@@ -69,7 +69,8 @@ html, body {
   font-size: var(--tvmv-base-size);
   line-height: 1.7;
   color: var(--ink);
-  font-variation-settings: "opsz" 11;
+  font-weight: 300;             /* Light body — so Regular (bold) clearly stands out */
+  font-variation-settings: normal;
   word-wrap: break-word;
 }
 html[data-measure="full"] #content.markdown-body { max-width: none; }
@@ -118,13 +119,11 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body a:hover {
   text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px;
 }
-/* Bold = the Medium face, in ink — a soft emphasis. Source Serif 4's weight ramp
-   is gentle (Medium is only ~0.8% heavier than Regular), so this reads subtly by
-   design. font-variation-settings:normal lets plain font-weight pick the static
-   Medium face. */
+/* Bold = Regular (400), against the Light (300) body — a full weight step, so it
+   reads as clear emphasis where Regular→Medium did not. */
 #content.markdown-body strong {
   font-variation-settings: normal;
-  font-weight: 500;
+  font-weight: 400;
   color: var(--ink);
 }
 #content.markdown-body em { font-style: italic; }
@@ -168,6 +167,7 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
   padding: 0.12em 0.4em;
   border-radius: 4px;
   color: var(--ink);
+  font-weight: 400;   /* keep code at normal weight, not the Light body weight */
 }
 #content.markdown-body pre {
   margin: 0 0 1em;
@@ -179,7 +179,7 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
   line-height: 1.5;
 }
 #content.markdown-body pre code {
-  background: none; padding: 0; font-size: 0.85em; color: var(--ink);
+  background: none; padding: 0; font-size: 0.85em; color: var(--ink); font-weight: 400;
 }
 
 /* ---- Tables ----------------------------------------------------------- */
@@ -199,7 +199,7 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
   background: var(--paper-deep);
   color: var(--ink);
   font-variation-settings: normal;
-  font-weight: 500;
+  font-weight: 400;
 }
 #content.markdown-body tr:nth-child(even) td {
   background: color-mix(in srgb, var(--paper-deep) 55%, transparent);
