@@ -1,0 +1,44 @@
+#!/usr/bin/env fish
+#
+# tvmv — CLI shim that opens Markdown files in the tvmv.app document viewer.
+#
+# Usage:  tvmv [file ...]
+#
+# Each argument is resolved to an absolute path with the `path resolve` builtin
+# (dependency-free, normalizes, and — unlike BSD /bin/realpath — tolerates
+# relative and not-yet-existing paths). Files are then handed to `open -a` as
+# operands so AppKit's document architecture routes them through
+# application:openURLs: (one window per file). They are NOT passed via --args
+# (which would bypass the document-open path) and NO `--` separator is used
+# (`--` is not an `open` separator). A running instance is reused (no -n).
+
+# --- Locate the installed app --------------------------------------------
+set -l app
+for candidate in $HOME/Applications/tvmv.app /Applications/tvmv.app
+    if test -d $candidate
+        set app $candidate
+        break
+    end
+end
+
+if test -z "$app"
+    echo "tvmv: tvmv.app not found in ~/Applications or /Applications" >&2
+    echo "      build & install it with build/bundle.fish" >&2
+    exit 1
+end
+
+# --- No args: just open the app ------------------------------------------
+if test (count $argv) -eq 0
+    open -a $app
+    exit $status
+end
+
+# --- Resolve every argument to an absolute path --------------------------
+set -l resolved
+for arg in $argv
+    set -a resolved (path resolve $arg)
+end
+
+# Files as operands => document-open path; reuse a running instance.
+open -a $app $resolved
+exit $status
