@@ -6,3 +6,4 @@ DerivedData/
 dist/
 *.app/
 .verify/
+build/icon-candidates/
