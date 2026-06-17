@@ -5,7 +5,9 @@
     <key>CFBundleIdentifier</key>
     <string>dk.dyregod.tvmv</string>
     <key>CFBundleName</key>
-    <string>tvmv</string>
+    <string>TVMV</string>
+    <key>CFBundleDisplayName</key>
+    <string>TVMV</string>
     <key>CFBundleExecutable</key>
     <string>tvmv</string>
     <key>CFBundlePackageType</key>

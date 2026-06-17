@@ -118,7 +118,13 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body a:hover {
   text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px;
 }
-#content.markdown-body strong { font-weight: 500; color: var(--ink); }
+/* Drive the weight axis directly: Source Serif 4 is variable, and plain
+   font-weight:500 snaps to the 400 master (while 600 snapped to ~700). */
+#content.markdown-body strong {
+  font-weight: 600; /* fallback for non-variable fonts */
+  font-variation-settings: "opsz" 11, "wght" 580;
+  color: var(--ink);
+}
 #content.markdown-body em { font-style: italic; }
 #content.markdown-body del { color: var(--muted); }
 #content.markdown-body hr {
@@ -190,7 +196,8 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body th {
   background: var(--paper-deep);
   color: var(--ink);
-  font-weight: 500;
+  font-weight: 600;
+  font-variation-settings: "opsz" 11, "wght" 580;
 }
 #content.markdown-body tr:nth-child(even) td {
   background: color-mix(in srgb, var(--paper-deep) 55%, transparent);
@@ -217,7 +224,7 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body .hljs-literal { color: var(--accent-4); }
 #content.markdown-body .hljs-title,
 #content.markdown-body .hljs-title.function_,
-#content.markdown-body .hljs-section { color: var(--ink); font-weight: 500; }
+#content.markdown-body .hljs-section { color: var(--ink); font-weight: 600; }
 #content.markdown-body .hljs-attr,
 #content.markdown-body .hljs-attribute,
 #content.markdown-body .hljs-property { color: var(--accent-4); }
@@ -231,7 +238,7 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body .hljs-meta,
 #content.markdown-body .hljs-doctag { color: var(--muted); }
 #content.markdown-body .hljs-emphasis { font-style: italic; }
-#content.markdown-body .hljs-strong { font-weight: 500; }
+#content.markdown-body .hljs-strong { font-weight: 600; }
 #content.markdown-body .hljs-link { color: var(--accent); text-decoration: underline; }
 
 /* ---- KaTeX (keep its own math fonts) ---------------------------------- */

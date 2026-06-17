@@ -14,7 +14,7 @@
 
 # --- Locate the installed app --------------------------------------------
 set -l app
-for candidate in $HOME/Applications/tvmv.app /Applications/tvmv.app
+for candidate in $HOME/Applications/TVMV.app /Applications/TVMV.app $HOME/Applications/tvmv.app /Applications/tvmv.app
     if test -d $candidate
         set app $candidate
         break
@@ -22,7 +22,7 @@ for candidate in $HOME/Applications/tvmv.app /Applications/tvmv.app
 end
 
 if test -z "$app"
-    echo "tvmv: tvmv.app not found in ~/Applications or /Applications" >&2
+    echo "tvmv: TVMV.app not found in ~/Applications or /Applications" >&2
     echo "      build & install it with build/bundle.fish" >&2
     exit 1
 end

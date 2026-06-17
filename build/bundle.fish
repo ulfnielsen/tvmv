@@ -40,7 +40,8 @@ if not test -d $resbundle
 end
 
 # --- 2. Assemble the .app -------------------------------------------------
-set -l app $repo_root/dist/tvmv.app
+# Bundle is TVMV.app (display name); the executable inside stays lowercase tvmv.
+set -l app $repo_root/dist/TVMV.app
 echo "==> assembling $app"
 rm -rf $app
 mkdir -p $app/Contents/MacOS
@@ -72,10 +73,10 @@ codesign --verify --verbose $app; or exit $fail_status
 echo "    signature OK"
 
 # --- 4. Install + register doc types -------------------------------------
-set -l installed $HOME/Applications/tvmv.app
+set -l installed $HOME/Applications/TVMV.app
 mkdir -p $HOME/Applications
 echo "==> installing to $installed"
-rm -rf $installed
+rm -rf $installed $HOME/Applications/tvmv.app
 cp -R $app $installed
 
 set -l lsregister /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
