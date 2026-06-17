@@ -256,8 +256,15 @@
       var cfg = (typeof json === "string") ? JSON.parse(json) : (json || {});
       var rootStyle = document.documentElement.style;
 
-      if (cfg.bodyFont != null) rootStyle.setProperty("--tvmv-body-font", cfg.bodyFont);
-      if (cfg.monoFont != null) rootStyle.setProperty("--tvmv-mono-font", cfg.monoFont);
+      // Quote the family name — an unquoted value like `Source Serif 4` is
+      // invalid CSS (identifier can't start with the digit "4"), which silently
+      // drops font-family and falls back to a generic serif (Regular+Bold only).
+      if (cfg.bodyFont != null) {
+        rootStyle.setProperty("--tvmv-body-font", JSON.stringify(cfg.bodyFont) + ", serif");
+      }
+      if (cfg.monoFont != null) {
+        rootStyle.setProperty("--tvmv-mono-font", JSON.stringify(cfg.monoFont) + ", monospace");
+      }
       if (cfg.baseSize != null) {
         var size = (typeof cfg.baseSize === "number") ? cfg.baseSize + "px" : cfg.baseSize;
         rootStyle.setProperty("--tvmv-base-size", size);
