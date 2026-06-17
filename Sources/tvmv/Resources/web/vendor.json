@@ -1,0 +1,126 @@
+[
+  {
+    "name": "github-markdown-css",
+    "version": "5.8.1",
+    "license": "MIT",
+    "files": [
+      {
+        "src": "https://cdn.jsdelivr.net/npm/github-markdown-css@5.8.1/github-markdown-light.min.css",
+        "dest": "github-markdown-css/github-markdown-light.min.css"
+      },
+      {
+        "src": "https://cdn.jsdelivr.net/npm/github-markdown-css@5.8.1/github-markdown-dark.min.css",
+        "dest": "github-markdown-css/github-markdown-dark.min.css"
+      }
+    ]
+  },
+  {
+    "name": "highlight.js",
+    "version": "11.11.1",
+    "license": "BSD-3-Clause",
+    "files": [
+      {
+        "src": "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
+        "dest": "highlight.js/highlight.min.js"
+      },
+      {
+        "src": "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github.min.css",
+        "dest": "highlight.js/github.min.css"
+      },
+      {
+        "src": "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark.min.css",
+        "dest": "highlight.js/github-dark.min.css"
+      }
+    ]
+  },
+  {
+    "name": "katex",
+    "version": "0.16.22",
+    "license": "MIT",
+    "files": [
+      {
+        "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css",
+        "dest": "katex/katex.min.css"
+      },
+      {
+        "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.js",
+        "dest": "katex/katex.min.js"
+      },
+      {
+        "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/contrib/auto-render.min.js",
+        "dest": "katex/contrib/auto-render.min.js"
+      },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_AMS-Regular.woff2", "dest": "katex/fonts/KaTeX_AMS-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_AMS-Regular.woff", "dest": "katex/fonts/KaTeX_AMS-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_AMS-Regular.ttf", "dest": "katex/fonts/KaTeX_AMS-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Caligraphic-Bold.woff2", "dest": "katex/fonts/KaTeX_Caligraphic-Bold.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Caligraphic-Bold.woff", "dest": "katex/fonts/KaTeX_Caligraphic-Bold.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Caligraphic-Bold.ttf", "dest": "katex/fonts/KaTeX_Caligraphic-Bold.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Caligraphic-Regular.woff2", "dest": "katex/fonts/KaTeX_Caligraphic-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Caligraphic-Regular.woff", "dest": "katex/fonts/KaTeX_Caligraphic-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Caligraphic-Regular.ttf", "dest": "katex/fonts/KaTeX_Caligraphic-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Fraktur-Bold.woff2", "dest": "katex/fonts/KaTeX_Fraktur-Bold.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Fraktur-Bold.woff", "dest": "katex/fonts/KaTeX_Fraktur-Bold.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Fraktur-Bold.ttf", "dest": "katex/fonts/KaTeX_Fraktur-Bold.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Fraktur-Regular.woff2", "dest": "katex/fonts/KaTeX_Fraktur-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Fraktur-Regular.woff", "dest": "katex/fonts/KaTeX_Fraktur-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Fraktur-Regular.ttf", "dest": "katex/fonts/KaTeX_Fraktur-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-Bold.woff2", "dest": "katex/fonts/KaTeX_Main-Bold.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-Bold.woff", "dest": "katex/fonts/KaTeX_Main-Bold.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-Bold.ttf", "dest": "katex/fonts/KaTeX_Main-Bold.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-BoldItalic.woff2", "dest": "katex/fonts/KaTeX_Main-BoldItalic.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-BoldItalic.woff", "dest": "katex/fonts/KaTeX_Main-BoldItalic.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-BoldItalic.ttf", "dest": "katex/fonts/KaTeX_Main-BoldItalic.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-Italic.woff2", "dest": "katex/fonts/KaTeX_Main-Italic.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-Italic.woff", "dest": "katex/fonts/KaTeX_Main-Italic.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-Italic.ttf", "dest": "katex/fonts/KaTeX_Main-Italic.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-Regular.woff2", "dest": "katex/fonts/KaTeX_Main-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-Regular.woff", "dest": "katex/fonts/KaTeX_Main-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Main-Regular.ttf", "dest": "katex/fonts/KaTeX_Main-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Math-BoldItalic.woff2", "dest": "katex/fonts/KaTeX_Math-BoldItalic.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Math-BoldItalic.woff", "dest": "katex/fonts/KaTeX_Math-BoldItalic.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Math-BoldItalic.ttf", "dest": "katex/fonts/KaTeX_Math-BoldItalic.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Math-Italic.woff2", "dest": "katex/fonts/KaTeX_Math-Italic.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Math-Italic.woff", "dest": "katex/fonts/KaTeX_Math-Italic.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Math-Italic.ttf", "dest": "katex/fonts/KaTeX_Math-Italic.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_SansSerif-Bold.woff2", "dest": "katex/fonts/KaTeX_SansSerif-Bold.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_SansSerif-Bold.woff", "dest": "katex/fonts/KaTeX_SansSerif-Bold.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_SansSerif-Bold.ttf", "dest": "katex/fonts/KaTeX_SansSerif-Bold.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_SansSerif-Italic.woff2", "dest": "katex/fonts/KaTeX_SansSerif-Italic.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_SansSerif-Italic.woff", "dest": "katex/fonts/KaTeX_SansSerif-Italic.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_SansSerif-Italic.ttf", "dest": "katex/fonts/KaTeX_SansSerif-Italic.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_SansSerif-Regular.woff2", "dest": "katex/fonts/KaTeX_SansSerif-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_SansSerif-Regular.woff", "dest": "katex/fonts/KaTeX_SansSerif-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_SansSerif-Regular.ttf", "dest": "katex/fonts/KaTeX_SansSerif-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Script-Regular.woff2", "dest": "katex/fonts/KaTeX_Script-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Script-Regular.woff", "dest": "katex/fonts/KaTeX_Script-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Script-Regular.ttf", "dest": "katex/fonts/KaTeX_Script-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size1-Regular.woff2", "dest": "katex/fonts/KaTeX_Size1-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size1-Regular.woff", "dest": "katex/fonts/KaTeX_Size1-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size1-Regular.ttf", "dest": "katex/fonts/KaTeX_Size1-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size2-Regular.woff2", "dest": "katex/fonts/KaTeX_Size2-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size2-Regular.woff", "dest": "katex/fonts/KaTeX_Size2-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size2-Regular.ttf", "dest": "katex/fonts/KaTeX_Size2-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size3-Regular.woff2", "dest": "katex/fonts/KaTeX_Size3-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size3-Regular.woff", "dest": "katex/fonts/KaTeX_Size3-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size3-Regular.ttf", "dest": "katex/fonts/KaTeX_Size3-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size4-Regular.woff2", "dest": "katex/fonts/KaTeX_Size4-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size4-Regular.woff", "dest": "katex/fonts/KaTeX_Size4-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Size4-Regular.ttf", "dest": "katex/fonts/KaTeX_Size4-Regular.ttf" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Typewriter-Regular.woff2", "dest": "katex/fonts/KaTeX_Typewriter-Regular.woff2" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Typewriter-Regular.woff", "dest": "katex/fonts/KaTeX_Typewriter-Regular.woff" },
+      { "src": "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/fonts/KaTeX_Typewriter-Regular.ttf", "dest": "katex/fonts/KaTeX_Typewriter-Regular.ttf" }
+    ]
+  },
+  {
+    "name": "mermaid",
+    "version": "11.15.0",
+    "license": "MIT",
+    "files": [
+      {
+        "src": "https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js",
+        "dest": "mermaid/mermaid.min.js"
+      }
+    ]
+  }
+]

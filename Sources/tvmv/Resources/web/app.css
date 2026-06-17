@@ -1,0 +1,116 @@
+/*
+ * app.css — tvmv chrome on top of github-markdown-css.
+ *
+ * Two github-markdown stylesheets (light + dark) are loaded in template.html;
+ * boot.js enables exactly one by toggling each <link>'s `disabled` attribute
+ * based on <html data-theme="...">. Those stylesheets set `color-scheme` and
+ * the full .markdown-body palette; this file only layers typography, measure
+ * (max-width), background plumbing, and print rules. app.css is loaded LAST so
+ * these overrides win the cascade.
+ */
+
+:root {
+  /* User-tunable knobs. applyStyle() rewrites these on :root; nothing else
+     needs to re-parse because every rule below reads the variables. */
+  --tvmv-body-font: "Source Serif 4", ui-serif, Georgia, Cambria, "Times New Roman", serif;
+  --tvmv-mono-font: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+  --tvmv-base-size: 16px;
+  --tvmv-measure: 72ch;     /* reading measure (max content width) */
+  --tvmv-pad: 32px;         /* page gutter */
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  /* Defer to whichever github-markdown theme is active for the actual color;
+     this just guarantees the area outside .markdown-body matches. */
+  background: var(--color-canvas-default, Canvas);
+}
+
+/* Center the reading column and apply the chosen measure + gutters. */
+#content.markdown-body {
+  box-sizing: border-box;
+  max-width: var(--tvmv-measure);
+  margin: 0 auto;
+  padding: var(--tvmv-pad);
+
+  /* Override github-markdown's own font stack and size with user prefs. */
+  font-family: var(--tvmv-body-font);
+  font-size: var(--tvmv-base-size);
+  line-height: 1.6;
+}
+
+/* Full-width mode: drop the measure cap, keep gutters. */
+html[data-measure="full"] #content.markdown-body {
+  max-width: none;
+}
+
+/* Monospace surfaces follow the user's mono preference. github-markdown sizes
+   code at ~85% of body; keep that ratio by inheriting font-size. */
+#content.markdown-body code,
+#content.markdown-body kbd,
+#content.markdown-body pre,
+#content.markdown-body tt,
+#content.markdown-body samp {
+  font-family: var(--tvmv-mono-font);
+}
+
+/* KaTeX ships its own math fonts; never let the body/mono override leak in. */
+#content.markdown-body .katex,
+#content.markdown-body .katex * {
+  font-family: KaTeX_Main, KaTeX_Math, KaTeX_Size1, KaTeX_Size2, KaTeX_Size3,
+               KaTeX_Size4, KaTeX_AMS, KaTeX_Caligraphic, KaTeX_Fraktur,
+               KaTeX_SansSerif, KaTeX_Script, KaTeX_Typewriter, serif;
+}
+
+/* Mermaid diagrams: center, let them size naturally, no code styling. */
+#content.markdown-body .mermaid {
+  margin: 16px 0;
+  text-align: center;
+  overflow-x: auto;
+}
+#content.markdown-body .mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+/* ---- Print ---------------------------------------------------------------
+ * Force the light theme, remove the measure cap and screen gutters, and avoid
+ * splitting code blocks / diagrams / headings awkwardly across pages.
+ */
+@media print {
+  html, body {
+    background: #fff;
+  }
+  #content.markdown-body {
+    max-width: none;
+    margin: 0;
+    padding: 0;
+    font-size: 11pt;
+    color: #000;
+  }
+  /* Keep headings with following content; don't orphan them at page bottoms. */
+  #content.markdown-body h1,
+  #content.markdown-body h2,
+  #content.markdown-body h3,
+  #content.markdown-body h4,
+  #content.markdown-body h5,
+  #content.markdown-body h6 {
+    break-after: avoid-page;
+    page-break-after: avoid;
+  }
+  #content.markdown-body pre,
+  #content.markdown-body table,
+  #content.markdown-body blockquote,
+  #content.markdown-body .mermaid,
+  #content.markdown-body .katex-display {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  /* Show link targets in print. */
+  #content.markdown-body a[href^="http"]::after {
+    content: " (" attr(href) ")";
+    font-size: 85%;
+    word-break: break-all;
+  }
+}
