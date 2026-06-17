@@ -118,15 +118,14 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body a:hover {
   text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px;
 }
-/* Source Serif 4's weight ramp is too gentle to be both visible AND light:
-   Medium (+0.8%) reads as no emphasis, and the next step (SemiBold) is as heavy
-   as the weight that felt too bold. So emphasis is carried by COLOR — a light
-   Medium weight in Concordat's deep-magenta emphasis tone (distinct from the
-   burnt-orange used for links). */
+/* Bold = the Medium face, in ink — a soft emphasis. Source Serif 4's weight ramp
+   is gentle (Medium is only ~0.8% heavier than Regular), so this reads subtly by
+   design. font-variation-settings:normal lets plain font-weight pick the static
+   Medium face. */
 #content.markdown-body strong {
   font-variation-settings: normal;
   font-weight: 500;
-  color: var(--accent-2);
+  color: var(--ink);
 }
 #content.markdown-body em { font-style: italic; }
 #content.markdown-body del { color: var(--muted); }
@@ -200,7 +199,7 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
   background: var(--paper-deep);
   color: var(--ink);
   font-variation-settings: normal;
-  font-weight: 600;
+  font-weight: 500;
 }
 #content.markdown-body tr:nth-child(even) td {
   background: color-mix(in srgb, var(--paper-deep) 55%, transparent);

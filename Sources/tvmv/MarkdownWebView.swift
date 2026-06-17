@@ -46,6 +46,7 @@ struct MarkdownWebView: NSViewRepresentable {
         configuration.userContentController.add(coordinator, name: "tvmv")
 
         let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.allowsMagnification = true   // trackpad pinch-to-zoom
         webView.navigationDelegate = coordinator
         coordinator.webView = webView
 
