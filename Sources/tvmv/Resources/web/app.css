@@ -118,15 +118,15 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body a:hover {
   text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px;
 }
-/* Source Serif 4's weight steps are subtle: Medium is only ~0.8% heavier than
-   Regular (measured in WebKit), so it reads as "no emphasis". SemiBold (+1.5%)
-   is the first weight that clearly registers. Cancel the inherited
-   font-variation-settings so plain font-weight selects the static SemiBold face
-   (and a custom body font still gets its own 600). */
+/* Source Serif 4's weight ramp is too gentle to be both visible AND light:
+   Medium (+0.8%) reads as no emphasis, and the next step (SemiBold) is as heavy
+   as the weight that felt too bold. So emphasis is carried by COLOR — a light
+   Medium weight in Concordat's deep-magenta emphasis tone (distinct from the
+   burnt-orange used for links). */
 #content.markdown-body strong {
   font-variation-settings: normal;
-  font-weight: 600;
-  color: var(--ink);
+  font-weight: 500;
+  color: var(--accent-2);
 }
 #content.markdown-body em { font-style: italic; }
 #content.markdown-body del { color: var(--muted); }
