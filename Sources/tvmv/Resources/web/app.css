@@ -118,11 +118,16 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body a:hover {
   text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px;
 }
-/* Drive the weight axis directly: Source Serif 4 is variable, and plain
-   font-weight:500 snaps to the 400 master (while 600 snapped to ~700). */
+/* Source Serif 4 is installed as STATIC named faces (Regular/Medium/SemiBold/
+   Bold...), so the variable wght axis can't interpolate and font-weight snaps
+   to whole faces. Select the Medium (500) face by its PostScript name for a true
+   medium-bold; fall back to the user's body font at weight 500 for other fonts.
+   `font-variation-settings: normal` cancels the inherited opsz so face matching
+   isn't overridden. */
 #content.markdown-body strong {
-  font-weight: 600; /* fallback for non-variable fonts */
-  font-variation-settings: "opsz" 11, "wght" 580;
+  font-family: "SourceSerif4Roman-Medium", var(--tvmv-body-font);
+  font-variation-settings: normal;
+  font-weight: 500;
   color: var(--ink);
 }
 #content.markdown-body em { font-style: italic; }
@@ -196,8 +201,9 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body th {
   background: var(--paper-deep);
   color: var(--ink);
-  font-weight: 600;
-  font-variation-settings: "opsz" 11, "wght" 580;
+  font-family: "SourceSerif4Roman-Medium", var(--tvmv-body-font);
+  font-variation-settings: normal;
+  font-weight: 500;
 }
 #content.markdown-body tr:nth-child(even) td {
   background: color-mix(in srgb, var(--paper-deep) 55%, transparent);
