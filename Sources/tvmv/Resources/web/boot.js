@@ -225,6 +225,7 @@
 
       var content = document.getElementById("content");
       content.innerHTML = bodyHTML; // trusted first-party cmark-gfm output
+      clearFind(); // drop stale find ranges/highlights from the previous document
 
       // 1. slugs + outline (synchronous, before KaTeX mutates heading text).
       var items = assignSlugsAndBuildOutline(content);
@@ -316,6 +317,96 @@
     window.scrollTo(0, ratio * maxScroll());
   }
 
+  /* ---- public: find in page ------------------------------------------- */
+  // Uses the CSS Custom Highlight API (no DOM mutation, so KaTeX/Mermaid and
+  // layout are untouched). Degrades to count-only if the API is unavailable.
+
+  var _findRanges = [];
+  var _findIndex = -1;
+
+  function _supportsHighlight() {
+    return !!(window.CSS && CSS.highlights && window.Highlight);
+  }
+
+  function clearFind() {
+    _findRanges = [];
+    _findIndex = -1;
+    if (_supportsHighlight()) {
+      CSS.highlights.delete("tvmv-find");
+      CSS.highlights.delete("tvmv-find-current");
+    }
+  }
+
+  function _paintCurrent() {
+    if (!_supportsHighlight() || _findIndex < 0 || _findIndex >= _findRanges.length) return;
+    var cur = new Highlight();
+    cur.add(_findRanges[_findIndex]);
+    CSS.highlights.set("tvmv-find-current", cur);
+    var rect = _findRanges[_findIndex].getBoundingClientRect();
+    var target = window.scrollY + rect.top - (window.innerHeight / 2);
+    window.scrollTo(0, Math.max(0, target));
+  }
+
+  // Find all case-insensitive occurrences of `query` within #content text
+  // nodes. Returns { count, index } with a 1-based index (0 when no matches).
+  function findInPage(query) {
+    clearFind();
+    var q = (query || "").toLowerCase();
+    if (!q) return { count: 0, index: 0 };
+
+    var content = document.getElementById("content");
+    if (!content) return { count: 0, index: 0 };
+
+    var walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT, {
+      acceptNode: function (node) {
+        if (!node.nodeValue) return NodeFilter.FILTER_REJECT;
+        var p = node.parentElement;
+        while (p) {
+          var tag = p.tagName;
+          if (tag === "SCRIPT" || tag === "STYLE" || tag === "TEXTAREA") {
+            return NodeFilter.FILTER_REJECT;
+          }
+          p = p.parentElement;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      }
+    });
+
+    var node;
+    while ((node = walker.nextNode())) {
+      var hay = node.nodeValue.toLowerCase();
+      var from = 0, i;
+      while ((i = hay.indexOf(q, from)) !== -1) {
+        var r = document.createRange();
+        r.setStart(node, i);
+        r.setEnd(node, i + q.length);
+        _findRanges.push(r);
+        from = i + q.length;
+      }
+    }
+
+    if (_supportsHighlight() && _findRanges.length > 0) {
+      var all = new Highlight();
+      for (var k = 0; k < _findRanges.length; k++) all.add(_findRanges[k]);
+      CSS.highlights.set("tvmv-find", all);
+    }
+
+    if (_findRanges.length > 0) {
+      _findIndex = 0;
+      _paintCurrent();
+    }
+    return { count: _findRanges.length, index: _findRanges.length ? 1 : 0 };
+  }
+
+  // Move to the next (dir >= 0) or previous (dir < 0) match, wrapping around.
+  function findNext(dir) {
+    if (_findRanges.length === 0) return { count: 0, index: 0 };
+    var step = (dir < 0) ? -1 : 1;
+    _findIndex = (_findIndex + step + _findRanges.length) % _findRanges.length;
+    _paintCurrent();
+    return { count: _findRanges.length, index: _findIndex + 1 };
+  }
+
   /* ---- expose to native ------------------------------------------------ */
 
   window.tvmv = {
@@ -324,6 +415,9 @@
     setTheme: setTheme,
     scrollToAnchor: scrollToAnchor,
     getScrollRatio: getScrollRatio,
-    setScrollRatio: setScrollRatio
+    setScrollRatio: setScrollRatio,
+    find: findInPage,
+    findNext: findNext,
+    clearFind: clearFind
   };
 })();

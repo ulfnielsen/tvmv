@@ -6,6 +6,8 @@ import SwiftUI
 final class ViewerModel: ObservableObject {
     @Published var outline: [OutlineItem] = []
     @Published var errorMessage: String?
+    @Published var findCount = 0
+    @Published var findIndex = 0   // 1-based; 0 when no matches
 
     let fileURL: URL?
     private var text: String
@@ -71,8 +73,25 @@ final class ViewerModel: ObservableObject {
     }
 
     func find(_ query: String) {
-        guard !query.isEmpty else { return }
-        Task { _ = await controller?.find(query) }
+        Task {
+            let r = await controller?.find(query)
+            findCount = r?.count ?? 0
+            findIndex = r?.index ?? 0
+        }
+    }
+
+    func findNext(forward: Bool) {
+        Task {
+            let r = await controller?.findNext(forward: forward)
+            findCount = r?.count ?? 0
+            findIndex = r?.index ?? 0
+        }
+    }
+
+    func clearFind() {
+        findCount = 0
+        findIndex = 0
+        Task { await controller?.clearFind() }
     }
 
     func printDoc() { controller?.printDocument() }

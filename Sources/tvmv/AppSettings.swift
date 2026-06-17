@@ -17,20 +17,23 @@ final class AppSettings: ObservableObject {
     @Published var theme: Theme { didSet { d.set(theme.rawValue, forKey: K.theme) } }
     @Published var showOutline: Bool { didSet { d.set(showOutline, forKey: K.showOutline) } }
 
-    private let d = UserDefaults.standard
+    private let d: UserDefaults
     private enum K {
         static let bodyFont = "bodyFont", monoFont = "monoFont", baseSize = "baseSize"
         static let measure = "measure", fullWidth = "fullWidth", theme = "theme", showOutline = "showOutline"
     }
 
-    private init() {
-        bodyFont = d.string(forKey: K.bodyFont) ?? "Source Serif 4"
-        monoFont = d.string(forKey: K.monoFont) ?? "Menlo"
-        baseSize = d.object(forKey: K.baseSize) as? Double ?? 16
-        measure = d.object(forKey: K.measure) as? Double ?? 72
-        fullWidth = d.bool(forKey: K.fullWidth)            // default false
-        theme = Theme(rawValue: d.string(forKey: K.theme) ?? "auto") ?? .auto
-        showOutline = d.object(forKey: K.showOutline) as? Bool ?? true
+    /// `defaults` is injectable so tests can use an ephemeral suite and never
+    /// touch the real app's persisted settings.
+    init(defaults: UserDefaults = .standard) {
+        d = defaults
+        bodyFont = defaults.string(forKey: K.bodyFont) ?? "Source Serif 4"
+        monoFont = defaults.string(forKey: K.monoFont) ?? "Menlo"
+        baseSize = defaults.object(forKey: K.baseSize) as? Double ?? 16
+        measure = defaults.object(forKey: K.measure) as? Double ?? 80
+        fullWidth = defaults.bool(forKey: K.fullWidth)            // default false
+        theme = Theme(rawValue: defaults.string(forKey: K.theme) ?? "auto") ?? .auto
+        showOutline = defaults.object(forKey: K.showOutline) as? Bool ?? true
     }
 
     func increaseFontSize() { baseSize = min(baseSize + 1, 48) }

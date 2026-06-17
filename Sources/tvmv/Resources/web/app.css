@@ -15,7 +15,7 @@
   --tvmv-body-font: "Source Serif 4", ui-serif, Georgia, Cambria, "Times New Roman", serif;
   --tvmv-mono-font: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
   --tvmv-base-size: 16px;
-  --tvmv-measure: 72ch;     /* reading measure (max content width) */
+  --tvmv-measure: 80ch;     /* reading measure (max content width) */
   --tvmv-pad: 32px;         /* page gutter */
 }
 
@@ -72,6 +72,18 @@ html[data-measure="full"] #content.markdown-body {
 #content.markdown-body .mermaid svg {
   max-width: 100%;
   height: auto;
+}
+
+/* ---- Find-in-page highlights (CSS Custom Highlight API) ------------------
+ * boot.js registers two highlights: every match (`tvmv-find`) and the current
+ * one (`tvmv-find-current`). No DOM mutation, so layout/KaTeX/Mermaid are safe.
+ */
+::highlight(tvmv-find) {
+  background-color: rgba(255, 214, 0, 0.40);
+}
+::highlight(tvmv-find-current) {
+  background-color: #ff9a3c;
+  color: #1b1b1b;
 }
 
 /* ---- Print ---------------------------------------------------------------

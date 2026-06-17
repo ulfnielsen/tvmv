@@ -13,6 +13,7 @@ struct TvmvApp: App {
             ViewerWindow(document: file.document, fileURL: file.fileURL)
                 .environmentObject(settings)
         }
+        .defaultSize(width: 1040, height: 1180)
         .commands {
             // --- Text size ---
             // CAVEAT: keyboardShortcut("+", modifiers: .command) collides with

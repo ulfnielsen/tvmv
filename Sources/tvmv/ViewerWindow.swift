@@ -12,6 +12,7 @@ struct ViewerWindow: View {
     @State private var selection: OutlineItem.ID?
     @State private var showFind = false
     @State private var findText = ""
+    @FocusState private var findFocused: Bool
 
     init(document: MarkdownDocument, fileURL: URL?) {
         self.document = document
@@ -53,6 +54,8 @@ struct ViewerWindow: View {
         .onDisappear { model.stopWatching() }
         .onReceive(NotificationCenter.default.publisher(for: .tvmvFind)) { _ in
             showFind = true
+            // Defer focus until after the bar is in the hierarchy this runloop turn.
+            DispatchQueue.main.async { findFocused = true }
         }
         .onReceive(NotificationCenter.default.publisher(for: .tvmvPrint)) { _ in
             model.printDoc()
@@ -80,15 +83,45 @@ struct ViewerWindow: View {
     }
 
     private var findBar: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .foregroundStyle(.secondary)
             TextField("Find", text: $findText)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
                 .frame(width: 200)
-                .onSubmit { model.find(findText) }
-            Button("Done") { showFind = false; findText = "" }
+                .focused($findFocused)
+                .onSubmit { model.findNext(forward: true) }
+                .onChange(of: findText) { model.find(findText) }
+            Text(matchLabel)
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            Divider().frame(height: 16)
+            Button { model.findNext(forward: false) } label: { Image(systemName: "chevron.up") }
+                .buttonStyle(.borderless)
+                .disabled(model.findCount == 0)
+            Button { model.findNext(forward: true) } label: { Image(systemName: "chevron.down") }
+                .buttonStyle(.borderless)
+                .disabled(model.findCount == 0)
+            Button { closeFind() } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless)
         }
-        .padding(8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
         .padding(8)
+        .onExitCommand { closeFind() }
+    }
+
+    private var matchLabel: String {
+        if findText.isEmpty { return "" }
+        return model.findCount == 0 ? "Not found" : "\(model.findIndex)/\(model.findCount)"
+    }
+
+    private func closeFind() {
+        showFind = false
+        findText = ""
+        model.clearFind()
     }
 }

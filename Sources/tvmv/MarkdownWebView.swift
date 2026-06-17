@@ -191,21 +191,37 @@ final class MarkdownWebController {
         await run(js)
     }
 
-    // MARK: Find
+    // MARK: Find (JS-backed via window.tvmv: returns total count + 1-based index)
+
+    struct FindResult: Sendable, Equatable {
+        var count: Int
+        var index: Int
+    }
 
     @discardableResult
-    func find(_ string: String) async -> Bool {
-        guard let webView else { return false }
-        let configuration = WKFindConfiguration()
-        configuration.backwards = false
-        configuration.caseSensitive = false
-        configuration.wraps = true
-        do {
-            let result = try await webView.find(string, configuration: configuration)
-            return result.matchFound
-        } catch {
-            return false
-        }
+    func find(_ string: String) async -> FindResult {
+        await findCall("window.tvmv.find(\(Self.jsString(string)))")
+    }
+
+    @discardableResult
+    func findNext(forward: Bool) async -> FindResult {
+        await findCall("window.tvmv.findNext(\(forward ? 1 : -1))")
+    }
+
+    func clearFind() async {
+        await run("window.tvmv && window.tvmv.clearFind && window.tvmv.clearFind();")
+    }
+
+    private func findCall(_ expr: String) async -> FindResult {
+        // Round-trip through JSON so the {count,index} object decodes reliably.
+        let js = "JSON.stringify(\(expr))"
+        guard let string = await evaluate(js) as? String,
+              let data = string.data(using: .utf8),
+              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return FindResult(count: 0, index: 0) }
+        let count = (obj["count"] as? NSNumber)?.intValue ?? 0
+        let index = (obj["index"] as? NSNumber)?.intValue ?? 0
+        return FindResult(count: count, index: index)
     }
 
     // MARK: Print (surfaces Save-as-PDF)
