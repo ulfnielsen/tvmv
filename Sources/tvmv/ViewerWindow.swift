@@ -44,28 +44,23 @@ struct ViewerWindow: View {
         .onChange(of: colorScheme) {
             if settings.theme == .auto { Task { await model.applyStyle() } }
         }
-        .onChange(of: settings.showOutline) { _, show in
-            columns = show ? .all : .detailOnly
-        }
         .onAppear {
             columns = settings.showOutline ? .all : .detailOnly
             model.startWatching()
         }
         .onDisappear { model.stopWatching() }
-        .onReceive(NotificationCenter.default.publisher(for: .tvmvFind)) { _ in
-            showFind = true
-            // Defer focus until after the bar is in the hierarchy this runloop turn.
-            DispatchQueue.main.async { findFocused = true }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .tvmvPrint)) { _ in
-            model.printDoc()
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .tvmvReload)) { _ in
-            Task { await model.reload() }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .tvmvToggleOutline)) { _ in
-            columns = (columns == .detailOnly) ? .all : .detailOnly
-        }
+        // Publish this window's command actions to the menu only while it is the
+        // focused scene — so Find/Print/Reload/Toggle-Outline hit just this window.
+        .focusedSceneValue(\.viewerCommands, ViewerCommands(
+            find: {
+                showFind = true
+                // Defer focus until the bar is in the hierarchy this runloop turn.
+                DispatchQueue.main.async { findFocused = true }
+            },
+            printDocument: { model.printDoc() },
+            reload: { Task { await model.reload() } },
+            toggleOutline: { columns = (columns == .detailOnly) ? .all : .detailOnly }
+        ))
     }
 
     private var webView: some View {
