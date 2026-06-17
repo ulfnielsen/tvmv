@@ -1,162 +1,153 @@
 import AppKit
+import Foundation
 
-// ---- Canvas setup ----
-let size = 1024
+// CONCEPT 2 — "Serif M on paper"
+// Offscreen 1024x1024 RGBA icon: elegant serif capital "M" in dark ink
+// on a warm cream-to-parchment gradient tile, with subtle paper character.
+
+let canvas: CGFloat = 1024
+let inset: CGFloat = 100
+let tileSize = canvas - inset * 2          // 824
+let cornerRadius = tileSize * 0.2237       // ~184
+
+// MARK: - Offscreen bitmap
 guard let rep = NSBitmapImageRep(
     bitmapDataPlanes: nil,
-    pixelsWide: size, pixelsHigh: size,
-    bitsPerSample: 8, samplesPerPixel: 4,
-    hasAlpha: true, isPlanar: false,
+    pixelsWide: Int(canvas),
+    pixelsHigh: Int(canvas),
+    bitsPerSample: 8,
+    samplesPerPixel: 4,
+    hasAlpha: true,
+    isPlanar: false,
     colorSpaceName: .deviceRGB,
-    bytesPerRow: 0, bitsPerPixel: 0
-) else { fatalError("rep") }
+    bytesPerRow: 0,
+    bitsPerPixel: 0
+) else {
+    FileHandle.standardError.write("Failed to create bitmap rep\n".data(using: .utf8)!)
+    exit(1)
+}
 
-guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else { fatalError("ctx") }
+guard let ctx = NSGraphicsContext(bitmapImageRep: rep) else {
+    FileHandle.standardError.write("Failed to create graphics context\n".data(using: .utf8)!)
+    exit(1)
+}
+
 NSGraphicsContext.saveGraphicsState()
 NSGraphicsContext.current = ctx
 let cg = ctx.cgContext
 
-// Transparent background (leave clear outside tile)
+// Transparent canvas
+cg.clear(CGRect(x: 0, y: 0, width: canvas, height: canvas))
 
-// ---- Tile geometry ----
-let inset: CGFloat = 100
-let tileRect = NSRect(x: inset, y: inset,
-                      width: CGFloat(size) - inset * 2,
-                      height: CGFloat(size) - inset * 2)
-let cornerRadius: CGFloat = tileRect.width * 0.2237
+let tileRect = NSRect(x: inset, y: inset, width: tileSize, height: tileSize)
+let tilePath = NSBezierPath(roundedRect: tileRect, xRadius: cornerRadius, yRadius: cornerRadius)
 
-// ---- Drop shadow (drawn under the tile) ----
+// MARK: - Drop shadow (drawn under the tile)
 cg.saveGState()
 let shadow = NSShadow()
-shadow.shadowColor = NSColor(white: 0, alpha: 0.28)
+shadow.shadowColor = NSColor.black.withAlphaComponent(0.25)
 shadow.shadowBlurRadius = 30
-shadow.shadowOffset = NSSize(width: 0, height: -10) // visually downward in this coordinate space
+shadow.shadowOffset = NSSize(width: 0, height: -12) // non-flipped: visually downward
 shadow.set()
-
-// Opaque path to cast a clean shadow
-let tilePath = NSBezierPath(roundedRect: tileRect, xRadius: cornerRadius, yRadius: cornerRadius)
-NSColor.black.setFill()
+NSColor.white.setFill()   // opaque fill so the shadow has a solid caster
 tilePath.fill()
 cg.restoreGState()
 
-// ---- Gradient fill: deep indigo -> violet (vertical) ----
+// MARK: - Warm cream-to-parchment gradient fill
 cg.saveGState()
 tilePath.addClip()
-let topColor    = NSColor(srgbRed: 0.20, green: 0.10, blue: 0.45, alpha: 1.0) // violet (top)
-let bottomColor = NSColor(srgbRed: 0.13, green: 0.07, blue: 0.34, alpha: 1.0) // deep indigo (bottom)
-// Vertical gradient: top brighter violet to deep indigo bottom
-let gradient = NSGradient(starting: bottomColor, ending: topColor)!
-gradient.draw(in: tileRect, angle: 90) // 90deg = upward, so ending(top) at top
-// Subtle top-edge highlight for depth
-let hl = NSGradient(colors: [NSColor(white: 1, alpha: 0.10), NSColor(white: 1, alpha: 0.0)])!
-hl.draw(in: tileRect, angle: 90)
+
+let cream = NSColor(calibratedRed: 0.992, green: 0.972, blue: 0.929, alpha: 1.0)      // top: warm cream
+let parchment = NSColor(calibratedRed: 0.945, green: 0.901, blue: 0.819, alpha: 1.0)  // bottom: parchment
+let gradient = NSGradient(colors: [cream, parchment])!
+// Top-to-bottom (top lighter). In non-flipped coords, angle -90 goes top->bottom.
+gradient.draw(in: tileRect, angle: -90)
+
+// MARK: - Soft inner vignette (paper character)
+let vignetteRect = tileRect
+let center = NSPoint(x: vignetteRect.midX, y: vignetteRect.midY)
+let radial = NSGradient(colors: [
+    NSColor.clear,
+    NSColor(calibratedRed: 0.62, green: 0.54, blue: 0.40, alpha: 0.0),
+    NSColor(calibratedRed: 0.50, green: 0.41, blue: 0.27, alpha: 0.16)
+])!
+radial.draw(fromCenter: center, radius: tileSize * 0.18,
+            toCenter: center, radius: tileSize * 0.74,
+            options: [])
+
+// MARK: - Faint horizontal baseline rule
+let ruleColor = NSColor(calibratedRed: 0.42, green: 0.33, blue: 0.20, alpha: 0.14)
+ruleColor.setStroke()
+let ruleY = tileRect.minY + tileSize * 0.265
+let rule = NSBezierPath()
+rule.lineWidth = 3
+let ruleInset = tileSize * 0.16
+rule.move(to: NSPoint(x: tileRect.minX + ruleInset, y: ruleY))
+rule.line(to: NSPoint(x: tileRect.maxX - ruleInset, y: ruleY))
+rule.stroke()
+
 cg.restoreGState()
 
-// ---- The Markdown mark ----
-// Classic CommonMark mark: a rounded-rect OUTLINE badge containing
-// a capital "M" and a downward-pointing arrowhead to its right.
-// Target: mark occupies ~55% of tile width, perfectly centered.
+// MARK: - Serif capital "M" glyph
+func resolveFont(size: CGFloat) -> NSFont {
+    let candidates = ["Source Serif 4 Semibold", "SourceSerif4-Semibold",
+                      "Source Serif 4", "Georgia-Bold", "Georgia"]
+    for name in candidates {
+        if let f = NSFont(name: name, size: size) {
+            return f
+        }
+    }
+    // System serif fallback
+    if #available(macOS 10.15, *) {
+        return NSFont(descriptor:
+            NSFont.systemFont(ofSize: size, weight: .semibold)
+                .fontDescriptor.withDesign(.serif) ?? NSFont.systemFont(ofSize: size).fontDescriptor,
+            size: size) ?? NSFont.systemFont(ofSize: size, weight: .semibold)
+    }
+    return NSFont.boldSystemFont(ofSize: size)
+}
 
-let markWidth = tileRect.width * 0.55
-// Standard markdown mark aspect ratio ~ 208:128 (width:height) -> ~1.625
-let markHeight = markWidth * (128.0 / 208.0)
-let markRect = NSRect(
-    x: tileRect.midX - markWidth / 2,
-    y: tileRect.midY - markHeight / 2,
-    width: markWidth, height: markHeight
-)
+let glyphFontSize = tileSize * 0.62
+let inkColor = NSColor(calibratedRed: 0.149, green: 0.118, blue: 0.090, alpha: 1.0) // dark warm ink
+let font = resolveFont(size: glyphFontSize)
 
-let white = NSColor(srgbRed: 0.98, green: 0.97, blue: 1.0, alpha: 1.0)
+let glyph = "M"
+let attrs: [NSAttributedString.Key: Any] = [
+    .font: font,
+    .foregroundColor: inkColor,
+    .kern: 0.0
+]
+let attr = NSAttributedString(string: glyph, attributes: attrs)
 
-// --- Outline badge ---
-let badgeStroke = markWidth * 0.058
-let badgeRadius = markHeight * 0.16
-let badgeInset = badgeStroke / 2
-let badgePath = NSBezierPath(
-    roundedRect: markRect.insetBy(dx: badgeInset, dy: badgeInset),
-    xRadius: badgeRadius, yRadius: badgeRadius
-)
-badgePath.lineWidth = badgeStroke
-white.setStroke()
-badgePath.stroke()
+// Optical centering: measure the actual glyph bounds (cap height differs from
+// the typographic line box) and center those bounds in the tile.
+let line = CTLineCreateWithAttributedString(attr as CFAttributedString)
+let imgBounds = CTLineGetImageBounds(line, cg) // tight ink bounds in text space
 
-// Inner content padding
-let padX = markWidth * 0.14
-let padY = markHeight * 0.20
-let inner = markRect.insetBy(dx: padX, dy: padY)
+// Slight optical lift so the M sits a touch above true center (reads better)
+let opticalLift: CGFloat = tileSize * 0.015
+let drawX = tileRect.midX - imgBounds.midX
+let drawY = tileRect.midY - imgBounds.midY + opticalLift
 
-// Layout: left ~58% for the "M", right ~38% for the arrow, small gap
-let gap = inner.width * 0.06
-let mWidth = inner.width * 0.56
-let arrowWidth = inner.width - mWidth - gap
+cg.saveGState()
+cg.textMatrix = .identity
+cg.translateBy(x: drawX, y: drawY)
+CTLineDraw(line, cg)
+cg.restoreGState()
 
-// --- Capital "M" drawn as a thick filled glyph (4 strokes / zigzag) ---
-let mStroke = mWidth * 0.235
-let mRect = NSRect(x: inner.minX, y: inner.minY, width: mWidth, height: inner.height)
-
-// Build the M as a filled polygon (outer zigzag down to inner) for crispness.
-let mPath = NSBezierPath()
-let xL = mRect.minX
-let xR = mRect.maxX
-let yB = mRect.minY
-let yT = mRect.maxY
-let s = mStroke
-let midX = mRect.midX
-// V notch depth (how far down the center dips from top)
-let notch = mRect.height * 0.42
-
-// Outer outline of the M, traced clockwise from bottom-left
-mPath.move(to: NSPoint(x: xL, y: yB))                          // bottom-left outer
-mPath.line(to: NSPoint(x: xL, y: yT))                          // up left outer
-mPath.line(to: NSPoint(x: xL + s, y: yT))                      // top of left leg (inner top)
-mPath.line(to: NSPoint(x: midX, y: yT - notch + s * 0.55))     // down to center valley (inner)
-mPath.line(to: NSPoint(x: xR - s, y: yT))                      // up to top of right leg
-mPath.line(to: NSPoint(x: xR, y: yT))                          // top-right outer
-mPath.line(to: NSPoint(x: xR, y: yB))                          // down right outer
-mPath.line(to: NSPoint(x: xR - s, y: yB))                      // bottom of right leg inner
-mPath.line(to: NSPoint(x: xR - s, y: yT - notch * 0.50))       // up right inner toward valley
-mPath.line(to: NSPoint(x: midX, y: yB + notch * 0.34))         // down to inner valley bottom
-mPath.line(to: NSPoint(x: xL + s, y: yT - notch * 0.50))       // up left inner from valley
-mPath.line(to: NSPoint(x: xL + s, y: yB))                      // down to bottom of left leg inner
-mPath.close()
-mPath.windingRule = .nonZero
-white.setFill()
-mPath.fill()
-
-// --- Downward-pointing arrow: vertical stem + arrowhead ---
-let aCenterX = inner.maxX - arrowWidth / 2
-let stemWidth = arrowWidth * 0.30
-let headWidth = arrowWidth          // full width arrowhead
-// Stem occupies top portion, head bottom portion
-let headHeight = inner.height * 0.42
-let stemTop = inner.maxY
-let stemBottom = inner.minY + headHeight - inner.height * 0.02
-let arrowTipY = inner.minY
-
-let arrowPath = NSBezierPath()
-// Stem (rectangle)
-let stemRect = NSRect(
-    x: aCenterX - stemWidth / 2,
-    y: stemBottom,
-    width: stemWidth,
-    height: stemTop - stemBottom
-)
-arrowPath.appendRect(stemRect)
-white.setFill()
-arrowPath.fill()
-
-// Arrowhead (triangle pointing down)
-let head = NSBezierPath()
-head.move(to: NSPoint(x: aCenterX - headWidth / 2, y: stemBottom + headHeight * 0.10))
-head.line(to: NSPoint(x: aCenterX + headWidth / 2, y: stemBottom + headHeight * 0.10))
-head.line(to: NSPoint(x: aCenterX, y: arrowTipY))
-head.close()
-head.fill()
-
-// ---- Finalize ----
 NSGraphicsContext.restoreGraphicsState()
 
-guard let data = rep.representation(using: .png, properties: [:]) else { fatalError("png") }
-let outURL = URL(fileURLWithPath: "/Users/ulfnielsen/dev/tvmv/build/icon-candidates/cand-1.png")
-try! data.write(to: outURL)
-print("wrote \(outURL.path)")
+// MARK: - Write PNG
+guard let pngData = rep.representation(using: .png, properties: [:]) else {
+    FileHandle.standardError.write("Failed to encode PNG\n".data(using: .utf8)!)
+    exit(1)
+}
+
+let outPath = "/Users/ulfnielsen/dev/tvmv/build/icon-candidates/cand-2.png"
+do {
+    try pngData.write(to: URL(fileURLWithPath: outPath))
+    print("Wrote \(outPath) (\(pngData.count) bytes)")
+} catch {
+    FileHandle.standardError.write("Failed to write PNG: \(error)\n".data(using: .utf8)!)
+    exit(1)
+}
