@@ -1,20 +1,5 @@
 [
   {
-    "name": "github-markdown-css",
-    "version": "5.8.1",
-    "license": "MIT",
-    "files": [
-      {
-        "src": "https://cdn.jsdelivr.net/npm/github-markdown-css@5.8.1/github-markdown-light.min.css",
-        "dest": "github-markdown-css/github-markdown-light.min.css"
-      },
-      {
-        "src": "https://cdn.jsdelivr.net/npm/github-markdown-css@5.8.1/github-markdown-dark.min.css",
-        "dest": "github-markdown-css/github-markdown-dark.min.css"
-      }
-    ]
-  },
-  {
     "name": "highlight.js",
     "version": "11.11.1",
     "license": "BSD-3-Clause",
@@ -22,14 +7,6 @@
       {
         "src": "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/highlight.min.js",
         "dest": "highlight.js/highlight.min.js"
-      },
-      {
-        "src": "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github.min.css",
-        "dest": "highlight.js/github.min.css"
-      },
-      {
-        "src": "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.11.1/build/styles/github-dark.min.css",
-        "dest": "highlight.js/github-dark.min.css"
       }
     ]
   },

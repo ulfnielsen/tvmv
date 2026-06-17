@@ -1,128 +1,277 @@
 /*
- * app.css — tvmv chrome on top of github-markdown-css.
+ * app.css — tvmv reading theme, inspired by the Concordat design system.
  *
- * Two github-markdown stylesheets (light + dark) are loaded in template.html;
- * boot.js enables exactly one by toggling each <link>'s `disabled` attribute
- * based on <html data-theme="...">. Those stylesheets set `color-scheme` and
- * the full .markdown-body palette; this file only layers typography, measure
- * (max-width), background plumbing, and print rules. app.css is loaded LAST so
- * these overrides win the cascade.
+ * A warm "paper & ink" editorial look: Source Serif 4 body, burnt-orange accent,
+ * teal structural rules, mustard numerics, hairline tan separators, mono code.
+ * Self-contained — this REPLACES github-markdown-css. Light + a warm dark variant
+ * switch on <html data-theme="light|dark"> (boot.js sets it). Syntax-highlight
+ * token colors are defined here from the same palette (no external hljs theme).
  */
 
+/* ---- Design tokens (Concordat palette) -------------------------------- */
 :root {
-  /* User-tunable knobs. applyStyle() rewrites these on :root; nothing else
-     needs to re-parse because every rule below reads the variables. */
-  --tvmv-body-font: "Source Serif 4", ui-serif, Georgia, Cambria, "Times New Roman", serif;
-  --tvmv-mono-font: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+  --paper:       #FBF8F2;
+  --paper-deep:  #F4EFE3;
+  --surface:     #FFFFFF;
+  --ink:         #2A1810;
+  --ink-soft:    #5A3D2A;
+  --muted:       #8A7359;
+  --rule:        #B89968;
+  --rule-soft:   #E3D7BC;
+  --accent:      #B83F12;   /* burnt orange — links / primary */
+  --accent-soft: #DC4F1B;
+  --accent-2:    #7A1F2B;   /* deep magenta — emphasis */
+  --accent-3:    #1F5F6E;   /* teal — structural */
+  --accent-4:    #A07D14;   /* mustard — numerics */
+
+  /* User-tunable knobs (applyStyle rewrites these on :root at runtime). */
+  --tvmv-body-font: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --tvmv-mono-font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --tvmv-base-size: 16px;
-  --tvmv-measure: 80ch;     /* reading measure (max content width) */
-  --tvmv-pad: 32px;         /* page gutter */
+  --tvmv-measure: 80ch;
+  --tvmv-pad: 44px;
+
+  color-scheme: light;
 }
 
+html[data-theme="dark"] {
+  --paper:       #181410;
+  --paper-deep:  #221C16;
+  --surface:     #13100C;
+  --ink:         #ECE3D3;
+  --ink-soft:    #CBB89B;
+  --muted:       #9C876A;
+  --rule:        #6E5A3C;
+  --rule-soft:   #382E22;
+  --accent:      #E2693B;
+  --accent-soft: #EE7A47;
+  --accent-2:    #DB8A93;
+  --accent-3:    #5FB6C6;
+  --accent-4:    #C9A227;
+  color-scheme: dark;
+}
+
+/* ---- Page ------------------------------------------------------------- */
 html, body {
   margin: 0;
-  padding: 0;
-  /* Defer to whichever github-markdown theme is active for the actual color;
-     this just guarantees the area outside .markdown-body matches. */
-  background: var(--color-canvas-default, Canvas);
+  height: 100%;
+  background: var(--paper);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* Center the reading column and apply the chosen measure + gutters. */
 #content.markdown-body {
   box-sizing: border-box;
   max-width: var(--tvmv-measure);
   margin: 0 auto;
   padding: var(--tvmv-pad);
-
-  /* Override github-markdown's own font stack and size with user prefs. */
   font-family: var(--tvmv-body-font);
   font-size: var(--tvmv-base-size);
-  line-height: 1.6;
+  line-height: 1.7;
+  color: var(--ink);
+  font-variation-settings: "opsz" 11;
+  word-wrap: break-word;
+}
+html[data-measure="full"] #content.markdown-body { max-width: none; }
+
+#content.markdown-body > :first-child { margin-top: 0; }
+#content.markdown-body > :last-child { margin-bottom: 0; }
+
+/* ---- Headings (serif, optical-size graded, hairline rules) ------------ */
+#content.markdown-body h1,
+#content.markdown-body h2,
+#content.markdown-body h3,
+#content.markdown-body h4,
+#content.markdown-body h5,
+#content.markdown-body h6 {
+  font-family: var(--tvmv-body-font);
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 1.6em 0 0.5em;
+}
+#content.markdown-body h1 {
+  font-size: 2.0em;
+  font-variation-settings: "opsz" 40;
+  margin-top: 0.2em;
+  padding-bottom: 0.18em;
+  border-bottom: 1px solid var(--rule-soft);
+}
+#content.markdown-body h2 {
+  font-size: 1.5em;
+  font-variation-settings: "opsz" 32;
+  padding-bottom: 0.16em;
+  border-bottom: 1px solid var(--rule-soft);
+}
+#content.markdown-body h3 { font-size: 1.28em; font-variation-settings: "opsz" 24; }
+#content.markdown-body h4 { font-size: 1.1em; }
+#content.markdown-body h5 { font-size: 0.95em; color: var(--ink-soft); }
+#content.markdown-body h6 {
+  font-size: 0.85em; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
 }
 
-/* Full-width mode: drop the measure cap, keep gutters. */
-html[data-measure="full"] #content.markdown-body {
-  max-width: none;
+/* ---- Body copy -------------------------------------------------------- */
+#content.markdown-body p { margin: 0 0 1em; }
+#content.markdown-body a { color: var(--accent); text-decoration: none; }
+#content.markdown-body a:hover {
+  text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px;
+}
+#content.markdown-body strong { font-weight: 600; color: var(--ink); }
+#content.markdown-body em { font-style: italic; }
+#content.markdown-body del { color: var(--muted); }
+#content.markdown-body hr {
+  border: 0; height: 1px; background: var(--rule-soft); margin: 2em 0;
 }
 
-/* Monospace surfaces follow the user's mono preference. github-markdown sizes
-   code at ~85% of body; keep that ratio by inheriting font-size. */
+/* ---- Lists ------------------------------------------------------------ */
+#content.markdown-body ul,
+#content.markdown-body ol { margin: 0 0 1em; padding-left: 1.6em; }
+#content.markdown-body li { margin: 0.25em 0; }
+#content.markdown-body li::marker { color: var(--muted); }
+#content.markdown-body li > ul,
+#content.markdown-body li > ol { margin: 0.25em 0; }
+/* GFM task lists (cmark-gfm emits <li><input type=checkbox>...). */
+#content.markdown-body li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.2em; }
+#content.markdown-body input[type="checkbox"] {
+  margin: 0 0.5em 0 0; vertical-align: middle; accent-color: var(--accent);
+}
+
+/* ---- Blockquote ------------------------------------------------------- */
+#content.markdown-body blockquote {
+  margin: 0 0 1em; padding: 0.4em 1.1em;
+  border-left: 3px solid var(--rule);
+  background: var(--paper-deep);
+  color: var(--ink-soft);
+  border-radius: 0 6px 6px 0;
+}
+#content.markdown-body blockquote > :last-child { margin-bottom: 0; }
+#content.markdown-body blockquote em { color: var(--accent-2); }
+
+/* ---- Code ------------------------------------------------------------- */
 #content.markdown-body code,
 #content.markdown-body kbd,
-#content.markdown-body pre,
-#content.markdown-body tt,
-#content.markdown-body samp {
-  font-family: var(--tvmv-mono-font);
+#content.markdown-body samp,
+#content.markdown-body tt { font-family: var(--tvmv-mono-font); }
+#content.markdown-body code {
+  font-size: 0.86em;
+  background: var(--paper-deep);
+  padding: 0.12em 0.4em;
+  border-radius: 4px;
+  color: var(--ink);
+}
+#content.markdown-body pre {
+  margin: 0 0 1em;
+  padding: 14px 16px;
+  background: var(--paper-deep);
+  border: 1px solid var(--rule-soft);
+  border-radius: 8px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+#content.markdown-body pre code {
+  background: none; padding: 0; font-size: 0.85em; color: var(--ink);
 }
 
-/* KaTeX ships its own math fonts; never let the body/mono override leak in. */
+/* ---- Tables ----------------------------------------------------------- */
+#content.markdown-body table {
+  border-collapse: collapse;
+  margin: 0 0 1em;
+  font-size: 0.95em;
+}
+#content.markdown-body th,
+#content.markdown-body td {
+  padding: 7px 14px;
+  border: 1px solid var(--rule-soft);
+  text-align: left;
+  vertical-align: top;
+}
+#content.markdown-body th {
+  background: var(--paper-deep);
+  color: var(--muted);
+  font-weight: 600;
+  font-size: 0.86em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+#content.markdown-body tr:nth-child(even) td {
+  background: color-mix(in srgb, var(--paper-deep) 55%, transparent);
+}
+
+/* ---- Images ----------------------------------------------------------- */
+#content.markdown-body img { max-width: 100%; border-radius: 6px; }
+
+/* ---- Syntax highlighting (highlight.js classes, Concordat palette) ----
+ * No external hljs theme is loaded; tokens are tinted from the accent palette
+ * so code stays in the warm-paper world and adapts to light/dark via the tokens.
+ */
+#content.markdown-body .hljs { background: transparent; color: var(--ink); }
+#content.markdown-body .hljs-comment,
+#content.markdown-body .hljs-quote { color: var(--muted); font-style: italic; }
+#content.markdown-body .hljs-keyword,
+#content.markdown-body .hljs-selector-tag,
+#content.markdown-body .hljs-built_in,
+#content.markdown-body .hljs-type { color: var(--accent); }
+#content.markdown-body .hljs-string,
+#content.markdown-body .hljs-regexp,
+#content.markdown-body .hljs-symbol { color: var(--accent-3); }
+#content.markdown-body .hljs-number,
+#content.markdown-body .hljs-literal { color: var(--accent-4); }
+#content.markdown-body .hljs-title,
+#content.markdown-body .hljs-title.function_,
+#content.markdown-body .hljs-section { color: var(--ink); font-weight: 600; }
+#content.markdown-body .hljs-attr,
+#content.markdown-body .hljs-attribute,
+#content.markdown-body .hljs-property { color: var(--accent-4); }
+#content.markdown-body .hljs-tag,
+#content.markdown-body .hljs-name,
+#content.markdown-body .hljs-selector-id,
+#content.markdown-body .hljs-selector-class { color: var(--accent-2); }
+#content.markdown-body .hljs-variable,
+#content.markdown-body .hljs-template-variable,
+#content.markdown-body .hljs-params { color: var(--ink-soft); }
+#content.markdown-body .hljs-meta,
+#content.markdown-body .hljs-doctag { color: var(--muted); }
+#content.markdown-body .hljs-emphasis { font-style: italic; }
+#content.markdown-body .hljs-strong { font-weight: 600; }
+#content.markdown-body .hljs-link { color: var(--accent); text-decoration: underline; }
+
+/* ---- KaTeX (keep its own math fonts) ---------------------------------- */
 #content.markdown-body .katex,
 #content.markdown-body .katex * {
   font-family: KaTeX_Main, KaTeX_Math, KaTeX_Size1, KaTeX_Size2, KaTeX_Size3,
                KaTeX_Size4, KaTeX_AMS, KaTeX_Caligraphic, KaTeX_Fraktur,
                KaTeX_SansSerif, KaTeX_Script, KaTeX_Typewriter, serif;
 }
+#content.markdown-body .katex-display { margin: 1em 0; overflow-x: auto; overflow-y: hidden; }
 
-/* Mermaid diagrams: center, let them size naturally, no code styling. */
-#content.markdown-body .mermaid {
-  margin: 16px 0;
-  text-align: center;
-  overflow-x: auto;
-}
-#content.markdown-body .mermaid svg {
-  max-width: 100%;
-  height: auto;
-}
+/* ---- Mermaid ---------------------------------------------------------- */
+#content.markdown-body .mermaid { margin: 1.2em 0; text-align: center; overflow-x: auto; }
+#content.markdown-body .mermaid svg { max-width: 100%; height: auto; }
 
-/* ---- Find-in-page highlights (CSS Custom Highlight API) ------------------
- * boot.js registers two highlights: every match (`tvmv-find`) and the current
- * one (`tvmv-find-current`). No DOM mutation, so layout/KaTeX/Mermaid are safe.
- */
-::highlight(tvmv-find) {
-  background-color: rgba(255, 214, 0, 0.40);
-}
-::highlight(tvmv-find-current) {
-  background-color: #ff9a3c;
-  color: #1b1b1b;
-}
+/* ---- Find-in-page highlights (CSS Custom Highlight API) --------------- */
+::highlight(tvmv-find) { background-color: rgba(184, 63, 18, 0.22); }
+::highlight(tvmv-find-current) { background-color: var(--accent-soft); color: #ffffff; }
 
-/* ---- Print ---------------------------------------------------------------
- * Force the light theme, remove the measure cap and screen gutters, and avoid
- * splitting code blocks / diagrams / headings awkwardly across pages.
- */
+/* ---- Print ------------------------------------------------------------ */
 @media print {
-  html, body {
-    background: #fff;
-  }
+  html, body { background: #fff; }
   #content.markdown-body {
-    max-width: none;
-    margin: 0;
-    padding: 0;
-    font-size: 11pt;
-    color: #000;
+    max-width: none; margin: 0; padding: 0; color: #000; font-size: 11pt;
   }
-  /* Keep headings with following content; don't orphan them at page bottoms. */
   #content.markdown-body h1,
   #content.markdown-body h2,
   #content.markdown-body h3,
   #content.markdown-body h4,
   #content.markdown-body h5,
-  #content.markdown-body h6 {
-    break-after: avoid-page;
-    page-break-after: avoid;
-  }
+  #content.markdown-body h6 { break-after: avoid-page; page-break-after: avoid; }
   #content.markdown-body pre,
   #content.markdown-body table,
   #content.markdown-body blockquote,
   #content.markdown-body .mermaid,
-  #content.markdown-body .katex-display {
-    break-inside: avoid;
-    page-break-inside: avoid;
-  }
-  /* Show link targets in print. */
+  #content.markdown-body .katex-display { break-inside: avoid; page-break-inside: avoid; }
   #content.markdown-body a[href^="http"]::after {
-    content: " (" attr(href) ")";
-    font-size: 85%;
-    word-break: break-all;
+    content: " (" attr(href) ")"; font-size: 85%; word-break: break-all;
   }
 }

@@ -160,11 +160,8 @@
     }
     if (targets.length === 0) return Promise.resolve();
 
-    // GitHub light theme for hljs as the base code palette.
-    return Promise.all([
-      loadStyle("highlight.js/github.min.css"),
-      loadScript("highlight.js/highlight.min.js")
-    ]).then(function () {
+    // Token colors come from app.css (Concordat palette) — no external theme.
+    return loadScript("highlight.js/highlight.min.js").then(function () {
       for (var j = 0; j < targets.length; j++) {
         try { window.hljs.highlightElement(targets[j]); } catch (e) { /* per-block */ }
       }
@@ -202,7 +199,7 @@
 
     return loadScript("mermaid/mermaid.min.js").then(function () {
       var theme = (document.documentElement.getAttribute("data-theme") === "dark")
-        ? "dark" : "default";
+        ? "dark" : "neutral";
       // UMD bundle assigns globalThis.mermaid -> window.mermaid is available.
       window.mermaid.initialize({ startOnLoad: false, theme: theme });
       return window.mermaid.run({ nodes: mermaidNodes });
@@ -283,14 +280,9 @@
     }
   }
 
-  // Switch the active github-markdown stylesheet by toggling link.disabled,
-  // and reflect the choice on <html data-theme> for app.css / mermaid.
+  // Light/dark lives entirely in app.css via the <html data-theme> attribute.
   function setTheme(theme) {
     document.documentElement.setAttribute("data-theme", theme);
-    var light = document.getElementById("gh-light");
-    var dark = document.getElementById("gh-dark");
-    if (light) light.disabled = (theme === "dark");
-    if (dark) dark.disabled = (theme !== "dark");
   }
 
   /* ---- public: scroll helpers ------------------------------------------ */

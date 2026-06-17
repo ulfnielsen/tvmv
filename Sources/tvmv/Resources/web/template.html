@@ -5,12 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>tvmv</title>
 
-  <!-- App styling and the two toggleable GitHub markdown themes.
-       Both github light/dark are loaded; boot.js enables one via the
-       `disabled` attribute (driven by data-theme). app.css comes last so its
-       :root custom properties and .markdown-body overrides win the cascade. -->
-  <link id="gh-light" rel="stylesheet" href="tvmv-asset://app/vendor/github-markdown-css/github-markdown-light.min.css">
-  <link id="gh-dark" rel="stylesheet" href="tvmv-asset://app/vendor/github-markdown-css/github-markdown-dark.min.css" disabled>
+  <!-- Concordat-inspired reading theme (self-contained). Light/dark lives
+       entirely in app.css via <html data-theme>; boot.js flips the attribute. -->
   <link rel="stylesheet" href="tvmv-asset://app/app.css">
 
   <!-- NOTE: KaTeX / Mermaid / highlight.js are intentionally NOT referenced
