@@ -107,7 +107,7 @@ func resolveFont(size: CGFloat) -> NSFont {
     return NSFont.boldSystemFont(ofSize: size)
 }
 
-let glyphFontSize = tileSize * 0.62
+let glyphFontSize = tileSize * 0.74
 let inkColor = NSColor(calibratedRed: 0.149, green: 0.118, blue: 0.090, alpha: 1.0) // dark warm ink
 let font = resolveFont(size: glyphFontSize)
 
