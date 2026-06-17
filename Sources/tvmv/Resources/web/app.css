@@ -118,16 +118,14 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body a:hover {
   text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px;
 }
-/* Source Serif 4 is installed as STATIC named faces (Regular/Medium/SemiBold/
-   Bold...), so the variable wght axis can't interpolate and font-weight snaps
-   to whole faces. Select the Medium (500) face by its PostScript name for a true
-   medium-bold; fall back to the user's body font at weight 500 for other fonts.
-   `font-variation-settings: normal` cancels the inherited opsz so face matching
-   isn't overridden. */
+/* Source Serif 4's weight steps are subtle: Medium is only ~0.8% heavier than
+   Regular (measured in WebKit), so it reads as "no emphasis". SemiBold (+1.5%)
+   is the first weight that clearly registers. Cancel the inherited
+   font-variation-settings so plain font-weight selects the static SemiBold face
+   (and a custom body font still gets its own 600). */
 #content.markdown-body strong {
-  font-family: "SourceSerif4Roman-Medium", var(--tvmv-body-font);
   font-variation-settings: normal;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--ink);
 }
 #content.markdown-body em { font-style: italic; }
@@ -201,9 +199,8 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body th {
   background: var(--paper-deep);
   color: var(--ink);
-  font-family: "SourceSerif4Roman-Medium", var(--tvmv-body-font);
   font-variation-settings: normal;
-  font-weight: 500;
+  font-weight: 600;
 }
 #content.markdown-body tr:nth-child(even) td {
   background: color-mix(in srgb, var(--paper-deep) 55%, transparent);
