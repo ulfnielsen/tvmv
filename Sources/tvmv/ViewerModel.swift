@@ -14,6 +14,7 @@ final class ViewerModel: ObservableObject {
 
     private var controller: MarkdownWebController?
     private var watcher: FileWatcher?
+    private var cssWatcher: FileWatcher?
     private var isReady = false
 
     init(text: String, fileURL: URL?) {
@@ -37,6 +38,12 @@ final class ViewerModel: ObservableObject {
         let base = "\(AssetSchemeHandler.scheme)://doc/"
         await controller.setContent(bodyHTML: html, docBaseHref: base)
         await controller.applyStyle(json: AppSettings.shared.styleJSON)
+        await controller.setUserCSS(UserCSS.load() ?? "")
+    }
+
+    func applyUserCSS() async {
+        guard isReady else { return }
+        await controller?.setUserCSS(UserCSS.load() ?? "")
     }
 
     func applyStyle() async {
@@ -45,16 +52,26 @@ final class ViewerModel: ObservableObject {
     }
 
     func startWatching() {
-        guard let url = fileURL else { return }
-        watcher = FileWatcher(url: url) { [weak self] in
-            Task { @MainActor in await self?.reload() }
+        if let url = fileURL {
+            watcher = FileWatcher(url: url) { [weak self] in
+                Task { @MainActor in await self?.reload() }
+            }
+            watcher?.start()
         }
-        watcher?.start()
+        // Live-reload the user CSS override while it's being edited.
+        if FileManager.default.fileExists(atPath: UserCSS.url.path) {
+            cssWatcher = FileWatcher(url: UserCSS.url) { [weak self] in
+                Task { @MainActor in await self?.applyUserCSS() }
+            }
+            cssWatcher?.start()
+        }
     }
 
     func stopWatching() {
         watcher?.stop()
         watcher = nil
+        cssWatcher?.stop()
+        cssWatcher = nil
     }
 
     /// Re-read the file from disk and re-render, preserving scroll position.

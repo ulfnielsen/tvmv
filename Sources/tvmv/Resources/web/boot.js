@@ -406,6 +406,21 @@
     return { count: _findRanges.length, index: _findIndex + 1 };
   }
 
+  /* ---- public: user CSS override --------------------------------------- */
+  // Inject (or replace/remove) a user-supplied stylesheet. Appended LAST in
+  // <head> so it overrides app.css and the lazily-loaded vendor styles.
+  function applyUserCSS(css) {
+    var id = "tvmv-user-css";
+    var el = document.getElementById(id);
+    if (!css) { if (el && el.parentNode) el.parentNode.removeChild(el); return; }
+    if (!el) {
+      el = document.createElement("style");
+      el.id = id;
+    }
+    el.textContent = css;
+    document.head.appendChild(el); // (re)append so it stays last in the cascade
+  }
+
   /* ---- expose to native ------------------------------------------------ */
 
   window.tvmv = {
@@ -417,6 +432,7 @@
     setScrollRatio: setScrollRatio,
     find: findInPage,
     findNext: findNext,
-    clearFind: clearFind
+    clearFind: clearFind,
+    applyUserCSS: applyUserCSS
   };
 })();

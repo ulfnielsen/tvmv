@@ -1,0 +1,57 @@
+/*
+ * comic-msd.css — a demo TVMV custom theme: Comic Sans on MSD teal.
+ *
+ * Drop a copy at ~/.config/tvmv/custom.css and TVMV injects it after the built-in
+ * theme (overriding it). Edit the file and the open window live-reloads.
+ */
+
+:root {
+  /* Comic Sans MS if installed; Chalkboard SE ships with macOS as a fallback.
+     NOTE: !important is required to override the typography variables — the app
+     sets them as inline styles on <html> for live Settings updates, which
+     otherwise outrank a plain :root rule. (Element selectors below don't need it.) */
+  --tvmv-body-font: "Comic Sans MS", "Comic Neue", "Chalkboard SE", cursive !important;
+  --tvmv-mono-font: "Comic Sans MS", "Chalkboard SE", ui-monospace, monospace !important;
+}
+
+html, body { background: #00857C; }            /* MSD / Merck teal */
+
+#content.markdown-body {
+  background: #00857C;
+  color: #ffffff;
+}
+
+#content.markdown-body h1,
+#content.markdown-body h2,
+#content.markdown-body h3,
+#content.markdown-body h4,
+#content.markdown-body h5,
+#content.markdown-body h6 {
+  color: #ffffff;
+  border-bottom-color: rgba(255, 255, 255, 0.35);
+}
+
+#content.markdown-body a { color: #BFEFE8; }
+#content.markdown-body strong { color: #ffffff; }
+#content.markdown-body em { color: #d8fff8; }
+
+#content.markdown-body blockquote {
+  background: rgba(255, 255, 255, 0.10);
+  border-left-color: rgba(255, 255, 255, 0.6);
+  color: #eafffb;
+}
+
+#content.markdown-body code {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+#content.markdown-body pre {
+  background: rgba(0, 0, 0, 0.22);
+  border-color: rgba(255, 255, 255, 0.25);
+}
+#content.markdown-body pre code { color: #eafffb; }
+
+#content.markdown-body th { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+#content.markdown-body th,
+#content.markdown-body td { border-color: rgba(255, 255, 255, 0.28); }
+#content.markdown-body hr { background: rgba(255, 255, 255, 0.35); }

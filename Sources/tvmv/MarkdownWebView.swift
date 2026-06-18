@@ -187,6 +187,12 @@ final class MarkdownWebController {
         await run(js)
     }
 
+    /// Inject the user's custom stylesheet (overrides the theme). Empty clears it.
+    func setUserCSS(_ css: String) async {
+        let js = "window.tvmv.applyUserCSS(\(Self.jsString(css)));"
+        await run(js)
+    }
+
     func scrollToAnchor(_ anchor: String) async {
         let js = "window.tvmv.scrollToAnchor(\(Self.jsString(anchor)));"
         await run(js)
