@@ -43,15 +43,25 @@ choose TVMV under **System Settings → General → Login Items & Extensions →
 Look** (enable TVMV, disable the other). The extension is ad-hoc signed with the
 `com.apple.security.app-sandbox` entitlement (required for QuickLook to load it).
 
-## Custom CSS
+## Custom themes (CSS)
 
-Drop a stylesheet at `~/.config/tvmv/custom.css` and TVMV injects it after the
-built-in theme — override fonts, colors, spacing, anything. The open window
-**live-reloads** as you edit the file. Plain element rules
-(`#content.markdown-body …`) override directly; to override the typography
-**variables** (`--tvmv-body-font`, `--tvmv-base-size`, …) add `!important`, since
-the app sets those inline for live Settings updates. See
-[`examples/comic-msd.css`](examples/comic-msd.css) for a Comic-Sans-on-MSD-teal demo.
+Out of the box TVMV wears its built-in "paper & ink" theme, which has taste. If
+you don't, you can override it with your own CSS — TVMV won't judge.
+
+Open **Settings (⌘,) → Custom CSS → Choose…** and pick a `.css` file. TVMV injects
+it after the built-in theme (overriding it), tints the window chrome — sidebar,
+window, and title bar — to a slightly-lightened version of your background color,
+and **live-reloads** as you edit the file. *Reset to default* goes back to the
+built-in theme. Nothing is loaded unless you pick a file.
+
+Try [`examples/comic-msd.css`](examples/comic-msd.css) — Comic Sans on MSD teal:
+
+![TVMV with a custom theme](docs/theme-screenshot.png)
+
+Writing your own: plain element rules (`#content.markdown-body …`) override
+directly; to override the typography **variables** (`--tvmv-body-font`,
+`--tvmv-base-size`, …) add `!important`, since the app sets those inline for live
+Settings updates.
 
 ## Releasing
 
