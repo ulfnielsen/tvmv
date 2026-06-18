@@ -29,7 +29,7 @@
   --tvmv-mono-font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   --tvmv-base-size: 16px;
   --tvmv-measure: 80ch;
-  --tvmv-pad: 44px;
+  --tvmv-pad: 60px;
 
   color-scheme: light;
 }
