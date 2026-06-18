@@ -75,20 +75,27 @@ fish $repo_root/build/quicklook.fish; or exit $fail_status
 
 # --- 3. Ad-hoc codesign ---------------------------------------------------
 # The deep sign seals the whole tree, but it also RE-SIGNS the embedded
-# QuickLook .appex without entitlements — stripping the sandbox entitlement
-# that QuickLook requires to load the extension. So after the deep sign we
-# re-sign the appex WITH its entitlements, then re-seal the app WITHOUT
-# --deep (which seals the appex by reference, leaving its signature intact).
-set -l appex_embedded $app/Contents/PlugIns/TVMVQuickLook.appex
+# QuickLook .appex(es) without entitlements — stripping the sandbox entitlement
+# that QuickLook requires to load each extension. So after the deep sign we
+# re-sign every embedded appex WITH its entitlements, then re-seal the app
+# WITHOUT --deep (which seals each appex by reference, leaving its signature
+# intact).
 set -l ql_ent $repo_root/quicklook/entitlements.plist
 
 echo "==> codesign (ad-hoc, --deep --force)"
 codesign -s - --deep --force $app; or exit $fail_status
 
-if test -d $appex_embedded
-    echo "==> re-signing embedded appex with sandbox entitlement"
-    codesign -s - --force --entitlements $ql_ent $appex_embedded; or exit $fail_status
-    echo "==> re-sealing app (no --deep, preserves appex signature)"
+set -l embedded_appexes $app/Contents/PlugIns/*.appex
+set -l resealed 0
+for appex_embedded in $embedded_appexes
+    if test -d $appex_embedded
+        echo "==> re-signing embedded appex with sandbox entitlement: "(path basename $appex_embedded)
+        codesign -s - --force --entitlements $ql_ent $appex_embedded; or exit $fail_status
+        set resealed 1
+    end
+end
+if test $resealed -eq 1
+    echo "==> re-sealing app (no --deep, preserves appex signatures)"
     codesign -s - --force $app; or exit $fail_status
 end
 
@@ -107,12 +114,14 @@ echo "==> registering document types via lsregister"
 $lsregister -f $installed
 echo "    registered $installed"
 
-# Register the embedded QuickLook extension with pluginkit so it is discoverable.
-set -l installed_appex $installed/Contents/PlugIns/TVMVQuickLook.appex
-if test -d $installed_appex
-    echo "==> registering QuickLook extension via pluginkit -a"
-    pluginkit -a $installed_appex
-    echo "    pluginkit registered $installed_appex"
+# Register the embedded QuickLook extensions (preview + thumbnail) with
+# pluginkit so they are discoverable.
+for installed_appex in $installed/Contents/PlugIns/*.appex
+    if test -d $installed_appex
+        echo "==> registering QuickLook extension via pluginkit -a: "(path basename $installed_appex)
+        pluginkit -a $installed_appex
+        echo "    pluginkit registered $installed_appex"
+    end
 end
 
 # --- 5. Install the CLI shim ---------------------------------------------

@@ -105,6 +105,65 @@ end
 mkdir -p $app/Contents/PlugIns
 rm -rf $app/Contents/PlugIns/TVMVQuickLook.appex
 cp -R $appex $app/Contents/PlugIns/TVMVQuickLook.appex
-echo "==> [QL] embedded appex -> $app/Contents/PlugIns/"
+echo "==> [QL] embedded preview appex -> $app/Contents/PlugIns/"
+
+# === SECOND APPEX: QuickLook Thumbnail provider ============================
+# Renders a page-overview thumbnail (document scaled to fit thumbnail width)
+# rather than the zoomed-in heading the preview-derived auto thumbnail gives.
+
+# --- T1. Compile the thumbnail extension executable ------------------------
+# Sources: the thumbnail provider + scheme handler + reused renderer files.
+set -l thumb_src \
+    quicklook/ThumbnailProvider.swift \
+    quicklook/PreviewAssetSchemeHandler.swift \
+    Sources/tvmv/MarkdownRenderer.swift \
+    Sources/tvmv/MarkdownText.swift
+
+set -l thumb_build_dir .build/quicklook-thumbnail
+rm -rf $thumb_build_dir
+mkdir -p $thumb_build_dir
+set -l thumb_exe $thumb_build_dir/TVMVThumbnail
+
+echo "==> [QL] swiftc compile thumbnail extension executable"
+env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
+    swiftc \
+    -O \
+    -target arm64-apple-macosx14.0 \
+    -Xcc -fmodule-map-file=$src_inc/module.modulemap \
+    -Xcc -fmodule-map-file=$ext_inc/module.modulemap \
+    -I $src_inc \
+    -I $ext_inc \
+    -framework Cocoa \
+    -framework WebKit \
+    -framework QuickLookThumbnailing \
+    -Xlinker -e -Xlinker _NSExtensionMain \
+    $libcmark \
+    -o $thumb_exe \
+    $thumb_src; or exit $fail_status
+echo "    compiled -> $thumb_exe"
+
+# --- T2. Assemble the thumbnail .appex bundle ------------------------------
+set -l thumb_appex $repo_root/dist/TVMVThumbnail.appex
+echo "==> [QL] assembling $thumb_appex"
+rm -rf $thumb_appex
+mkdir -p $thumb_appex/Contents/MacOS
+mkdir -p $thumb_appex/Contents/Resources
+
+cp $thumb_exe $thumb_appex/Contents/MacOS/TVMVThumbnail
+cp quicklook/Thumbnail-Info.plist $thumb_appex/Contents/Info.plist
+cp -R Sources/tvmv/Resources/web $thumb_appex/Contents/Resources/web
+echo "    copied web/ -> Contents/Resources/web"
+
+# --- T3. Sign the thumbnail appex with the sandbox entitlement -------------
+echo "==> [QL] codesign thumbnail appex (ad-hoc, sandbox entitlement)"
+codesign -s - --force --entitlements quicklook/entitlements.plist $thumb_appex; or exit $fail_status
+codesign -d --entitlements - $thumb_appex 2>/dev/null | grep -q app-sandbox; \
+    and echo "    sandbox entitlement present"; \
+    or echo "    WARNING: sandbox entitlement not detected"
+
+# --- T4. Embed the thumbnail appex into the app's PlugIns dir --------------
+rm -rf $app/Contents/PlugIns/TVMVThumbnail.appex
+cp -R $thumb_appex $app/Contents/PlugIns/TVMVThumbnail.appex
+echo "==> [QL] embedded thumbnail appex -> $app/Contents/PlugIns/"
 
 echo "==> [QL] done."
