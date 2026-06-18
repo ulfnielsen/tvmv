@@ -2,28 +2,24 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-	<key>CFBundleName</key>
-	<string>TVMVQuickLook</string>
 	<key>CFBundleDisplayName</key>
 	<string>TVMV QuickLook</string>
 	<key>CFBundleExecutable</key>
 	<string>TVMVQuickLook</string>
 	<key>CFBundleIdentifier</key>
 	<string>dk.dyregod.tvmv.quicklook</string>
+	<key>CFBundleName</key>
+	<string>TVMVQuickLook</string>
 	<key>CFBundlePackageType</key>
 	<string>XPC!</string>
 	<key>CFBundleShortVersionString</key>
-	<string>0.2.0</string>
+	<string>0.3.0</string>
 	<key>CFBundleVersion</key>
-	<string>2</string>
+	<string>3</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>14.0</string>
 	<key>NSExtension</key>
 	<dict>
-		<key>NSExtensionPointIdentifier</key>
-		<string>com.apple.quicklook.preview</string>
-		<key>NSExtensionPrincipalClass</key>
-		<string>PreviewViewController</string>
 		<key>NSExtensionAttributes</key>
 		<dict>
 			<key>QLSupportedContentTypes</key>
@@ -33,6 +29,10 @@
 			<key>QLSupportsSearchableItems</key>
 			<false/>
 		</dict>
+		<key>NSExtensionPointIdentifier</key>
+		<string>com.apple.quicklook.preview</string>
+		<key>NSExtensionPrincipalClass</key>
+		<string>PreviewViewController</string>
 	</dict>
 </dict>
 </plist>
