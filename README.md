@@ -2,6 +2,8 @@
 
 **TVMV** — *totally vibe coded markdown viewer*.
 
+![TVMV rendering its own README](docs/screenshot.png)
+
 A native macOS Markdown viewer. Opens `.md` files in real windows and renders
 GitHub-Flavored Markdown (via cmark-gfm) in a `WKWebView` with a warm "paper &
 ink" reading theme, syntax highlighting, KaTeX math, and Mermaid diagrams.
