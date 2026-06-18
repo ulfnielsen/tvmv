@@ -33,6 +33,16 @@ the `tvmv` CLI shim to `~/.local/bin`.
 
 Design spec and implementation plan live in `docs/superpowers/`.
 
+## QuickLook
+
+TVMV bundles a QuickLook **preview extension**, so pressing Space on a `.md` file
+in Finder renders it with the same theme (cmark-gfm + the warm reading CSS). It's
+installed with the app under `~/Applications`. If another markdown QuickLook
+extension is also installed (e.g. QLMarkdown), macOS may pick that one instead —
+choose TVMV under **System Settings → General → Login Items & Extensions → Quick
+Look** (enable TVMV, disable the other). The extension is ad-hoc signed with the
+`com.apple.security.app-sandbox` entitlement (required for QuickLook to load it).
+
 ## Releasing
 
 `build/release.fish [major|minor|patch]` (default `patch`) cuts a release:

@@ -84,11 +84,14 @@ end
 # --- Stamp the version ----------------------------------------------------
 /usr/libexec/PlistBuddy -c "Set CFBundleShortVersionString $ver" $plist
 /usr/libexec/PlistBuddy -c "Set CFBundleVersion $build" $plist
+# Keep the QuickLook extension's version in sync with the app.
+/usr/libexec/PlistBuddy -c "Set CFBundleShortVersionString $ver" quicklook/Info.plist
+/usr/libexec/PlistBuddy -c "Set CFBundleVersion $build" quicklook/Info.plist
 
 # --- Build + sign the .app ------------------------------------------------
 if not fish build/bundle.fish
     echo "error: build failed — reverting version stamp." >&2
-    git checkout -- $plist
+    git checkout -- $plist quicklook/Info.plist
     exit 1
 end
 
@@ -99,7 +102,7 @@ ditto -c -k --sequesterRsrc --keepParent $repo_root/dist/TVMV.app $zip
 echo "==> packaged $zip"
 
 # --- Commit + tag ---------------------------------------------------------
-git add $plist
+git add $plist quicklook/Info.plist
 git commit -m "Release $tag"
 git tag -a "$tag" -m "TVMV $ver"
 

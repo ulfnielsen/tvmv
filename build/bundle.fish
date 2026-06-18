@@ -66,10 +66,33 @@ else
     echo "    (no AppIcon.icns at build/AppIcon.icns; skipping)"
 end
 
+# --- 2b. Build + embed the QuickLook extension ----------------------------
+# Must run BEFORE the app codesign below so the app signature seals the
+# embedded .appex (the appex is itself already signed with its sandbox
+# entitlement inside quicklook.fish).
+echo "==> embedding QuickLook extension via build/quicklook.fish"
+fish $repo_root/build/quicklook.fish; or exit $fail_status
+
 # --- 3. Ad-hoc codesign ---------------------------------------------------
+# The deep sign seals the whole tree, but it also RE-SIGNS the embedded
+# QuickLook .appex without entitlements — stripping the sandbox entitlement
+# that QuickLook requires to load the extension. So after the deep sign we
+# re-sign the appex WITH its entitlements, then re-seal the app WITHOUT
+# --deep (which seals the appex by reference, leaving its signature intact).
+set -l appex_embedded $app/Contents/PlugIns/TVMVQuickLook.appex
+set -l ql_ent $repo_root/quicklook/entitlements.plist
+
 echo "==> codesign (ad-hoc, --deep --force)"
 codesign -s - --deep --force $app; or exit $fail_status
-codesign --verify --verbose $app; or exit $fail_status
+
+if test -d $appex_embedded
+    echo "==> re-signing embedded appex with sandbox entitlement"
+    codesign -s - --force --entitlements $ql_ent $appex_embedded; or exit $fail_status
+    echo "==> re-sealing app (no --deep, preserves appex signature)"
+    codesign -s - --force $app; or exit $fail_status
+end
+
+codesign --verify --deep --strict --verbose $app; or exit $fail_status
 echo "    signature OK"
 
 # --- 4. Install + register doc types -------------------------------------
@@ -83,6 +106,14 @@ set -l lsregister /System/Library/Frameworks/CoreServices.framework/Frameworks/L
 echo "==> registering document types via lsregister"
 $lsregister -f $installed
 echo "    registered $installed"
+
+# Register the embedded QuickLook extension with pluginkit so it is discoverable.
+set -l installed_appex $installed/Contents/PlugIns/TVMVQuickLook.appex
+if test -d $installed_appex
+    echo "==> registering QuickLook extension via pluginkit -a"
+    pluginkit -a $installed_appex
+    echo "    pluginkit registered $installed_appex"
+end
 
 # --- 5. Install the CLI shim ---------------------------------------------
 set -l bindir $HOME/.local/bin
