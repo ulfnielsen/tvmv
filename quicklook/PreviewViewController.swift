@@ -23,6 +23,8 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     private var completion: ((Error?) -> Void)?
     private var fallbackTimer: Timer?
     private var didComplete = false
+    private var didRender = false
+    private var lastCompact: Bool?   // cache so resize doesn't spam JS
 
     // The rendered body HTML + document base href, captured at prepare time and
     // injected once the template's boot.js has loaded (navigation didFinish).
@@ -43,6 +45,28 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         // window, zoomed out to a page overview when rendered small (thumbnail).
         let zoom = min(1.0, max(0.2, view.bounds.width / 760))
         if abs(wv.pageZoom - zoom) > 0.01 { wv.pageZoom = zoom }
+        applyResponsiveLayout()
+    }
+
+    /// Adapt the page to the pane size. A small Finder preview pane fills the
+    /// width with compact padding (no wasted reading margin — the whole point of
+    /// a glance preview); the large spacebar Quick Look window keeps TVMV's
+    /// comfortable reading measure + padding. Guarded on `didRender` so the
+    /// early layout passes (before boot.js exists) are no-ops.
+    private func applyResponsiveLayout() {
+        guard didRender, let wv = webView else { return }
+        let compact = view.bounds.width < 520
+        if compact == lastCompact { return }   // only re-apply on a real change
+        lastCompact = compact
+        let js: String
+        if compact {
+            js = "window.tvmv.applyStyle({fullWidth:true});" +
+                 "document.documentElement.style.setProperty('--tvmv-pad','22px')"
+        } else {
+            js = "window.tvmv.applyStyle({fullWidth:false});" +
+                 "document.documentElement.style.removeProperty('--tvmv-pad')"
+        }
+        wv.evaluateJavaScript(js, completionHandler: nil)
     }
 
     // MARK: QLPreviewingController
@@ -116,10 +140,12 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         guard let body = pendingBodyHTML else { return }
         let base = pendingDocBase ?? "tvmv-asset://doc/"
 
-        // Apply reading-theme typography first (mirrors the app defaults).
+        // Apply reading-theme typography first (mirrors the app defaults). Width
+        // and padding are NOT set here — applyResponsiveLayout() owns those and
+        // adapts them to the pane size.
         let style = """
         window.tvmv.applyStyle({theme:'light',bodyFont:'Source Serif 4',\
-        monoFont:'Menlo',baseSize:16,measure:80,fullWidth:false})
+        monoFont:'Menlo',baseSize:16,measure:80})
         """
         webView.evaluateJavaScript(style, completionHandler: nil)
 
@@ -128,6 +154,9 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         let jsonBase = Self.jsString(base)
         let render = "window.tvmv.render(\(jsonHTML), \(jsonBase))"
         webView.evaluateJavaScript(render, completionHandler: nil)
+
+        didRender = true
+        applyResponsiveLayout()
     }
 
     private func finish(_ error: Error?) {
