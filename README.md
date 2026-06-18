@@ -30,3 +30,18 @@ the `tvmv` CLI shim to `~/.local/bin`.
 - Double-click a `.md` in Finder (set TVMV as the default handler via Get Info → Open With → Change All).
 
 Design spec and implementation plan live in `docs/superpowers/`.
+
+## Releasing
+
+`build/release.fish [major|minor|patch]` (default `patch`) cuts a release:
+runs the tests, bumps `CFBundleShortVersionString` + the build number, builds and
+signs `TVMV.app`, zips it, commits + tags `vX.Y.Z`, pushes, and creates a GitHub
+Release with the changelog and the zip attached.
+
+```sh
+fish build/release.fish minor    # 0.1.0 -> 0.2.0
+fish build/release.fish patch    # 0.2.0 -> 0.2.1
+```
+
+Requires a git `origin` remote on GitHub, an authenticated `gh`, and a clean
+working tree. Builds are ad-hoc signed (not notarized).
