@@ -13,7 +13,7 @@ struct TvmvApp: App {
             ViewerWindow(document: file.document, fileURL: file.fileURL)
                 .environmentObject(settings)
         }
-        .defaultSize(width: 1120, height: 1180)
+        .defaultSize(width: 1680, height: 1180)
         .commands {
             ViewerMenuCommands()
         }
