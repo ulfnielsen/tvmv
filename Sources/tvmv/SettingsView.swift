@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @EnvironmentObject private var settings: AppSettings
@@ -26,8 +27,39 @@ struct SettingsView: View {
                 ForEach(AppSettings.Theme.allCases) { Text($0.rawValue.capitalized).tag($0) }
             }
             .pickerStyle(.segmented)
+
+            Divider()
+            LabeledContent("Custom CSS") {
+                Text(cssLabel)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            HStack {
+                Button("Choose…") { chooseCSS() }
+                if !settings.customCSSPath.isEmpty {
+                    Button("Reset to default") { settings.customCSSPath = "" }
+                }
+                Spacer()
+            }
         }
         .padding(20)
-        .frame(width: 380)
+        .frame(width: 400)
+    }
+
+    private var cssLabel: String {
+        settings.customCSSPath.isEmpty ? "none" : (settings.customCSSPath as NSString).lastPathComponent
+    }
+
+    private func chooseCSS() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.title = "Choose a CSS theme"
+        if let css = UTType(filenameExtension: "css") { panel.allowedContentTypes = [css] }
+        if panel.runModal() == .OK, let url = panel.url {
+            settings.customCSSPath = url.path
+        }
     }
 }

@@ -16,11 +16,19 @@ final class AppSettings: ObservableObject {
     @Published var fullWidth: Bool { didSet { d.set(fullWidth, forKey: K.fullWidth) } }
     @Published var theme: Theme { didSet { d.set(theme.rawValue, forKey: K.theme) } }
     @Published var showOutline: Bool { didSet { d.set(showOutline, forKey: K.showOutline) } }
+    @Published var customCSSPath: String { didSet { d.set(customCSSPath, forKey: K.customCSSPath) } }
 
     private let d: UserDefaults
     private enum K {
         static let bodyFont = "bodyFont", monoFont = "monoFont", baseSize = "baseSize"
         static let measure = "measure", fullWidth = "fullWidth", theme = "theme", showOutline = "showOutline"
+        static let customCSSPath = "customCSSPath"
+    }
+
+    /// The custom-CSS file chosen in Settings, or `nil` for no override (the
+    /// built-in theme). Nothing is loaded unless the user explicitly picks a file.
+    var customCSSURL: URL? {
+        customCSSPath.isEmpty ? nil : URL(fileURLWithPath: (customCSSPath as NSString).expandingTildeInPath)
     }
 
     /// `defaults` is injectable so tests can use an ephemeral suite and never
@@ -34,6 +42,7 @@ final class AppSettings: ObservableObject {
         fullWidth = defaults.bool(forKey: K.fullWidth)            // default false
         theme = Theme(rawValue: defaults.string(forKey: K.theme) ?? "auto") ?? .auto
         showOutline = defaults.object(forKey: K.showOutline) as? Bool ?? true
+        customCSSPath = defaults.string(forKey: K.customCSSPath) ?? ""
     }
 
     func increaseFontSize() { baseSize = min(baseSize + 1, 48) }

@@ -44,6 +44,8 @@ struct ViewerWindow: View {
         }
         // Live-apply typography/theme: styleJSON changes whenever any setting does.
         .onChange(of: settings.styleJSON) { Task { await model.applyStyle() } }
+        // Re-apply when the custom-CSS file is changed in Settings.
+        .onChange(of: settings.customCSSPath) { model.cssPathChanged() }
         // Re-resolve auto theme when the system appearance flips.
         .onChange(of: colorScheme) {
             if settings.theme == .auto { Task { await model.applyStyle() } }
@@ -126,14 +128,28 @@ struct ViewerWindow: View {
 }
 
 /// Paints the host NSWindow's background so the theme color extends past the
-/// content into the window chrome (title bar, gaps) and behind the sidebar.
+/// content into the window chrome — including the title bar (made transparent so
+/// it shows the window background) and the area behind the sidebar. Chrome text
+/// (title, sidebar, traffic lights) is flipped light/dark for legibility.
 private struct WindowChrome: NSViewRepresentable {
     var color: NSColor?
     func makeNSView(context: Context) -> NSView { NSView() }
     func updateNSView(_ nsView: NSView, context: Context) {
         let color = color
         DispatchQueue.main.async {
-            nsView.window?.backgroundColor = color ?? .windowBackgroundColor
+            guard let w = nsView.window else { return }
+            if let c = color {
+                w.titlebarAppearsTransparent = true   // show the window bg in the title bar
+                w.backgroundColor = c
+                let lum: CGFloat = c.usingColorSpace(.sRGB).map {
+                    0.299 * $0.redComponent + 0.587 * $0.greenComponent + 0.114 * $0.blueComponent
+                } ?? 1
+                w.appearance = NSAppearance(named: lum < 0.6 ? .darkAqua : .aqua)
+            } else {
+                w.titlebarAppearsTransparent = false
+                w.backgroundColor = .windowBackgroundColor
+                w.appearance = nil
+            }
         }
     }
 }

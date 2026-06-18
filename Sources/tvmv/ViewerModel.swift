@@ -40,13 +40,13 @@ final class ViewerModel: ObservableObject {
         let base = "\(AssetSchemeHandler.scheme)://doc/"
         await controller.setContent(bodyHTML: html, docBaseHref: base)
         await controller.applyStyle(json: AppSettings.shared.styleJSON)
-        await controller.setUserCSS(UserCSS.load() ?? "")
+        await controller.setUserCSS(UserCSS.load(AppSettings.shared.customCSSURL) ?? "")
         await updateChrome()
     }
 
     func applyUserCSS() async {
         guard isReady else { return }
-        await controller?.setUserCSS(UserCSS.load() ?? "")
+        await controller?.setUserCSS(UserCSS.load(AppSettings.shared.customCSSURL) ?? "")
         await updateChrome()
     }
 
@@ -81,12 +81,24 @@ final class ViewerModel: ObservableObject {
             watcher?.start()
         }
         // Live-reload the user CSS override while it's being edited.
-        if FileManager.default.fileExists(atPath: UserCSS.url.path) {
-            cssWatcher = FileWatcher(url: UserCSS.url) { [weak self] in
-                Task { @MainActor in await self?.applyUserCSS() }
-            }
-            cssWatcher?.start()
+        startCSSWatcher()
+    }
+
+    private func startCSSWatcher() {
+        cssWatcher?.stop()
+        cssWatcher = nil
+        guard let cssURL = AppSettings.shared.customCSSURL,
+              FileManager.default.fileExists(atPath: cssURL.path) else { return }
+        cssWatcher = FileWatcher(url: cssURL) { [weak self] in
+            Task { @MainActor in await self?.applyUserCSS() }
         }
+        cssWatcher?.start()
+    }
+
+    /// Re-watch + re-apply when the custom-CSS path changes in Settings.
+    func cssPathChanged() {
+        startCSSWatcher()
+        Task { await applyUserCSS() }
     }
 
     func stopWatching() {
