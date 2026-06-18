@@ -119,10 +119,10 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 #content.markdown-body a:hover {
   text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px;
 }
-/* Bold = Medium (500) against the Regular (400) body. */
+/* Bold = SemiBold (600) against the Regular (400) body. */
 #content.markdown-body strong {
   font-variation-settings: normal;
-  font-weight: 500;
+  font-weight: 600;
   color: var(--ink);
 }
 #content.markdown-body em { font-style: italic; }
@@ -198,7 +198,7 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
   background: var(--paper-deep);
   color: var(--ink);
   font-variation-settings: normal;
-  font-weight: 500;
+  font-weight: 600;
 }
 #content.markdown-body tr:nth-child(even) td {
   background: color-mix(in srgb, var(--paper-deep) 55%, transparent);
