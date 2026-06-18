@@ -112,11 +112,11 @@ echo "==> [QL] embedded preview appex -> $app/Contents/PlugIns/"
 # rather than the zoomed-in heading the preview-derived auto thumbnail gives.
 
 # --- T1. Compile the thumbnail extension executable ------------------------
-# Sources: the thumbnail provider + scheme handler + reused renderer files.
+# Sources: just the thumbnail provider + the text decoder. The thumbnail now
+# renders purely with Core Graphics + Core Text (NO WKWebView, NO cmark/HTML),
+# so it needs neither the scheme handler, the cmark renderer, nor WebKit.
 set -l thumb_src \
     quicklook/ThumbnailProvider.swift \
-    quicklook/PreviewAssetSchemeHandler.swift \
-    Sources/tvmv/MarkdownRenderer.swift \
     Sources/tvmv/MarkdownText.swift
 
 set -l thumb_build_dir .build/quicklook-thumbnail
@@ -129,15 +129,9 @@ env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
     swiftc \
     -O \
     -target arm64-apple-macosx14.0 \
-    -Xcc -fmodule-map-file=$src_inc/module.modulemap \
-    -Xcc -fmodule-map-file=$ext_inc/module.modulemap \
-    -I $src_inc \
-    -I $ext_inc \
     -framework Cocoa \
-    -framework WebKit \
     -framework QuickLookThumbnailing \
     -Xlinker -e -Xlinker _NSExtensionMain \
-    $libcmark \
     -o $thumb_exe \
     $thumb_src; or exit $fail_status
 echo "    compiled -> $thumb_exe"
@@ -151,8 +145,7 @@ mkdir -p $thumb_appex/Contents/Resources
 
 cp $thumb_exe $thumb_appex/Contents/MacOS/TVMVThumbnail
 cp quicklook/Thumbnail-Info.plist $thumb_appex/Contents/Info.plist
-cp -R Sources/tvmv/Resources/web $thumb_appex/Contents/Resources/web
-echo "    copied web/ -> Contents/Resources/web"
+# No web/ assets: the thumbnail renders with Core Graphics + Core Text only.
 
 # --- T3. Sign the thumbnail appex with the sandbox entitlement -------------
 echo "==> [QL] codesign thumbnail appex (ad-hoc, sandbox entitlement)"
