@@ -35,6 +35,16 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         self.view.autoresizingMask = [.width, .height]
     }
 
+    override func viewDidLayout() {
+        super.viewDidLayout()
+        guard let wv = webView else { return }
+        // macOS derives Finder thumbnails by rendering THIS preview at a small
+        // size. Scale responsively: full reading size in the large spacebar
+        // window, zoomed out to a page overview when rendered small (thumbnail).
+        let zoom = min(1.0, max(0.2, view.bounds.width / 760))
+        if abs(wv.pageZoom - zoom) > 0.01 { wv.pageZoom = zoom }
+    }
+
     // MARK: QLPreviewingController
 
     func preparePreviewOfFile(at url: URL,
