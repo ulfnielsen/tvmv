@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct ViewerWindow: View {
     let document: MarkdownDocument
@@ -28,10 +29,13 @@ struct ViewerWindow: View {
                     .lineLimit(1)
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 240)
+            .scrollContentBackground(model.chromeColor == nil ? .automatic : .hidden)
+            .background(model.chromeColor.map { Color(nsColor: $0) } ?? .clear)
         } detail: {
             webView
                 .overlay(alignment: .topTrailing) { if showFind { findBar } }
         }
+        .background { WindowChrome(color: model.chromeColor) }
         .navigationTitle(fileURL?.lastPathComponent ?? "Untitled")
         .onChange(of: selection) { _, new in
             if let new, let item = model.outline.first(where: { $0.id == new }) {
@@ -118,5 +122,18 @@ struct ViewerWindow: View {
         showFind = false
         findText = ""
         model.clearFind()
+    }
+}
+
+/// Paints the host NSWindow's background so the theme color extends past the
+/// content into the window chrome (title bar, gaps) and behind the sidebar.
+private struct WindowChrome: NSViewRepresentable {
+    var color: NSColor?
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ nsView: NSView, context: Context) {
+        let color = color
+        DispatchQueue.main.async {
+            nsView.window?.backgroundColor = color ?? .windowBackgroundColor
+        }
     }
 }

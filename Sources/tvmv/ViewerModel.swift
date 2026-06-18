@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Owns one document window's render lifecycle: initial render after the page is
 /// ready, live reload with scroll preservation, outline, find, and print.
@@ -8,6 +9,7 @@ final class ViewerModel: ObservableObject {
     @Published var errorMessage: String?
     @Published var findCount = 0
     @Published var findIndex = 0   // 1-based; 0 when no matches
+    @Published var chromeColor: NSColor?   // lightened page background, for window + sidebar
 
     let fileURL: URL?
     private var text: String
@@ -39,11 +41,31 @@ final class ViewerModel: ObservableObject {
         await controller.setContent(bodyHTML: html, docBaseHref: base)
         await controller.applyStyle(json: AppSettings.shared.styleJSON)
         await controller.setUserCSS(UserCSS.load() ?? "")
+        await updateChrome()
     }
 
     func applyUserCSS() async {
         guard isReady else { return }
         await controller?.setUserCSS(UserCSS.load() ?? "")
+        await updateChrome()
+    }
+
+    /// Tint the window chrome (sidebar + window background) to a slightly
+    /// lightened version of the page's background color, so the theme extends
+    /// past the content into the app window.
+    private func updateChrome() async {
+        guard let controller, let css = await controller.pageBackgroundColor(),
+              let base = Self.parseCSSColor(css), base.alphaComponent > 0.05 else { return }
+        chromeColor = base.blended(withFraction: 0.16, of: .white) ?? base
+    }
+
+    /// Parse "rgb(r, g, b)" / "rgba(r, g, b, a)" into an NSColor.
+    static func parseCSSColor(_ s: String) -> NSColor? {
+        let nums = s.components(separatedBy: CharacterSet(charactersIn: "0123456789.").inverted)
+            .filter { !$0.isEmpty }.compactMap { Double($0) }
+        guard nums.count >= 3 else { return nil }
+        let alpha = nums.count >= 4 ? nums[3] : 1.0
+        return NSColor(srgbRed: nums[0] / 255, green: nums[1] / 255, blue: nums[2] / 255, alpha: alpha)
     }
 
     func applyStyle() async {

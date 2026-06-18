@@ -193,6 +193,12 @@ final class MarkdownWebController {
         await run(js)
     }
 
+    /// The page's effective background color (e.g. "rgb(0, 133, 124)"), so the
+    /// app can tint its window chrome to match the theme.
+    func pageBackgroundColor() async -> String? {
+        await evaluate("getComputedStyle(document.body).backgroundColor") as? String
+    }
+
     func scrollToAnchor(_ anchor: String) async {
         let js = "window.tvmv.scrollToAnchor(\(Self.jsString(anchor)));"
         await run(js)

@@ -1,5 +1,5 @@
 /*
- * comic-msd.css — a demo TVMV custom theme: Comic Sans on MSD teal.
+ * comic-msd.css — a demo TVMV custom theme: Comic Sans on teal.
  *
  * Drop a copy at ~/.config/tvmv/custom.css and TVMV injects it after the built-in
  * theme (overriding it). Edit the file and the open window live-reloads.
@@ -14,7 +14,12 @@
   --tvmv-mono-font: "Comic Sans MS", "Chalkboard SE", ui-monospace, monospace !important;
 }
 
-html, body { background: #00857C; }            /* MSD / Merck teal */
+html,
+body {
+  background: #00857C;
+}
+
+/* MSD / Merck teal */
 
 #content.markdown-body {
   background: #00857C;
@@ -31,9 +36,17 @@ html, body { background: #00857C; }            /* MSD / Merck teal */
   border-bottom-color: rgba(255, 255, 255, 0.35);
 }
 
-#content.markdown-body a { color: #BFEFE8; }
-#content.markdown-body strong { color: #ffffff; }
-#content.markdown-body em { color: #d8fff8; }
+#content.markdown-body a {
+  color: #BFEFE8;
+}
+
+#content.markdown-body strong {
+  color: #ffffff;
+}
+
+#content.markdown-body em {
+  color: #d8fff8;
+}
 
 #content.markdown-body blockquote {
   background: rgba(255, 255, 255, 0.10);
@@ -45,13 +58,57 @@ html, body { background: #00857C; }            /* MSD / Merck teal */
   background: rgba(255, 255, 255, 0.16);
   color: #ffffff;
 }
-#content.markdown-body pre {
-  background: rgba(0, 0, 0, 0.22);
-  border-color: rgba(255, 255, 255, 0.25);
-}
-#content.markdown-body pre code { color: #eafffb; }
 
-#content.markdown-body th { background: rgba(255, 255, 255, 0.14); color: #ffffff; }
+/* Lightened teal surface (not a dark overlay) so code stays readable. */
+#content.markdown-body pre {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+#content.markdown-body pre code,
+#content.markdown-body .hljs {
+  color: #f2fffb;
+}
+
+/* The default theme's syntax tokens are dark — too low-contrast on teal.
+   Recolor them light. */
+#content.markdown-body .hljs-keyword,
+#content.markdown-body .hljs-built_in,
+#content.markdown-body .hljs-type {
+  color: #FFD9A8 !important;
+}
+
+#content.markdown-body .hljs-string,
+#content.markdown-body .hljs-regexp,
+#content.markdown-body .hljs-symbol {
+  color: #CFEFE9 !important;
+}
+
+#content.markdown-body .hljs-number,
+#content.markdown-body .hljs-literal {
+  color: #FFE9A8 !important;
+}
+
+#content.markdown-body .hljs-comment {
+  color: rgba(255, 255, 255, 0.6) !important;
+}
+
+#content.markdown-body .hljs-title,
+#content.markdown-body .hljs-title.function_,
+#content.markdown-body .hljs-section {
+  color: #ffffff !important;
+}
+
+#content.markdown-body th {
+  background: rgba(255, 255, 255, 0.14);
+  color: #ffffff;
+}
+
 #content.markdown-body th,
-#content.markdown-body td { border-color: rgba(255, 255, 255, 0.28); }
-#content.markdown-body hr { background: rgba(255, 255, 255, 0.35); }
+#content.markdown-body td {
+  border-color: rgba(255, 255, 255, 0.28);
+}
+
+#content.markdown-body hr {
+  background: rgba(255, 255, 255, 0.35);
+}
