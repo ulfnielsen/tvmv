@@ -10,5 +10,16 @@
 	     sandbox; without it the preview web view renders blank. -->
 	<key>com.apple.security.network.client</key>
 	<true/>
+	<!-- QuickLook hands a preview extension a sandbox grant for ONLY the
+	     previewed file, not its enclosing folder. Relative image references
+	     (e.g. ![](images/foo.png)) therefore fail to load: reading the sibling
+	     file returns "Operation not permitted". This read-only exception lets
+	     the asset scheme handler load those sibling images. The host app is
+	     itself unsandboxed, so this adds no net read exposure beyond it; it is
+	     honored for Developer-ID / ad-hoc signed (non-App-Store) builds. -->
+	<key>com.apple.security.temporary-exception.files.absolute-path.read-only</key>
+	<array>
+		<string>/</string>
+	</array>
 </dict>
 </plist>
