@@ -145,5 +145,10 @@ final class ViewerModel: ObservableObject {
         Task { await controller?.clearFind() }
     }
 
-    func printDoc() { controller?.printDocument() }
+    func printDoc() {
+        // Use the file's base name (no extension) so the print job and the
+        // Save-as-PDF default read as e.g. "ui-guide", not the app name.
+        let title = fileURL?.deletingPathExtension().lastPathComponent
+        controller?.printDocument(jobTitle: title)
+    }
 }

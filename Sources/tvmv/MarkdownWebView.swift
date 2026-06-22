@@ -239,11 +239,18 @@ final class MarkdownWebController {
 
     // MARK: Print (surfaces Save-as-PDF)
 
-    func printDocument() {
+    func printDocument(jobTitle: String? = nil) {
         guard let webView else { return }
         let printInfo = NSPrintInfo.shared
         let operation = webView.printOperation(with: printInfo)
         operation.view?.frame = webView.bounds
+        // Carry the document's name into the print job so the print queue and the
+        // "Save as PDF" default filename read as the file, not "tvmv". Without
+        // this the job title falls back to the web view's (empty) page title and
+        // then the app name.
+        if let jobTitle, !jobTitle.isEmpty {
+            operation.jobTitle = jobTitle
+        }
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
         if let window = webView.window {
