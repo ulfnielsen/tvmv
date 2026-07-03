@@ -18,7 +18,8 @@ import AppKit
 /// cannot happen synchronously inside windowShouldClose. So the delegate
 /// defers the close (returns false), flushes, prompts if still dirty, then
 /// re-closes with an approval flag. Clean, non-editing windows keep the old
-/// synchronous fast path.
+/// synchronous fast path. The quit path (AppDelegate) drives the same flow
+/// via `resolveForQuit`.
 struct WindowCloseGuard: NSViewRepresentable {
     /// True when the async flow is needed (dirty, or the editor pane is open
     /// and may hold unflushed keystrokes).
@@ -50,6 +51,11 @@ struct WindowCloseGuard: NSViewRepresentable {
     }
 }
 
+/// The user's decision for a dirty window that is about to close.
+enum CloseChoice {
+    case save, dontSave, cancel
+}
+
 /// Proxy window delegate: intercepts `windowShouldClose`, forwards the rest.
 @MainActor
 final class CloseGuardDelegate: NSObject, NSWindowDelegate {
@@ -65,12 +71,29 @@ final class CloseGuardDelegate: NSObject, NSWindowDelegate {
     var flush: () async -> Void = {}
     var isDirty: () -> Bool = { false }
     var save: () -> Bool = { true }
-    /// Set by the async flow just before it re-triggers the close; consumed
-    /// (and reset) by the next windowShouldClose so the close proceeds.
+    /// Presents the Save/Don't Save/Cancel decision. Injectable so the whole
+    /// close/quit flow is testable headless; the default shows the standard
+    /// modal alert.
+    var presentPrompt: (NSWindow) -> CloseChoice = { window in
+        let alert = NSAlert()
+        alert.messageText = "Do you want to save the changes made to “\(window.title)”?"
+        alert.informativeText = "Your changes will be lost if you don't save them."
+        alert.addButton(withTitle: "Save")
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Don't Save")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .save
+        case .alertThirdButtonReturn: return .dontSave
+        default: return .cancel
+        }
+    }
+
+    /// Set by the flow just before it re-triggers the close; consumed (and
+    /// reset) by the next windowShouldClose so the close proceeds.
     private var closeApproved = false
-    /// True while the async flow (flush → prompt → re-close) is running, so a
-    /// second close attempt can't spawn a concurrent flow (double flush,
-    /// stacked alerts, double performClose). Cleared on every flow exit.
+    /// True while a flow (flush → prompt → re-close) is running, so a second
+    /// close attempt can't spawn a concurrent flow (double flush, stacked
+    /// alerts, double performClose). Cleared on every flow exit.
     private var flowInFlight = false
 
     func windowShouldClose(_ sender: NSWindow) -> Bool {
@@ -81,33 +104,45 @@ final class CloseGuardDelegate: NSObject, NSWindowDelegate {
         guard needsFlow() else {
             return original?.windowShouldClose?(sender) ?? true
         }
-        if flowInFlight { return false }
+        guard !flowInFlight else { return false }
         flowInFlight = true
         Task { @MainActor [weak self, weak sender] in
-            guard let self, let window = sender else { return }
+            guard let self else { return }
             defer { self.flowInFlight = false }
-            await self.flush()
-            guard self.isDirty() else {
-                self.approveAndClose(window)
-                return
-            }
-            let alert = NSAlert()
-            alert.messageText = "Do you want to save the changes made to “\(window.title)”?"
-            alert.informativeText = "Your changes will be lost if you don't save them."
-            alert.addButton(withTitle: "Save")
-            alert.addButton(withTitle: "Cancel")
-            alert.addButton(withTitle: "Don't Save")
-            switch alert.runModal() {
-            case .alertFirstButtonReturn:            // Save
-                if self.save() { self.approveAndClose(window) }
-                // Save failed: stay open; the model's saveError alert explains.
-            case .alertThirdButtonReturn:            // Don't Save
-                self.approveAndClose(window)
-            default:                                 // Cancel
-                break
-            }
+            guard let window = sender else { return }
+            _ = await self.runResolutionFlow(window)
         }
         return false
+    }
+
+    /// Quit-path entry: run the resolution flow unless one is already in
+    /// flight. Returns true when the window closed (quit may proceed), false
+    /// when the user kept it open (Cancel, or a failed save).
+    func resolveForQuit(_ window: NSWindow) async -> Bool {
+        guard !flowInFlight else { return false }
+        flowInFlight = true
+        defer { flowInFlight = false }
+        return await runResolutionFlow(window)
+    }
+
+    /// Flush the editor, prompt if still dirty, and close on approval.
+    private func runResolutionFlow(_ window: NSWindow) async -> Bool {
+        await flush()
+        guard isDirty() else {
+            approveAndClose(window)
+            return true
+        }
+        switch presentPrompt(window) {
+        case .save:
+            guard save() else { return false }   // stays open; saveError alert explains
+            approveAndClose(window)
+            return true
+        case .dontSave:
+            approveAndClose(window)
+            return true
+        case .cancel:
+            return false
+        }
     }
 
     /// Re-run the close with approval set; performClose (not close()) so the
