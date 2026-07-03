@@ -316,6 +316,71 @@
     window.scrollTo(0, ratio * maxScroll());
   }
 
+  /* ---- public: sourcepos scroll sync ------------------------------------ */
+  // Rendered blocks carry data-sourcepos="startLine:col-endLine:col" (cmark
+  // CMARK_OPT_SOURCEPOS). These helpers map source lines <-> viewport position
+  // for the app's editor/preview sync.
+
+  function _sourceposStart(el) {
+    var sp = el.getAttribute("data-sourcepos");
+    if (!sp) return null;
+    var n = parseInt(sp, 10); // "12:1-14:8" -> 12
+    return isNaN(n) ? null : n;
+  }
+
+  // The deepest block whose sourcepos start is <= line (last match in document
+  // order wins, so a list item beats its containing list). Falls back to the
+  // first block when `line` precedes all blocks.
+  function _elementForLine(line) {
+    var content = document.getElementById("content");
+    if (!content) return null;
+    var els = content.querySelectorAll("[data-sourcepos]");
+    var best = null, bestLine = -1;
+    for (var i = 0; i < els.length; i++) {
+      var start = _sourceposStart(els[i]);
+      if (start === null) continue;
+      if (start <= line && start >= bestLine) { best = els[i]; bestLine = start; }
+    }
+    return best || (els.length ? els[0] : null);
+  }
+
+  // Source line of the topmost visible block, preferring the deepest nested
+  // block (children follow parents in document order, so a visible child
+  // inside a tall container wins over the container itself).
+  function topVisibleSourceLine() {
+    var content = document.getElementById("content");
+    if (!content) return null;
+    var els = content.querySelectorAll("[data-sourcepos]");
+    var best = null;
+    for (var i = 0; i < els.length; i++) {
+      var r = els[i].getBoundingClientRect();
+      if (r.height <= 0 || r.bottom <= 0) continue;      // empty or above viewport
+      if (r.top > window.innerHeight) break;             // below viewport — done
+      if (best === null || best.contains(els[i])) best = els[i];
+      else break;                                        // left the first visible container
+    }
+    return best ? _sourceposStart(best) : null;
+  }
+
+  // Scroll the block for `line` to just below the viewport top (editor-scroll sync).
+  function scrollToSourceLine(line) {
+    var el = _elementForLine(Number(line) || 1);
+    if (!el) return;
+    var rect = el.getBoundingClientRect();
+    window.scrollTo(0, Math.max(0, window.scrollY + rect.top - 16));
+  }
+
+  // Scroll only if the block for `line` is fully outside the viewport (cursor
+  // sync — don't yank the preview around while the target is already in view).
+  function revealSourceLine(line) {
+    var el = _elementForLine(Number(line) || 1);
+    if (!el) return;
+    var rect = el.getBoundingClientRect();
+    if (rect.bottom < 0 || rect.top > window.innerHeight) {
+      el.scrollIntoView({ block: "center" });
+    }
+  }
+
   /* ---- public: find in page ------------------------------------------- */
   // Uses the CSS Custom Highlight API (no DOM mutation, so KaTeX/Mermaid and
   // layout are untouched). Degrades to count-only if the API is unavailable.
@@ -430,6 +495,9 @@
     scrollToAnchor: scrollToAnchor,
     getScrollRatio: getScrollRatio,
     setScrollRatio: setScrollRatio,
+    topVisibleSourceLine: topVisibleSourceLine,
+    scrollToSourceLine: scrollToSourceLine,
+    revealSourceLine: revealSourceLine,
     find: findInPage,
     findNext: findNext,
     clearFind: clearFind,

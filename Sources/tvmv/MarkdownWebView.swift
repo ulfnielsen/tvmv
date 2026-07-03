@@ -290,6 +290,33 @@ final class MarkdownWebController {
         await run(js)
     }
 
+    // MARK: Sourcepos sync (editor <-> preview mapping via data-sourcepos)
+
+    /// Source line of the topmost visible rendered block, or nil before the
+    /// first sourcepos render.
+    func topVisibleSourceLine() async -> Int? {
+        guard let value = await evaluate("window.tvmv.topVisibleSourceLine()") as? NSNumber else {
+            return nil
+        }
+        return value.intValue
+    }
+
+    /// Scroll the block containing `line` to the top of the preview.
+    func scrollToSourceLine(_ line: Int) async {
+        await run("window.tvmv.scrollToSourceLine(\(line));")
+    }
+
+    /// Scroll the block containing `line` into view only if it is offscreen.
+    func revealSourceLine(_ line: Int) async {
+        await run("window.tvmv.revealSourceLine(\(line));")
+    }
+
+    /// Move keyboard focus to the web view (leaving edit mode).
+    func focus() {
+        guard let webView else { return }
+        webView.window?.makeFirstResponder(webView)
+    }
+
     // MARK: JS helpers
 
     @discardableResult
