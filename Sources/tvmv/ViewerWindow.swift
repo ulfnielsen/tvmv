@@ -54,6 +54,10 @@ struct ViewerWindow: View {
             }
         }
         .background { WindowChrome(color: model.chromeColor) }
+        .background { WindowCloseGuard(
+            isDirty: { model.isDirty },
+            save: { model.save(); return !model.isDirty }
+        ) }
         .navigationTitle(fileURL?.lastPathComponent ?? "Untitled")
         .onChange(of: selection) { _, new in
             if let new, let item = model.outline.first(where: { $0.id == new }) {
