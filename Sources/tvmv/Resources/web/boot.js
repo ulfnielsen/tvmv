@@ -140,6 +140,10 @@
       var div = document.createElement("div");
       div.className = "mermaid";
       div.textContent = src;
+      // Carry the source mapping over so editor/preview sync (scroll, click)
+      // still sees the diagram block after the <pre> is replaced.
+      var sp = pre ? pre.getAttribute("data-sourcepos") : null;
+      if (sp) div.setAttribute("data-sourcepos", sp);
       if (pre && pre.parentNode) {
         pre.parentNode.replaceChild(div, pre);
       }
@@ -380,6 +384,21 @@
       el.scrollIntoView({ block: "center" });
     }
   }
+
+  /* ---- preview -> editor click sync ------------------------------------ */
+  // A click on a rendered block reports its source line so the app can jump
+  // the editor there. The native side ignores it unless the editor pane is
+  // open. Clicks on links keep their normal navigation behavior.
+
+  document.addEventListener("click", function (ev) {
+    var target = ev.target;
+    if (!target || typeof target.closest !== "function") return;
+    if (target.closest("a")) return;
+    var el = target.closest("[data-sourcepos]");
+    if (!el) return;
+    var line = _sourceposStart(el);
+    if (line !== null) post({ type: "sourceClick", line: line });
+  });
 
   /* ---- public: find in page ------------------------------------------- */
   // Uses the CSS Custom Highlight API (no DOM mutation, so KaTeX/Mermaid and

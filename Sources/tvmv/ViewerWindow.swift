@@ -111,7 +111,8 @@ struct ViewerWindow: View {
                 onOutline: { items in model.outline = items },
                 onRenderComplete: { },
                 onError: { msg in model.errorMessage = msg },
-                onReady: { model.pageReady() }
+                onReady: { model.pageReady() },
+                onSourceClick: { line in model.previewClicked(line: line) }
             ),
             onMakeController: { controller in model.attach(controller: controller) }
         )

@@ -160,7 +160,10 @@ to throw. Save bypasses the SwiftUI document machinery entirely and writes via
 
 ## Out of scope (v1)
 
-- Preview→editor scroll sync; find (⌘F) in the editor (stays preview-only);
+- Preview→editor *scroll* sync (added post-v1: clicking a rendered block
+  jumps the editor to its source line while the split is open — a discrete
+  action with no feedback-loop risk, unlike continuous scroll coupling);
+  find (⌘F) in the editor (stays preview-only);
   outline clicks moving the editor; editor syntax highlighting; autosave;
   editor font preferences; any QuickLook changes.
 

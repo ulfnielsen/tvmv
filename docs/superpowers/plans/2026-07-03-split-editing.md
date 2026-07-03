@@ -1348,6 +1348,7 @@ Added during the final review (validate the review fixes):
 16. **⌘Q immediately after the first-ever keystroke** in a freshly opened window → the save prompt must still appear.
 17. **Save onto a read-only file** (`chmod 444`): Save Failed alert, stays dirty; closing the window and choosing "Save" must keep the window open.
 18. **Banner + find bar together:** with the banner showing, press ⌘F — both must remain usable (known cosmetic overlap top-right; judge acceptability).
+19. **Click-to-jump:** with the split open, click a paragraph / list item / table / mermaid diagram in the preview → editor scrolls to that block's first line, cursor placed, editor focused. With the editor closed, clicks select text and links open normally.
 
 - [ ] **Step 4: Fix anything that failed** (each fix: reproduce → fix → re-verify → its own commit), then re-run the full suite:
 

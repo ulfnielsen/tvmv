@@ -11,6 +11,9 @@ struct MarkdownWebViewCallbacks {
     /// Fired when the template page finishes loading (boot.js is live and the
     /// `window.tvmv` API is callable). The owner renders content on this signal.
     var onReady: (@MainActor () -> Void)?
+    /// Fired when the user clicks a rendered block; carries the block's
+    /// 1-based source line (from data-sourcepos) for preview→editor jumps.
+    var onSourceClick: (@MainActor (Int) -> Void)?
 }
 
 /// NSViewRepresentable wrapping a WKWebView that hosts the markdown renderer.
@@ -106,6 +109,11 @@ struct MarkdownWebView: NSViewRepresentable {
 
             case "renderComplete":
                 callbacks.onRenderComplete?()
+
+            case "sourceClick":
+                if let line = dict["line"] as? Int {
+                    callbacks.onSourceClick?(line)
+                }
 
             case "error":
                 let msg = dict["message"] as? String ?? "Unknown error"

@@ -147,6 +147,15 @@ final class ViewerModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
+    /// Preview click: jump the editor to the clicked block's source line and
+    /// hand it focus. No-op while the editor pane is closed, so plain viewing
+    /// keeps its normal click behavior (selection, links).
+    func previewClicked(line: Int) {
+        guard isEditing, let editor = editorController else { return }
+        editor.scrollToLine(line, placeCursor: true)
+        editor.focus()
+    }
+
     /// Cursor moved: bring its block into the preview only if offscreen.
     func editorCursorMoved() {
         guard isEditing else { return }
