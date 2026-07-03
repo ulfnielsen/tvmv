@@ -1,0 +1,18 @@
+/* tvmv editor page — chrome around CodeMirror. Theme + typography arrive via
+   applyStyle() as CSS custom properties / data-theme, mirroring app.css. */
+
+:root {
+  --tvmv-editor-mono: Menlo, monospace;
+  --tvmv-editor-size: 13px;
+}
+
+html, body { height: 100%; margin: 0; }
+#editor { height: 100%; }
+
+.cm-editor { height: 100%; font-size: var(--tvmv-editor-size); }
+.cm-editor .cm-content, .cm-editor .cm-gutters {
+  font-family: var(--tvmv-editor-mono);
+}
+.cm-editor .cm-content { padding: 12px 0; }
+.cm-editor .cm-line { padding: 0 12px; }
+.cm-editor.cm-focused { outline: none; }
