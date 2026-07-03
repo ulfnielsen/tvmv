@@ -18,7 +18,8 @@ struct ViewerWindow: View {
     init(document: MarkdownDocument, fileURL: URL?) {
         self.document = document
         self.fileURL = fileURL
-        _model = StateObject(wrappedValue: ViewerModel(text: document.text, fileURL: fileURL))
+        _model = StateObject(wrappedValue: ViewerModel(
+            text: document.text, fileURL: fileURL, encoding: document.encodingUsed))
     }
 
     var body: some View {
@@ -32,8 +33,25 @@ struct ViewerWindow: View {
             .scrollContentBackground(model.chromeColor == nil ? .automatic : .hidden)
             .background(model.chromeColor.map { Color(nsColor: $0) } ?? .clear)
         } detail: {
-            webView
-                .overlay(alignment: .topTrailing) { if showFind { findBar } }
+            HSplitView {
+                if model.isEditing {
+                    editorPane
+                        .frame(minWidth: 280,
+                               idealWidth: settings.editorPaneWidth > 0
+                                   ? CGFloat(settings.editorPaneWidth) : nil)
+                        .overlay(alignment: .top) {
+                            if model.externalChangePending { externalChangeBanner }
+                        }
+                        .background(GeometryReader { geo in
+                            Color.clear.onChange(of: geo.size.width) { _, w in
+                                settings.editorPaneWidth = Double(w)
+                            }
+                        })
+                }
+                webView
+                    .frame(minWidth: 320)
+                    .overlay(alignment: .topTrailing) { if showFind { findBar } }
+            }
         }
         .background { WindowChrome(color: model.chromeColor) }
         .navigationTitle(fileURL?.lastPathComponent ?? "Untitled")
@@ -55,6 +73,14 @@ struct ViewerWindow: View {
             model.startWatching()
         }
         .onDisappear { model.stopWatching() }
+        .alert("Save Failed", isPresented: Binding(
+            get: { model.saveError != nil },
+            set: { if !$0 { model.saveError = nil } }
+        )) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text(model.saveError ?? "")
+        }
         // Publish this window's command actions to the menu only while it is the
         // focused scene — so Find/Print/Reload/Toggle-Outline hit just this window.
         .focusedSceneValue(\.viewerCommands, ViewerCommands(
@@ -81,6 +107,35 @@ struct ViewerWindow: View {
             ),
             onMakeController: { controller in model.attach(controller: controller) }
         )
+    }
+
+    private var editorPane: some View {
+        EditorPane(
+            text: model.text,
+            onTextChange: { model.textEdited($0) },
+            onCursorMove: { model.editorCursorMoved() },
+            onScroll: { model.editorScrolled() },
+            onMakeController: { model.attach(editor: $0) }
+        )
+    }
+
+    private var externalChangeBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text("File changed on disk")
+                .font(.caption)
+            Spacer()
+            Button("Reload (discards edits)") {
+                Task { await model.discardAndReload() }
+            }
+            .font(.caption)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+        .padding(8)
     }
 
     private var findBar: some View {

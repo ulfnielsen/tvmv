@@ -17,12 +17,14 @@ final class AppSettings: ObservableObject {
     @Published var theme: Theme { didSet { d.set(theme.rawValue, forKey: K.theme) } }
     @Published var showOutline: Bool { didSet { d.set(showOutline, forKey: K.showOutline) } }
     @Published var customCSSPath: String { didSet { d.set(customCSSPath, forKey: K.customCSSPath) } }
+    @Published var editorPaneWidth: Double { didSet { d.set(editorPaneWidth, forKey: K.editorPaneWidth) } }
 
     private let d: UserDefaults
     private enum K {
         static let bodyFont = "bodyFont", monoFont = "monoFont", baseSize = "baseSize"
         static let measure = "measure", fullWidth = "fullWidth", theme = "theme", showOutline = "showOutline"
         static let customCSSPath = "customCSSPath"
+        static let editorPaneWidth = "editorPaneWidth"
     }
 
     /// The custom-CSS file chosen in Settings, or `nil` for no override (the
@@ -43,6 +45,7 @@ final class AppSettings: ObservableObject {
         theme = Theme(rawValue: defaults.string(forKey: K.theme) ?? "auto") ?? .auto
         showOutline = defaults.object(forKey: K.showOutline) as? Bool ?? true
         customCSSPath = defaults.string(forKey: K.customCSSPath) ?? ""
+        editorPaneWidth = defaults.object(forKey: K.editorPaneWidth) as? Double ?? 0
     }
 
     func increaseFontSize() { baseSize = min(baseSize + 1, 48) }
