@@ -4,14 +4,18 @@ import cmark_gfm_extensions
 /// Parse GitHub-Flavored Markdown and render it to an HTML string.
 ///
 /// Enables the GFM core extensions: table, strikethrough, autolink, tasklist.
-func renderHTML(_ markdown: String) -> String {
+/// - Parameter sourcePos: When true, block elements carry `data-sourcepos="line:col-line:col"`
+///   attributes for editor/preview sync. Default false keeps output byte-identical for QuickLook.
+func renderHTML(_ markdown: String, sourcePos: Bool = false) -> String {
     // Register the GFM core extensions exactly once per process. This populates
     // the global registry queried by `cmark_find_syntax_extension`. Idempotent.
     cmark_gfm_core_extensions_ensure_registered()
 
     // Options bitmask. CMARK_OPT_DEFAULT (0) keeps the safe default (raw HTML and
     // javascript:/data: links stripped). Use CMARK_OPT_UNSAFE to allow raw HTML.
-    let options = CMARK_OPT_DEFAULT
+    // CMARK_OPT_SOURCEPOS adds data-sourcepos="line:col-line:col" to block
+    // elements — the anchor the app's editor/preview sync maps through.
+    let options = sourcePos ? CMARK_OPT_SOURCEPOS : CMARK_OPT_DEFAULT
 
     guard let parser = cmark_parser_new(options) else { return "" }
     defer { cmark_parser_free(parser) }

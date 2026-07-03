@@ -25,4 +25,15 @@ final class MarkdownRendererTests: XCTestCase {
         // Anchors are assigned in JS; cmark-gfm emits none.
         XCTAssertFalse(renderHTML("# Hello").contains("<h1 id"))
     }
+    func testSourcePosEmitsDataSourcepos() {
+        let html = renderHTML("# Title\n\npara\n\n| a |\n|---|\n| 1 |\n", sourcePos: true)
+        XCTAssertTrue(html.contains("<h1 data-sourcepos=\"1:1-1:7\">"))
+        XCTAssertTrue(html.contains("<p data-sourcepos=\"3:1-3:4\">"))
+        // GFM extension blocks must carry sourcepos too (spec risk check).
+        XCTAssertTrue(html.contains("<table data-sourcepos="))
+    }
+    func testSourcePosDefaultsOffAndOutputUnchanged() {
+        // QuickLook compiles this file directly; the default must not change output.
+        XCTAssertFalse(renderHTML("# Title\n\npara").contains("data-sourcepos"))
+    }
 }
