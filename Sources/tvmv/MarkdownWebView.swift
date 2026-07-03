@@ -186,18 +186,18 @@ final class MarkdownWebController {
     // MARK: Content
 
     func setContent(bodyHTML: String, docBaseHref: String) async {
-        let js = "window.tvmv.render(\(Self.jsString(bodyHTML)), \(Self.jsString(docBaseHref)));"
+        let js = "window.tvmv.render(\(JSString.literal(bodyHTML)), \(JSString.literal(docBaseHref)));"
         await run(js)
     }
 
     func applyStyle(json: String) async {
-        let js = "window.tvmv.applyStyle(\(Self.jsString(json)));"
+        let js = "window.tvmv.applyStyle(\(JSString.literal(json)));"
         await run(js)
     }
 
     /// Inject the user's custom stylesheet (overrides the theme). Empty clears it.
     func setUserCSS(_ css: String) async {
-        let js = "window.tvmv.applyUserCSS(\(Self.jsString(css)));"
+        let js = "window.tvmv.applyUserCSS(\(JSString.literal(css)));"
         await run(js)
     }
 
@@ -208,7 +208,7 @@ final class MarkdownWebController {
     }
 
     func scrollToAnchor(_ anchor: String) async {
-        let js = "window.tvmv.scrollToAnchor(\(Self.jsString(anchor)));"
+        let js = "window.tvmv.scrollToAnchor(\(JSString.literal(anchor)));"
         await run(js)
     }
 
@@ -221,7 +221,7 @@ final class MarkdownWebController {
 
     @discardableResult
     func find(_ string: String) async -> FindResult {
-        await findCall("window.tvmv.find(\(Self.jsString(string)))")
+        await findCall("window.tvmv.find(\(JSString.literal(string)))")
     }
 
     @discardableResult
@@ -340,14 +340,5 @@ final class MarkdownWebController {
 
     private func run(_ js: String) async {
         _ = await evaluate(js)
-    }
-
-    /// JSON-encode a Swift string into a safe JS string literal.
-    private static func jsString(_ value: String) -> String {
-        if let data = try? JSONEncoder().encode(value),
-           let json = String(data: data, encoding: .utf8) {
-            return json
-        }
-        return "\"\""
     }
 }

@@ -1,14 +1,6 @@
 import SwiftUI
 import AppKit
 
-/// A captured editor location, used to restore cursor + scroll when the
-/// editor pane is closed and reopened (the NSTextView itself is destroyed
-/// with the pane; the position outlives it in ViewerModel).
-struct EditorPosition {
-    var cursorOffset: Int   // UTF-16, clamped on restore
-    var topLine: Int        // 1-based
-}
-
 /// Imperative surface for the editor pane, mirroring MarkdownWebController.
 /// All offsets are UTF-16 (NSTextView's native unit); lines are 1-based
 /// (cmark sourcepos's unit). LineIndex converts between them.
