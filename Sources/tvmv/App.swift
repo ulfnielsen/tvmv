@@ -3,15 +3,14 @@ import AppKit
 
 /// Routes app termination through each dirty window's close prompt, so ⌘Q
 /// can't silently drop unsaved edits (windowShouldClose is not consulted
-/// during termination otherwise). Besides `isDocumentEdited` (the model's
-/// dirty flag), it also asks the close-guard proxy's `needsFlow` — a window
-/// with an open editor can hold keystrokes still inside the editor's 100 ms
-/// debounce, invisible to the dirty flag until flushed.
+/// during termination otherwise). Windows are found via the close-guard
+/// proxy's `needsFlow` (dirty, or an open editor that can hold keystrokes
+/// still inside its 100 ms debounce). `isDocumentEdited` is deliberately
+/// never consulted or set — see WindowCloseGuard's doc comment.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         for window in sender.windows {
-            let guardedNeedsFlow = (window.delegate as? CloseGuardDelegate)?.needsFlow() == true
-            guard window.isDocumentEdited || guardedNeedsFlow else { continue }
+            guard (window.delegate as? CloseGuardDelegate)?.needsFlow() == true else { continue }
             window.makeKeyAndOrderFront(nil)
             let mayClose = window.delegate?.windowShouldClose?(window) ?? true
             if !mayClose { return .terminateCancel }

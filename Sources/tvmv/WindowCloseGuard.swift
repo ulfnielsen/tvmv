@@ -2,8 +2,13 @@ import SwiftUI
 import AppKit
 
 /// Attaches a Save/Don't Save/Cancel prompt to the hosting window's close
-/// button when there are unsaved edits, and mirrors the dirty state into the
-/// titlebar dot (`isDocumentEdited`).
+/// button when there are unsaved edits.
+///
+/// Deliberately does NOT touch `window.isDocumentEdited`: in a
+/// `DocumentGroup(viewing:)` app the document is unwritable, and marking the
+/// window edited recruits AppKit/SwiftUI's own unsaved-document machinery,
+/// which then fails to autosave and stacks its own "cannot autosave" alerts
+/// around ours. The dirty indicator is a SwiftUI `navigationSubtitle` instead.
 ///
 /// SwiftUI owns the window's delegate, so we install a proxy that intercepts
 /// only `windowShouldClose` and forwards everything else to the original.
@@ -35,14 +40,12 @@ struct WindowCloseGuard: NSViewRepresentable {
         proxy.flush = flush
         proxy.isDirty = isDirty
         proxy.save = save
-        let dirty = isDirty()
         DispatchQueue.main.async {
             guard let window = nsView.window else { return }
             if window.delegate !== proxy {
                 proxy.original = window.delegate
                 window.delegate = proxy
             }
-            window.isDocumentEdited = dirty
         }
     }
 }

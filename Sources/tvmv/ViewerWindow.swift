@@ -65,6 +65,10 @@ struct ViewerWindow: View {
             save: { model.save(); return !model.isDirty }
         ) }
         .navigationTitle(fileURL?.lastPathComponent ?? "Untitled")
+        // Dirty indicator. Deliberately NOT window.isDocumentEdited: marking a
+        // DocumentGroup(viewing:) window "edited" drags in AppKit's autosave
+        // machinery, which can't save this document and alerts about it.
+        .navigationSubtitle(model.isDirty ? "Edited" : "")
         .onChange(of: selection) { _, new in
             if let new, let item = model.outline.first(where: { $0.id == new }) {
                 model.scrollTo(item)
