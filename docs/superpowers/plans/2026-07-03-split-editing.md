@@ -1340,6 +1340,15 @@ Verify each; check off only what actually passed:
 11. **Divider persistence:** drag the split divider, quit, reopen, ⌘E → width restored.
 12. **Menus:** Save disabled when not dirty; Toggle Editing disabled on no window; ⌘R, ⌘F, ⌘P, ⌘⇧0 all still work.
 
+Added during the final review (validate the review fixes):
+
+13. **Hidden-banner path:** edit → ⌘E off → append to the file externally → the banner must appear over the *preview*; ⌘R while dirty must show it too (never a silent no-op).
+14. **Toggle-off during debounce:** type a character and press ⌘E within ~¼ s in the mermaid/KaTeX doc → preview must not jump.
+15. **Undo across reload:** clean-reload externally while the editor is open, then ⌘Z; and discard-reload then ⌘Z — nothing may resurrect or garble.
+16. **⌘Q immediately after the first-ever keystroke** in a freshly opened window → the save prompt must still appear.
+17. **Save onto a read-only file** (`chmod 444`): Save Failed alert, stays dirty; closing the window and choosing "Save" must keep the window open.
+18. **Banner + find bar together:** with the banner showing, press ⌘F — both must remain usable (known cosmetic overlap top-right; judge acceptability).
+
 - [ ] **Step 4: Fix anything that failed** (each fix: reproduce → fix → re-verify → its own commit), then re-run the full suite:
 
 Run: `env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`
