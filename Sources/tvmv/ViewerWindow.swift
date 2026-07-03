@@ -115,7 +115,10 @@ struct ViewerWindow: View {
             callbacks: MarkdownWebViewCallbacks(
                 onOutline: { items in model.outline = items },
                 onRenderComplete: { },
-                onError: { msg in model.errorMessage = msg },
+                // While editing, half-typed mermaid/math makes nearly every
+                // debounced re-render reject transiently — suppress the banner
+                // there (mermaid draws its own in-place error graphic anyway).
+                onError: { msg in if !model.isEditing { model.errorMessage = msg } },
                 onReady: { model.pageReady() },
                 onSourceClick: { line in model.previewClicked(line: line) }
             ),

@@ -1088,6 +1088,20 @@ Run: `open -a ~/Applications/TVMV.app /private/tmp/claude-501/-Users-ulfnielsen-
 26. **External reload while editing (clean):** editor content replaces, ⌘Z does NOT resurrect the old text.
 27. **Dead-bridge save:** none observable normally — skip unless a crash occurs; the headless test covers the fallback.
 
+Added by the final review (validate the review fixes):
+
+28. **⌘E-off flush:** type rapidly and hit ⌘E within the same beat — the last characters must survive into the preview and a subsequent ⌘S.
+29. **⌘W right after typing:** close the window immediately after a keystroke — the prompt must appear and Save must capture everything.
+30. **setState listener survival:** external clean reload while editing, then keep typing and scrolling — sync must still flow, and ⌘Z must not resurrect pre-reload text.
+31. **Rapid ⌘E off/on ×10:** position restore correct, no double-seed flash, no stuck focus (a second ⌘E during the ms-scale close-flush is deliberately swallowed — press again).
+32. **Edit menu clipboard/undo:** ⌘Z/⇧⌘Z via the menu (not just keys), plus ⌘X/C/V/A in the editor.
+33. **Broken bundle probe:** temporarily rename `codemirror.bundle.js`, ⌘E → the red error banner must show an "Editor: …" message; restore the file.
+34. **Mermaid banner flap:** type inside a mermaid fence — the error banner must NOT flap while editing (suppressed); mermaid's in-place error graphic still shows.
+35. **⌘S within ~100 ms of the very first keystroke** on a clean doc — nothing lost (canSave now enabled while editing).
+36. **Editor process hygiene:** open/close the pane ×10; editor web-content processes in Activity Monitor return to baseline.
+37. **Multi-window ⌘Q:** two dirty windows → one prompt per ⌘Q press (accepted UX); Cancel mid-sequence leaves both windows consistent.
+38. **Read-only save through the close flow:** `chmod 444` the file, dirty-close, choose Save → Save Failed alert, window stays; a second ⌘W re-runs the flow.
+
 - [ ] **Step 4: Fix anything that failed** (each fix: reproduce → fix → re-verify → own commit), then:
 
 Run: `env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`

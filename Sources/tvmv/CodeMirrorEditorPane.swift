@@ -18,8 +18,8 @@ struct EditorBridgeCallbacks {
     var onCursorMoved: (@MainActor (Int, Int) -> Void)?
     /// 1-based first visible line
     var onScrolled: (@MainActor (Int) -> Void)?
-    /// Editor page failed to load (spec: surface via the existing
-    /// errorMessage path; typing into a dead pane visibly does nothing).
+    /// Editor page failed to load, or an uncaught JS error occurred — shown
+    /// to the user via the window's error banner.
     var onError: (@MainActor (String) -> Void)?
 }
 
