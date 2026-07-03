@@ -1,0 +1,114 @@
+import XCTest
+@testable import tvmv
+
+@MainActor
+final class ViewerModelEditingTests: XCTestCase {
+    private func tempFile(_ contents: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tvmv-test-\(UUID().uuidString).md")
+        try contents.data(using: .utf8)!.write(to: url)
+        addTeardownBlock { try? FileManager.default.removeItem(at: url) }
+        return url
+    }
+
+    func testTextEditedSetsDirtyAndSaveWritesAndClearsIt() throws {
+        let url = try tempFile("# hello\n")
+        let model = ViewerModel(text: "# hello\n", fileURL: url, encoding: .utf8)
+        XCTAssertFalse(model.isDirty)
+        model.textEdited("# hello world\n")
+        XCTAssertTrue(model.isDirty)
+        model.save()
+        XCTAssertFalse(model.isDirty)
+        XCTAssertNil(model.saveError)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "# hello world\n")
+    }
+
+    func testEditingBackToSavedTextClearsDirty() throws {
+        let url = try tempFile("a\n")
+        let model = ViewerModel(text: "a\n", fileURL: url, encoding: .utf8)
+        model.textEdited("ab\n")
+        model.textEdited("a\n")
+        XCTAssertFalse(model.isDirty)
+    }
+
+    func testReloadIgnoresOwnSaveEcho() async throws {
+        // After save(), the FileWatcher will fire and call reload(); the disk
+        // content equals our text, so nothing may change (no clobber loop).
+        let url = try tempFile("a\n")
+        let model = ViewerModel(text: "a\n", fileURL: url, encoding: .utf8)
+        model.textEdited("b\n")
+        model.save()
+        await model.reload()
+        XCTAssertEqual(model.text, "b\n")
+        XCTAssertFalse(model.isDirty)
+        XCTAssertFalse(model.externalChangePending)
+    }
+
+    func testExternalChangeWhileDirtySetsPendingAndKeepsEdits() async throws {
+        let url = try tempFile("original\n")
+        let model = ViewerModel(text: "original\n", fileURL: url, encoding: .utf8)
+        model.textEdited("edited\n")
+        try "external\n".data(using: .utf8)!.write(to: url)
+        await model.reload()
+        XCTAssertTrue(model.externalChangePending)
+        XCTAssertEqual(model.text, "edited\n")   // edits never clobbered
+        XCTAssertTrue(model.isDirty)
+    }
+
+    func testExternalChangeWhileCleanUpdatesText() async throws {
+        let url = try tempFile("original\n")
+        let model = ViewerModel(text: "original\n", fileURL: url, encoding: .utf8)
+        try "external\n".data(using: .utf8)!.write(to: url)
+        await model.reload()
+        XCTAssertEqual(model.text, "external\n")
+        XCTAssertFalse(model.isDirty)
+        XCTAssertFalse(model.externalChangePending)
+    }
+
+    func testDiscardAndReloadDropsEditsAndClearsPending() async throws {
+        let url = try tempFile("original\n")
+        let model = ViewerModel(text: "original\n", fileURL: url, encoding: .utf8)
+        model.textEdited("edited\n")
+        try "external\n".data(using: .utf8)!.write(to: url)
+        await model.reload()
+        XCTAssertTrue(model.externalChangePending)
+        await model.discardAndReload()
+        XCTAssertEqual(model.text, "external\n")
+        XCTAssertFalse(model.isDirty)
+        XCTAssertFalse(model.externalChangePending)
+    }
+
+    func testDiscardAndReloadWhenDiskEqualsLastSavedClearsFlags() async throws {
+        // External process reverted the file to exactly what we last saved
+        // (e.g. git checkout): discard must still clear flags and adopt it.
+        let url = try tempFile("original\n")
+        let model = ViewerModel(text: "original\n", fileURL: url, encoding: .utf8)
+        model.textEdited("edited\n")
+        XCTAssertTrue(model.isDirty)
+        await model.discardAndReload()
+        XCTAssertEqual(model.text, "original\n")
+        XCTAssertFalse(model.isDirty)
+        XCTAssertFalse(model.externalChangePending)
+    }
+
+    func testSaveFailureSetsErrorAndStaysDirty() throws {
+        let missingDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tvmv-missing-\(UUID().uuidString)")
+        let url = missingDir.appendingPathComponent("f.md")   // parent doesn't exist
+        let model = ViewerModel(text: "a", fileURL: url, encoding: .utf8)
+        model.textEdited("b")
+        model.save()
+        XCTAssertNotNil(model.saveError)
+        XCTAssertTrue(model.isDirty)
+    }
+
+    func testSaveRoundTripsLatin1Encoding() throws {
+        let url = try tempFile("x")
+        let model = ViewerModel(text: "café\n", fileURL: url, encoding: .isoLatin1)
+        model.textEdited("café olé\n")
+        model.save()
+        let decoded = MarkdownText.decode(try Data(contentsOf: url))
+        XCTAssertEqual(decoded.text, "café olé\n")
+        XCTAssertEqual(decoded.encoding, .isoLatin1)
+    }
+}
