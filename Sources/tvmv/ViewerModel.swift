@@ -25,7 +25,10 @@ final class ViewerModel: ObservableObject {
 
     private var lastSavedText: String
     private var controller: MarkdownWebController?
-    private var editorController: EditorController?
+    private var editorBridge: EditorBridge?
+    /// Latest cursor/scroll reported by the editor's events; makes position
+    /// capture on ⌘E-off synchronous even though the editor is async.
+    private var lastEditorPosition = EditorPosition(cursorOffset: 0, topLine: 1)
     /// Where the editor was when its pane last closed, for exact restore.
     private var savedEditorPosition: EditorPosition?
     /// Preview's top source line when the editor pane last closed; if the
@@ -56,16 +59,39 @@ final class ViewerModel: ObservableObject {
 
     // MARK: Editing
 
-    func attach(editor: EditorController) {
-        editorController = editor
-        Task { await positionEditorOnOpen() }
+    func attach(editor: EditorBridge) {
+        editorBridge = editor
+        // Positioning waits for the page's `ready` event (editorReady()).
+    }
+
+    /// The editor page is live: seed it with the document, style, and the
+    /// restore-vs-reanchor position, then hand it focus.
+    func editorReady() {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.editorCloseSync?.value
+            guard let bridge = self.editorBridge else { return }
+            await bridge.setText(self.text, resetHistory: true)
+            await bridge.applyStyle(json: AppSettings.shared.editorStyleJSON)
+            let previewLine = await self.controller?.topVisibleSourceLine()
+            if let saved = self.savedEditorPosition,
+               previewLine == self.previewTopLineAtEditorClose {
+                await bridge.restore(saved)
+                self.lastEditorPosition = saved
+            } else {
+                let line = previewLine ?? 1
+                await bridge.scrollToLine(line, placeCursor: true)
+                self.lastEditorPosition = EditorPosition(cursorOffset: 0, topLine: line)
+            }
+            bridge.focus()
+        }
     }
 
     /// The editor pane is closing (⌘E off): remember where it was, and where
     /// the preview was, so re-entry can decide between restore and re-anchor.
     func editorClosed() {
-        savedEditorPosition = editorController?.capturePosition()
-        editorController = nil
+        savedEditorPosition = lastEditorPosition
+        editorBridge = nil
         renderDebounce?.cancel()
         editorCloseSync = Task { [weak self] in
             guard let self else { return }
@@ -90,24 +116,10 @@ final class ViewerModel: ObservableObject {
         } else {
             saveError = nil
             isEditing = true
-            // EditorPane's makeNSView calls attach(editor:), which positions
-            // and focuses; nothing more to do here.
+            // CodeMirrorEditorPane's makeNSView calls attach(editor:); the
+            // page's `ready` event then calls editorReady(), which positions
+            // and focuses. Nothing more to do here.
         }
-    }
-
-    /// Entry positioning: restore the exact previous spot when the preview
-    /// didn't move while the editor was hidden; otherwise (or on first open)
-    /// anchor to the preview's topmost visible source line.
-    private func positionEditorOnOpen() async {
-        await editorCloseSync?.value
-        guard let editor = editorController else { return }
-        let previewLine = await controller?.topVisibleSourceLine()
-        if let saved = savedEditorPosition, previewLine == previewTopLineAtEditorClose {
-            editor.restore(saved)
-        } else {
-            editor.scrollToLine(previewLine ?? 1, placeCursor: true)
-        }
-        editor.focus()
     }
 
     /// Editor keystrokes: adopt the text, track dirtiness, and re-render the
@@ -129,21 +141,40 @@ final class ViewerModel: ObservableObject {
         previewNeedsRender = false
         await renderCurrent()
         try? await Task.sleep(nanoseconds: 60_000_000) // let layout settle
-        if let editor = editorController {
-            await controller?.scrollToSourceLine(editor.topVisibleLine())
+        if isEditing {
+            await controller?.scrollToSourceLine(lastEditorPosition.topLine)
         }
     }
 
-    /// Editor scrolled: keep the preview's top aligned (debounced).
-    func editorScrolled() {
+    /// Editor event: text changed (already debounced ~100 ms page-side).
+    func editorTextChanged(_ newText: String) {
+        textEdited(newText)
+    }
+
+    /// Editor event: scrolled. Keep the preview's top aligned (debounced).
+    func editorScrolled(topLine: Int) {
+        lastEditorPosition.topLine = topLine
         guard isEditing else { return }
         scrollSyncDebounce?.cancel()
         let work = DispatchWorkItem { [weak self] in
-            guard let self, let editor = self.editorController else { return }
-            let line = editor.topVisibleLine()
-            Task { @MainActor in await self.controller?.scrollToSourceLine(line) }
+            guard let self else { return }
+            Task { @MainActor in await self.controller?.scrollToSourceLine(topLine) }
         }
         scrollSyncDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    /// Editor event: cursor moved. Reveal its block in the preview only if
+    /// offscreen (debounced).
+    func editorCursorMoved(line: Int, offset: Int) {
+        lastEditorPosition.cursorOffset = offset
+        guard isEditing else { return }
+        cursorSyncDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            Task { @MainActor in await self.controller?.revealSourceLine(line) }
+        }
+        cursorSyncDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
@@ -151,22 +182,11 @@ final class ViewerModel: ObservableObject {
     /// hand it focus. No-op while the editor pane is closed, so plain viewing
     /// keeps its normal click behavior (selection, links).
     func previewClicked(line: Int) {
-        guard isEditing, let editor = editorController else { return }
-        editor.scrollToLine(line, placeCursor: true)
-        editor.focus()
-    }
-
-    /// Cursor moved: bring its block into the preview only if offscreen.
-    func editorCursorMoved() {
-        guard isEditing else { return }
-        cursorSyncDebounce?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            guard let self, let editor = self.editorController else { return }
-            let line = editor.cursorLine
-            Task { @MainActor in await self.controller?.revealSourceLine(line) }
+        guard isEditing, let bridge = editorBridge else { return }
+        Task {
+            await bridge.scrollToLine(line, placeCursor: true)
+            bridge.focus()
         }
-        cursorSyncDebounce = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     // MARK: Save
@@ -185,6 +205,22 @@ final class ViewerModel: ObservableObject {
         } catch {
             saveError = error.localizedDescription
         }
+    }
+
+    /// Pull the authoritative document from the editor into the model without
+    /// saving (covers keystrokes inside the page's 100 ms debounce window).
+    /// Falls back silently when the bridge is gone — the cached text is then
+    /// at worst <100 ms stale, in a scenario where the editor process died.
+    func flushEditorText() async {
+        if let bridge = editorBridge, let current = await bridge.getText() {
+            textEdited(current)
+        }
+    }
+
+    /// Flush, then save. ⌘S and the close flow's Save button use this.
+    func flushAndSave() async {
+        await flushEditorText()
+        save()
     }
 
     /// Called from MarkdownWebView's `onReady` (web view didFinish) — boot.js is live.
@@ -230,6 +266,7 @@ final class ViewerModel: ObservableObject {
     func applyStyle() async {
         guard isReady else { return }
         await controller?.applyStyle(json: AppSettings.shared.styleJSON)
+        await editorBridge?.applyStyle(json: AppSettings.shared.editorStyleJSON)
     }
 
     func startWatching() {
@@ -272,6 +309,13 @@ final class ViewerModel: ObservableObject {
     /// otherwise adopt the new text and re-render, preserving scroll.
     func reload(force: Bool = false) async {
         guard let url = fileURL, let data = try? Data(contentsOf: url) else { return }
+        // Adopt any keystrokes still inside the editor page's debounce window
+        // before judging dirtiness, or an external change racing a fresh
+        // keystroke would clobber it. Never on the force path: discard means
+        // the editor's unsaved content is intentionally being dropped.
+        if isEditing && !force {
+            await flushEditorText()
+        }
         let decoded = MarkdownText.decode(data).text
         if decoded == text && !force {
             // Buffer already matches disk. If we were dirty, the external
@@ -290,6 +334,12 @@ final class ViewerModel: ObservableObject {
         }
         text = decoded
         lastSavedText = decoded
+        if isEditing, let bridge = editorBridge {
+            // Programmatic replacement: fresh history so ⌘Z can't resurrect
+            // the pre-reload text. The resulting textChanged echo is a no-op
+            // (textEdited guards newText != text).
+            await bridge.setText(decoded, resetHistory: true)
+        }
         guard isReady, let controller else { return }
         let ratio = await controller.getScrollRatio()
         await renderCurrent()

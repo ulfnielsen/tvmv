@@ -124,4 +124,15 @@ final class ViewerModelEditingTests: XCTestCase {
         XCTAssertEqual(decoded.text, "café olé\n")
         XCTAssertEqual(decoded.encoding, .isoLatin1)
     }
+
+    func testFlushAndSaveWithoutBridgeSavesCachedText() async throws {
+        // The editor bridge is gone (pane closed / page dead): flushAndSave
+        // must still write the model's cached text rather than losing the save.
+        let url = try tempFile("# hello\n")
+        let model = ViewerModel(text: "# hello\n", fileURL: url, encoding: .utf8)
+        model.textEdited("# hello world\n")
+        await model.flushAndSave()
+        XCTAssertFalse(model.isDirty)
+        XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "# hello world\n")
+    }
 }

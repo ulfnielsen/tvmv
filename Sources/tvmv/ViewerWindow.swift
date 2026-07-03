@@ -119,12 +119,16 @@ struct ViewerWindow: View {
     }
 
     private var editorPane: some View {
-        EditorPane(
-            text: model.text,
-            onTextChange: { model.textEdited($0) },
-            onCursorMove: { model.editorCursorMoved() },
-            onScroll: { model.editorScrolled() },
-            onMakeController: { model.attach(editor: $0) }
+        CodeMirrorEditorPane(
+            appWebDir: WebResources.baseURL,
+            callbacks: EditorBridgeCallbacks(
+                onReady: { model.editorReady() },
+                onTextChanged: { model.editorTextChanged($0) },
+                onCursorMoved: { line, offset in model.editorCursorMoved(line: line, offset: offset) },
+                onScrolled: { line in model.editorScrolled(topLine: line) },
+                onError: { msg in model.errorMessage = msg }
+            ),
+            onMakeBridge: { model.attach(editor: $0) }
         )
     }
 

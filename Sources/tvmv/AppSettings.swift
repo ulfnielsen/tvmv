@@ -72,4 +72,14 @@ final class AppSettings: ObservableObject {
         let data = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
         return String(data: data, encoding: .utf8) ?? "{}"
     }
+
+    /// JSON payload for editor.js `applyStyle` — the editor pane needs only
+    /// the mono font, size, and resolved theme.
+    var editorStyleJSON: String {
+        let dict: [String: Any] = [
+            "monoFont": monoFont, "baseSize": baseSize, "theme": resolvedTheme
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
+        return String(data: data, encoding: .utf8) ?? "{}"
+    }
 }
