@@ -36,6 +36,7 @@ final class ViewerModel: ObservableObject {
     /// reopen so a fast close-then-open toggle never reads a stale value.
     private var editorCloseSync: Task<Void, Never>?
     private var renderDebounce: DispatchWorkItem?
+    private var previewNeedsRender = false
     private var scrollSyncDebounce: DispatchWorkItem?
     private var cursorSyncDebounce: DispatchWorkItem?
     private var watcher: FileWatcher?
@@ -65,8 +66,18 @@ final class ViewerModel: ObservableObject {
     func editorClosed() {
         savedEditorPosition = editorController?.capturePosition()
         editorController = nil
+        renderDebounce?.cancel()
         editorCloseSync = Task { [weak self] in
             guard let self else { return }
+            if self.previewNeedsRender {
+                // Flush the last edit's render before recording the preview
+                // position, preserving scroll so leaving edit mode never jumps.
+                let ratio = await self.controller?.getScrollRatio() ?? 0
+                await self.renderCurrent()
+                try? await Task.sleep(nanoseconds: 60_000_000) // let layout settle
+                await self.controller?.setScrollRatio(ratio)
+                self.previewNeedsRender = false
+            }
             self.previewTopLineAtEditorClose = await self.controller?.topVisibleSourceLine()
         }
         controller?.focus()
@@ -105,6 +116,7 @@ final class ViewerModel: ObservableObject {
         guard newText != text else { return }
         text = newText
         isDirty = (newText != lastSavedText)
+        previewNeedsRender = true
         renderDebounce?.cancel()
         let work = DispatchWorkItem { [weak self] in
             Task { @MainActor [weak self] in await self?.renderAfterEdit() }
@@ -114,6 +126,7 @@ final class ViewerModel: ObservableObject {
     }
 
     private func renderAfterEdit() async {
+        previewNeedsRender = false
         await renderCurrent()
         try? await Task.sleep(nanoseconds: 60_000_000) // let layout settle
         if let editor = editorController {
@@ -251,7 +264,15 @@ final class ViewerModel: ObservableObject {
     func reload(force: Bool = false) async {
         guard let url = fileURL, let data = try? Data(contentsOf: url) else { return }
         let decoded = MarkdownText.decode(data).text
-        if decoded == text && !force { return }             // our own save echoing back
+        if decoded == text && !force {
+            // Buffer already matches disk. If we were dirty, the external
+            // write caught up with our edits — nothing left unsaved.
+            if isDirty {
+                lastSavedText = decoded
+                isDirty = false
+            }
+            return
+        }
         if isDirty {
             externalChangePending = true                    // user decides; never clobber
             return

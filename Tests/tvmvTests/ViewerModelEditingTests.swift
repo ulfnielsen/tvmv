@@ -91,6 +91,19 @@ final class ViewerModelEditingTests: XCTestCase {
         XCTAssertFalse(model.externalChangePending)
     }
 
+    func testExternalWriteMatchingBufferClearsDirty() async throws {
+        let url = try tempFile("original\n")
+        let model = ViewerModel(text: "original\n", fileURL: url, encoding: .utf8)
+        model.textEdited("edited\n")
+        XCTAssertTrue(model.isDirty)
+        // An external writer saves exactly what our buffer holds.
+        try "edited\n".data(using: .utf8)!.write(to: url)
+        await model.reload()
+        XCTAssertFalse(model.isDirty)
+        XCTAssertFalse(model.externalChangePending)
+        XCTAssertEqual(model.text, "edited\n")
+    }
+
     func testSaveFailureSetsErrorAndStaysDirty() throws {
         let missingDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("tvmv-missing-\(UUID().uuidString)")

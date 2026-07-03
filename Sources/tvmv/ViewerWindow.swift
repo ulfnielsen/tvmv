@@ -39,9 +39,6 @@ struct ViewerWindow: View {
                         .frame(minWidth: 280,
                                idealWidth: settings.editorPaneWidth > 0
                                    ? CGFloat(settings.editorPaneWidth) : nil)
-                        .overlay(alignment: .top) {
-                            if model.externalChangePending { externalChangeBanner }
-                        }
                         .background(GeometryReader { geo in
                             Color.clear.onChange(of: geo.size.width) { _, w in
                                 settings.editorPaneWidth = Double(w)
@@ -50,6 +47,9 @@ struct ViewerWindow: View {
                 }
                 webView
                     .frame(minWidth: 320)
+                    .overlay(alignment: .top) {
+                        if model.externalChangePending { externalChangeBanner }
+                    }
                     .overlay(alignment: .topTrailing) { if showFind { findBar } }
             }
         }

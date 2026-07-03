@@ -116,6 +116,9 @@ struct EditorPane: NSViewRepresentable {
         guard let tv = scroll.documentView as? NSTextView else { return }
         if tv.string != text {
             tv.string = text
+            // Drop undo history: undoing across an external reload / discard
+            // would resurrect stale text over the replaced buffer.
+            tv.undoManager?.removeAllActions()
         }
     }
 
