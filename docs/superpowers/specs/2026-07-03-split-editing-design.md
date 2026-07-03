@@ -144,7 +144,7 @@ to throw. Save bypasses the SwiftUI document machinery entirely and writes via
 |---|---|
 | Save write fails | Alert, stays dirty |
 | External edit while dirty | Banner, user chooses |
-| Sourcepos lookup misses (line in no block) | Fall back to nearest following block, else ratio |
+| Sourcepos lookup misses (line in no block) | Fall back to nearest preceding block, else the first block (amended during implementation: anchoring above reads better than below) |
 | JS bridge unavailable (page not ready) | Sync calls no-op, as existing controller calls do |
 
 ## Testing

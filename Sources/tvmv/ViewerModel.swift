@@ -266,10 +266,12 @@ final class ViewerModel: ObservableObject {
         let decoded = MarkdownText.decode(data).text
         if decoded == text && !force {
             // Buffer already matches disk. If we were dirty, the external
-            // write caught up with our edits — nothing left unsaved.
+            // write caught up with our edits — nothing left unsaved, so any
+            // pending-change banner would be lying too.
             if isDirty {
                 lastSavedText = decoded
                 isDirty = false
+                externalChangePending = false
             }
             return
         }
@@ -289,6 +291,7 @@ final class ViewerModel: ObservableObject {
     /// Banner action: drop unsaved edits and adopt the on-disk content.
     func discardAndReload() async {
         renderDebounce?.cancel()
+        previewNeedsRender = false   // the forced reload below renders anyway
         isDirty = false
         externalChangePending = false
         await reload(force: true)
