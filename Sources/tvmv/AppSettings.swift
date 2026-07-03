@@ -20,6 +20,8 @@ final class AppSettings: ObservableObject {
     @Published var editorPaneWidth: Double { didSet { d.set(editorPaneWidth, forKey: K.editorPaneWidth) } }
     /// Editor-pane font family. Empty means "same as the code font".
     @Published var editorFont: String { didSet { d.set(editorFont, forKey: K.editorFont) } }
+    /// Editor-pane font size in points. 0 means "same as the base size".
+    @Published var editorFontSize: Double { didSet { d.set(editorFontSize, forKey: K.editorFontSize) } }
 
     private let d: UserDefaults
     private enum K {
@@ -28,6 +30,7 @@ final class AppSettings: ObservableObject {
         static let customCSSPath = "customCSSPath"
         static let editorPaneWidth = "editorPaneWidth"
         static let editorFont = "editorFont"
+        static let editorFontSize = "editorFontSize"
     }
 
     /// The custom-CSS file chosen in Settings, or `nil` for no override (the
@@ -50,6 +53,7 @@ final class AppSettings: ObservableObject {
         customCSSPath = defaults.string(forKey: K.customCSSPath) ?? ""
         editorPaneWidth = defaults.object(forKey: K.editorPaneWidth) as? Double ?? 0
         editorFont = defaults.string(forKey: K.editorFont) ?? ""
+        editorFontSize = defaults.object(forKey: K.editorFontSize) as? Double ?? 0
     }
 
     func increaseFontSize() { baseSize = min(baseSize + 1, 48) }
@@ -78,12 +82,13 @@ final class AppSettings: ObservableObject {
     }
 
     /// JSON payload for editor.js `applyStyle` — the editor pane needs only
-    /// a font family, size, and resolved theme. The dedicated editor font
-    /// wins when set; otherwise the editor follows the code font.
+    /// a font family, size, and resolved theme. Dedicated editor overrides
+    /// win when set; otherwise the editor follows the code font / base size.
     var editorStyleJSON: String {
         let dict: [String: Any] = [
             "monoFont": editorFont.isEmpty ? monoFont : editorFont,
-            "baseSize": baseSize, "theme": resolvedTheme
+            "baseSize": editorFontSize > 0 ? editorFontSize : baseSize,
+            "theme": resolvedTheme
         ]
         let data = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
         return String(data: data, encoding: .utf8) ?? "{}"

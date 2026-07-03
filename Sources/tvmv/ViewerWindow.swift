@@ -71,8 +71,9 @@ struct ViewerWindow: View {
         }
         // Live-apply typography/theme: styleJSON changes whenever any setting does.
         .onChange(of: settings.styleJSON) { Task { await model.applyStyle() } }
-        // The editor-only font isn't part of styleJSON; re-apply on its own.
-        .onChange(of: settings.editorFont) { Task { await model.applyStyle() } }
+        // Editor-only settings (font, size) aren't part of styleJSON; watch
+        // the editor payload so any of them live-applies too.
+        .onChange(of: settings.editorStyleJSON) { Task { await model.applyStyle() } }
         // Re-apply when the custom-CSS file is changed in Settings.
         .onChange(of: settings.customCSSPath) { model.cssPathChanged() }
         // Re-resolve auto theme when the system appearance flips.

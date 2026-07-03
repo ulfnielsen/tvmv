@@ -42,6 +42,22 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(obj["baseSize"] as? Double, 14)
         XCTAssertEqual(obj["theme"] as? String, "light")
     }
+    func testEditorStyleJSONFollowsBaseSizeUntilOverridden() throws {
+        let s = Self.isolated()
+        s.baseSize = 16
+
+        // Default: 0 means "same as the viewer's base size".
+        var obj = try JSONSerialization.jsonObject(
+            with: Data(s.editorStyleJSON.utf8)) as! [String: Any]
+        XCTAssertEqual(obj["baseSize"] as? Double, 16)
+
+        // Overridden: the dedicated editor size wins, and no longer tracks base.
+        s.editorFontSize = 13
+        s.baseSize = 20
+        obj = try JSONSerialization.jsonObject(
+            with: Data(s.editorStyleJSON.utf8)) as! [String: Any]
+        XCTAssertEqual(obj["baseSize"] as? Double, 13)
+    }
     func testFontSizeClamps() {
         let s = Self.isolated()
         s.baseSize = 8; s.decreaseFontSize(); XCTAssertEqual(s.baseSize, 8)

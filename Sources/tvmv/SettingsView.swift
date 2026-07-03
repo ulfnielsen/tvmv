@@ -19,6 +19,19 @@ struct SettingsView: View {
                 Divider()
                 ForEach(families, id: \.self) { Text($0).tag($0) }
             }
+            // Follows the base size until first touched; 0 = "not overridden".
+            Stepper(value: editorSize, in: 8...48, step: 1) {
+                HStack {
+                    Text(settings.editorFontSize > 0
+                        ? "Editor size: \(Int(settings.editorFontSize)) pt"
+                        : "Editor size: base (\(Int(settings.baseSize)) pt)")
+                    if settings.editorFontSize > 0 {
+                        Button("Match base") { settings.editorFontSize = 0 }
+                            .buttonStyle(.link)
+                            .font(.caption)
+                    }
+                }
+            }
             Stepper(value: $settings.baseSize, in: 8...48, step: 1) {
                 Text("Base size: \(Int(settings.baseSize)) pt")
             }
@@ -50,6 +63,14 @@ struct SettingsView: View {
         }
         .padding(20)
         .frame(width: 400)
+    }
+
+    /// Stepping from the "follow base size" state starts from the base value.
+    private var editorSize: Binding<Double> {
+        Binding(
+            get: { settings.editorFontSize > 0 ? settings.editorFontSize : settings.baseSize },
+            set: { settings.editorFontSize = $0 }
+        )
     }
 
     private var cssLabel: String {
