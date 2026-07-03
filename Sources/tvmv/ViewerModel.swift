@@ -38,6 +38,9 @@ final class ViewerModel: ObservableObject {
     /// In-flight capture of the preview's top line at editor close; awaited on
     /// reopen so a fast close-then-open toggle never reads a stale value.
     private var editorCloseSync: Task<Void, Never>?
+    /// Guards toggleEditing()'s closing branch against re-entry while the
+    /// deterministic flush is in flight (a double ⌘E-off before it settles).
+    private var closingEditor = false
     private var renderDebounce: DispatchWorkItem?
     private var previewNeedsRender = false
     private var scrollSyncDebounce: DispatchWorkItem?
@@ -66,11 +69,11 @@ final class ViewerModel: ObservableObject {
 
     /// The editor page is live: seed it with the document, style, and the
     /// restore-vs-reanchor position, then hand it focus.
-    func editorReady() {
+    func editorReady(bridge: EditorBridge) {
         Task { [weak self] in
             guard let self else { return }
             await self.editorCloseSync?.value
-            guard let bridge = self.editorBridge else { return }
+            guard bridge === self.editorBridge, let bridge = self.editorBridge else { return }
             await bridge.setText(self.text, resetHistory: true)
             await bridge.applyStyle(json: AppSettings.shared.editorStyleJSON)
             let previewLine = await self.controller?.topVisibleSourceLine()
@@ -111,8 +114,21 @@ final class ViewerModel: ObservableObject {
 
     func toggleEditing() {
         if isEditing {
-            isEditing = false
-            editorClosed()
+            guard !closingEditor else { return }
+            closingEditor = true
+            let bridge = editorBridge
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                // Deterministic flush: the page's blur-flush races webview
+                // teardown, so pull the doc explicitly — ⌘E-off must never
+                // drop keystrokes still inside the 100 ms debounce.
+                if let bridge, let current = await bridge.getText() {
+                    self.textEdited(current)
+                }
+                self.isEditing = false
+                self.editorClosed()
+                self.closingEditor = false
+            }
         } else {
             saveError = nil
             isEditing = true

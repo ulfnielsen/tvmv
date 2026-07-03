@@ -1,5 +1,6 @@
-/* tvmv editor page — chrome around CodeMirror. Theme + typography arrive via
-   applyStyle() as CSS custom properties / data-theme, mirroring app.css. */
+/* tvmv editor page — chrome around CodeMirror. Typography arrives via
+   applyStyle() as CSS custom properties; light/dark theming is handled by
+   CodeMirror's theme compartment (oneDark). */
 
 :root {
   --tvmv-editor-mono: Menlo, monospace;

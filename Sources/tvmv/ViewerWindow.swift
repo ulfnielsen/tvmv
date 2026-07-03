@@ -51,6 +51,9 @@ struct ViewerWindow: View {
                         if model.externalChangePending { externalChangeBanner }
                     }
                     .overlay(alignment: .topTrailing) { if showFind { findBar } }
+                    .overlay(alignment: .bottom) {
+                        if model.errorMessage != nil { errorBanner }
+                    }
             }
         }
         .background { WindowChrome(color: model.chromeColor) }
@@ -100,7 +103,7 @@ struct ViewerWindow: View {
             toggleOutline: { columns = (columns == .detailOnly) ? .all : .detailOnly },
             toggleEditing: { model.toggleEditing() },
             save: { Task { await model.flushAndSave() } },
-            canSave: model.isDirty && fileURL != nil,
+            canSave: (model.isDirty || model.isEditing) && fileURL != nil,
             canEdit: fileURL != nil
         ))
     }
@@ -124,7 +127,7 @@ struct ViewerWindow: View {
         CodeMirrorEditorPane(
             appWebDir: WebResources.baseURL,
             callbacks: EditorBridgeCallbacks(
-                onReady: { model.editorReady() },
+                onReady: { model.editorReady(bridge: $0) },
                 onTextChanged: { model.editorTextChanged($0) },
                 onCursorMoved: { line, offset in model.editorCursorMoved(line: line, offset: offset) },
                 onScrolled: { line in model.editorScrolled(topLine: line) },
@@ -132,6 +135,24 @@ struct ViewerWindow: View {
             ),
             onMakeBridge: { model.attach(editor: $0) }
         )
+    }
+
+    private var errorBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.octagon.fill")
+                .foregroundStyle(.red)
+            Text(model.errorMessage ?? "")
+                .font(.caption)
+                .lineLimit(2)
+            Spacer()
+            Button { model.errorMessage = nil } label: { Image(systemName: "xmark") }
+                .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
+        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
+        .padding(8)
     }
 
     private var externalChangeBanner: some View {

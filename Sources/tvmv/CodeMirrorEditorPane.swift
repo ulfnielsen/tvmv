@@ -12,7 +12,7 @@ struct EditorPosition {
 
 /// Events pushed by the editor page. All delivered on the main actor.
 struct EditorBridgeCallbacks {
-    var onReady: (@MainActor () -> Void)?
+    var onReady: (@MainActor (EditorBridge) -> Void)?
     var onTextChanged: (@MainActor (String) -> Void)?
     /// (1-based line, UTF-16 offset)
     var onCursorMoved: (@MainActor (Int, Int) -> Void)?
@@ -110,6 +110,13 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
         context.coordinator.callbacks = callbacks
     }
 
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        // Explicit teardown: unregister the message handler and drop callbacks
+        // so a closing page's late events can never reach the model.
+        nsView.configuration.userContentController.removeScriptMessageHandler(forName: "tvmvEditor")
+        coordinator.callbacks = EditorBridgeCallbacks()
+    }
+
     @MainActor
     final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
         var callbacks: EditorBridgeCallbacks
@@ -123,6 +130,8 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
         // MARK: WKNavigationDelegate — editor page load failures
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
             callbacks.onError?("Editor failed to load: \(error.localizedDescription)")
         }
 
@@ -131,6 +140,8 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
             didFailProvisionalNavigation navigation: WKNavigation!,
             withError error: Error
         ) {
+            let nsError = error as NSError
+            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
             callbacks.onError?("Editor failed to load: \(error.localizedDescription)")
         }
 
@@ -147,7 +158,7 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
 
                 switch type {
                 case "ready":
-                    callbacks.onReady?()
+                    if let bridge { callbacks.onReady?(bridge) }
                 case "textChanged":
                     if let text = dict["text"] as? String {
                         callbacks.onTextChanged?(text)
@@ -159,6 +170,10 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
                 case "scrolled":
                     if let line = dict["topLine"] as? Int {
                         callbacks.onScrolled?(line)
+                    }
+                case "error":
+                    if let msg = dict["message"] as? String {
+                        callbacks.onError?("Editor: \(msg)")
                     }
                 default:
                     break

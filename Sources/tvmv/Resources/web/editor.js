@@ -15,6 +15,10 @@
     try { window.webkit.messageHandlers.tvmvEditor.postMessage(msg); } catch (e) {}
   }
 
+  window.onerror = function (message) {
+    post({ type: "error", message: String(message) });
+  };
+
   /* ---- debounced event reporting ---------------------------------------- */
 
   var TEXT_DEBOUNCE_MS = 100;
