@@ -91,7 +91,7 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
         configuration.setURLSchemeHandler(handler, forURLScheme: AssetSchemeHandler.scheme)
         configuration.userContentController.add(coordinator, name: "tvmvEditor")
 
-        let webView = WKWebView(frame: .zero, configuration: configuration)
+        let webView = EditorWebView(frame: .zero, configuration: configuration)
         webView.navigationDelegate = coordinator
         coordinator.webView = webView
 
@@ -115,6 +115,22 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
         // so a closing page's late events can never reach the model.
         nsView.configuration.userContentController.removeScriptMessageHandler(forName: "tvmvEditor")
         coordinator.callbacks = EditorBridgeCallbacks()
+    }
+
+    /// WKWebView whose undo registrations never leave the view.
+    ///
+    /// WebKit registers a native undo action for every edit in editable
+    /// content with `self.undoManager`, which by default resolves up the
+    /// responder chain to the window — and in a document window, to the
+    /// document's undo manager. Each registration increments the document's
+    /// change count, so SwiftUI's DocumentGroup bridge believed the (unwritable,
+    /// `viewing:`) document had unsaved changes and tried to autosave it on
+    /// quit, failing with "could not be autosaved" alerts around our own
+    /// prompt. CodeMirror manages real undo itself in JS; the native
+    /// registrations are decoys, so they go into a private manager instead.
+    private final class EditorWebView: WKWebView {
+        private let sandboxedUndoManager = UndoManager()
+        override var undoManager: UndoManager? { sandboxedUndoManager }
     }
 
     @MainActor
