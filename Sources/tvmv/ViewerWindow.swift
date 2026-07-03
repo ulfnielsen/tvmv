@@ -55,6 +55,8 @@ struct ViewerWindow: View {
         }
         .background { WindowChrome(color: model.chromeColor) }
         .background { WindowCloseGuard(
+            needsFlow: { model.isDirty || model.isEditing },
+            flush: { await model.flushEditorText() },
             isDirty: { model.isDirty },
             save: { model.save(); return !model.isDirty }
         ) }
@@ -97,7 +99,7 @@ struct ViewerWindow: View {
             reload: { Task { await model.reload() } },
             toggleOutline: { columns = (columns == .detailOnly) ? .all : .detailOnly },
             toggleEditing: { model.toggleEditing() },
-            save: { model.save() },
+            save: { Task { await model.flushAndSave() } },
             canSave: model.isDirty && fileURL != nil,
             canEdit: fileURL != nil
         ))
