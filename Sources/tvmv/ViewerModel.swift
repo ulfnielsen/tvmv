@@ -21,6 +21,9 @@ final class ViewerModel: ObservableObject {
 
     let fileURL: URL?
     let encodingUsed: TextEncodingUsed
+    /// Newline style of the file on disk; `text` is always LF-normalized and
+    /// saves restore this style.
+    let lineEndingUsed: LineEndingUsed
     @Published private(set) var text: String
 
     private var lastSavedText: String
@@ -49,11 +52,17 @@ final class ViewerModel: ObservableObject {
     private var cssWatcher: FileWatcher?
     private var isReady = false
 
-    init(text: String, fileURL: URL?, encoding: TextEncodingUsed = .utf8) {
+    init(
+        text: String,
+        fileURL: URL?,
+        encoding: TextEncodingUsed = .utf8,
+        lineEnding: LineEndingUsed = .lf
+    ) {
         self.text = text
         self.lastSavedText = text
         self.fileURL = fileURL
         self.encodingUsed = encoding
+        self.lineEndingUsed = lineEnding
     }
 
     func attach(controller: MarkdownWebController) {
@@ -212,7 +221,7 @@ final class ViewerModel: ObservableObject {
     func save() {
         guard let url = fileURL, isDirty else { return }
         do {
-            try MarkdownText.encode(text, encoding: encodingUsed)
+            try MarkdownText.encode(text, encoding: encodingUsed, lineEnding: lineEndingUsed)
                 .write(to: url, options: .atomic)
             lastSavedText = text
             isDirty = false

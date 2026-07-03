@@ -3,15 +3,41 @@ import XCTest
 
 final class MarkdownTextTests: XCTestCase {
     func testUTF8() {
-        let (text, enc) = MarkdownText.decode(Data("héllo".utf8))
-        XCTAssertEqual(text, "héllo")
-        XCTAssertEqual(enc, .utf8)
+        let d = MarkdownText.decode(Data("héllo".utf8))
+        XCTAssertEqual(d.text, "héllo")
+        XCTAssertEqual(d.encoding, .utf8)
     }
     func testLatin1Fallback() {
         // 0xFF is invalid UTF-8 but valid Latin-1 (ÿ).
-        let (text, enc) = MarkdownText.decode(Data([0xFF]))
-        XCTAssertEqual(enc, .isoLatin1)
-        XCTAssertEqual(text, "ÿ")
+        let d = MarkdownText.decode(Data([0xFF]))
+        XCTAssertEqual(d.encoding, .isoLatin1)
+        XCTAssertEqual(d.text, "ÿ")
+    }
+    // Line endings: the model always holds LF (CodeMirror normalizes its
+    // document the same way, so untouched files never look dirty); the
+    // original style is recorded and restored on encode.
+    func testDecodeNormalizesCRLFAndRecordsIt() {
+        let d = MarkdownText.decode(Data("a\r\nb\r\n".utf8))
+        XCTAssertEqual(d.text, "a\nb\n")
+        XCTAssertEqual(d.lineEnding, .crlf)
+    }
+    func testDecodeNormalizesLoneCR() {
+        let d = MarkdownText.decode(Data("a\rb".utf8))
+        XCTAssertEqual(d.text, "a\nb")
+        XCTAssertEqual(d.lineEnding, .cr)
+    }
+    func testDecodeLFIsDefault() {
+        XCTAssertEqual(MarkdownText.decode(Data("a\nb".utf8)).lineEnding, .lf)
+    }
+    func testEncodeRestoresCRLF() {
+        let data = MarkdownText.encode("a\nb\n", encoding: .utf8, lineEnding: .crlf)
+        XCTAssertEqual(String(data: data, encoding: .utf8), "a\r\nb\r\n")
+    }
+    func testCRLFByteRoundTrip() {
+        let original = Data("# hé\r\nline two\r\n".utf8)
+        let d = MarkdownText.decode(original)
+        let out = MarkdownText.encode(d.text, encoding: d.encoding, lineEnding: d.lineEnding)
+        XCTAssertEqual(out, original)
     }
     func testEncodeDecodeRoundTripUTF8() {
         let text = "# héllo → 🌍\n"

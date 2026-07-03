@@ -125,6 +125,30 @@ final class ViewerModelEditingTests: XCTestCase {
         XCTAssertEqual(decoded.encoding, .isoLatin1)
     }
 
+    func testCRLFDocumentEditorEchoStaysCleanAndSavePreservesCRLF() async throws {
+        // Root-cause regression for spurious quit prompts: CodeMirror
+        // normalizes CRLF to LF, so the model must hold normalized text
+        // (making the editor's seed/flush echo a no-op) and restore the
+        // original endings on save.
+        let url = try tempFile("line one\r\nline two\r\n")
+        let d = MarkdownText.decode(try Data(contentsOf: url))
+        let model = ViewerModel(text: d.text, fileURL: url,
+                                encoding: d.encoding, lineEnding: d.lineEnding)
+        // The editor's seed/flush echo delivers CM's LF-normalized doc.
+        model.textEdited("line one\nline two\n")
+        XCTAssertFalse(model.isDirty)   // no actual change → no quit prompt
+
+        // A real edit saves with the file's original endings.
+        model.textEdited("line one\nline two\nline three\n")
+        model.save()
+        XCTAssertEqual(try Data(contentsOf: url),
+                       Data("line one\r\nline two\r\nline three\r\n".utf8))
+        // The watcher echo of our own save must still read as clean.
+        await model.reload()
+        XCTAssertFalse(model.isDirty)
+        XCTAssertFalse(model.externalChangePending)
+    }
+
     func testFlushAndSaveWithoutBridgeSavesCachedText() async throws {
         // The editor bridge is gone (pane closed / page dead): flushAndSave
         // must still write the model's cached text rather than losing the save.

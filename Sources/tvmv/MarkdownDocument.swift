@@ -14,6 +14,8 @@ struct MarkdownDocument: FileDocument {
     let data: Data
     /// Which encoding successfully decoded `data`.
     let encodingUsed: TextEncodingUsed
+    /// Which newline style `data` used (text is LF-normalized; saves restore this).
+    let lineEndingUsed: LineEndingUsed
 
     // `net.daringfireball.markdown` is system-known on macOS 26.
     static let markdownType = UTType(importedAs: "net.daringfireball.markdown")
@@ -31,6 +33,7 @@ struct MarkdownDocument: FileDocument {
         let decoded = MarkdownText.decode(bytes)
         self.text = decoded.text
         self.encodingUsed = decoded.encoding
+        self.lineEndingUsed = decoded.lineEnding
     }
 
     // This app never writes. DocumentGroup(viewing:) means this is never invoked,

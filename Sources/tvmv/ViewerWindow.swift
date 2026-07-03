@@ -19,7 +19,8 @@ struct ViewerWindow: View {
         self.document = document
         self.fileURL = fileURL
         _model = StateObject(wrappedValue: ViewerModel(
-            text: document.text, fileURL: fileURL, encoding: document.encodingUsed))
+            text: document.text, fileURL: fileURL,
+            encoding: document.encodingUsed, lineEnding: document.lineEndingUsed))
     }
 
     var body: some View {
