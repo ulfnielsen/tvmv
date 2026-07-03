@@ -8,6 +8,12 @@ struct ViewerCommands {
     var printDocument: () -> Void
     var reload: () -> Void
     var toggleOutline: () -> Void
+    var toggleEditing: () -> Void
+    var save: () -> Void
+    /// Enables ⌘S: there are unsaved edits and a file to write to.
+    var canSave: Bool
+    /// Enables ⌘E: the document has a file URL to save back to.
+    var canEdit: Bool
 }
 
 struct ViewerCommandsKey: FocusedValueKey {
@@ -39,6 +45,9 @@ struct ViewerMenuCommands: Commands {
             Button("Toggle Outline") { commands?.toggleOutline() }
                 .keyboardShortcut("0", modifiers: [.command, .shift])
                 .disabled(commands == nil)
+            Button("Toggle Editing") { commands?.toggleEditing() }
+                .keyboardShortcut("e", modifiers: .command)
+                .disabled(commands?.canEdit != true)
         }
         CommandGroup(after: .textEditing) {
             Button("Find…") { commands?.find() }
@@ -46,6 +55,10 @@ struct ViewerMenuCommands: Commands {
                 .disabled(commands == nil)
         }
         CommandGroup(after: .newItem) {
+            Button("Save") { commands?.save() }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(commands?.canSave != true)
+            Divider()
             Button("Reload") { commands?.reload() }
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(commands == nil)

@@ -91,7 +91,11 @@ struct ViewerWindow: View {
             },
             printDocument: { model.printDoc() },
             reload: { Task { await model.reload() } },
-            toggleOutline: { columns = (columns == .detailOnly) ? .all : .detailOnly }
+            toggleOutline: { columns = (columns == .detailOnly) ? .all : .detailOnly },
+            toggleEditing: { model.toggleEditing() },
+            save: { model.save() },
+            canSave: model.isDirty && fileURL != nil,
+            canEdit: fileURL != nil
         ))
     }
 
