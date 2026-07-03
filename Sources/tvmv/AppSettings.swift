@@ -18,6 +18,8 @@ final class AppSettings: ObservableObject {
     @Published var showOutline: Bool { didSet { d.set(showOutline, forKey: K.showOutline) } }
     @Published var customCSSPath: String { didSet { d.set(customCSSPath, forKey: K.customCSSPath) } }
     @Published var editorPaneWidth: Double { didSet { d.set(editorPaneWidth, forKey: K.editorPaneWidth) } }
+    /// Editor-pane font family. Empty means "same as the code font".
+    @Published var editorFont: String { didSet { d.set(editorFont, forKey: K.editorFont) } }
 
     private let d: UserDefaults
     private enum K {
@@ -25,6 +27,7 @@ final class AppSettings: ObservableObject {
         static let measure = "measure", fullWidth = "fullWidth", theme = "theme", showOutline = "showOutline"
         static let customCSSPath = "customCSSPath"
         static let editorPaneWidth = "editorPaneWidth"
+        static let editorFont = "editorFont"
     }
 
     /// The custom-CSS file chosen in Settings, or `nil` for no override (the
@@ -46,6 +49,7 @@ final class AppSettings: ObservableObject {
         showOutline = defaults.object(forKey: K.showOutline) as? Bool ?? true
         customCSSPath = defaults.string(forKey: K.customCSSPath) ?? ""
         editorPaneWidth = defaults.object(forKey: K.editorPaneWidth) as? Double ?? 0
+        editorFont = defaults.string(forKey: K.editorFont) ?? ""
     }
 
     func increaseFontSize() { baseSize = min(baseSize + 1, 48) }
@@ -74,10 +78,12 @@ final class AppSettings: ObservableObject {
     }
 
     /// JSON payload for editor.js `applyStyle` — the editor pane needs only
-    /// the mono font, size, and resolved theme.
+    /// a font family, size, and resolved theme. The dedicated editor font
+    /// wins when set; otherwise the editor follows the code font.
     var editorStyleJSON: String {
         let dict: [String: Any] = [
-            "monoFont": monoFont, "baseSize": baseSize, "theme": resolvedTheme
+            "monoFont": editorFont.isEmpty ? monoFont : editorFont,
+            "baseSize": baseSize, "theme": resolvedTheme
         ]
         let data = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
         return String(data: data, encoding: .utf8) ?? "{}"

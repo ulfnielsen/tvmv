@@ -14,6 +14,11 @@ struct SettingsView: View {
             Picker("Code font", selection: $settings.monoFont) {
                 ForEach(families, id: \.self) { Text($0).tag($0) }
             }
+            Picker("Editor font", selection: $settings.editorFont) {
+                Text("Same as code font").tag("")
+                Divider()
+                ForEach(families, id: \.self) { Text($0).tag($0) }
+            }
             Stepper(value: $settings.baseSize, in: 8...48, step: 1) {
                 Text("Base size: \(Int(settings.baseSize)) pt")
             }

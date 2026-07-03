@@ -25,6 +25,23 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(obj["fullWidth"] as? Bool, false)
         XCTAssertEqual(obj["theme"] as? String, "light")
     }
+    func testEditorStyleJSONFollowsCodeFontUntilOverridden() throws {
+        let s = Self.isolated()
+        s.monoFont = "Menlo"; s.baseSize = 14; s.theme = .light
+
+        // Default: empty editorFont means "same as code font".
+        var obj = try JSONSerialization.jsonObject(
+            with: Data(s.editorStyleJSON.utf8)) as! [String: Any]
+        XCTAssertEqual(obj["monoFont"] as? String, "Menlo")
+
+        // Overridden: the dedicated editor font wins.
+        s.editorFont = "SF Mono"
+        obj = try JSONSerialization.jsonObject(
+            with: Data(s.editorStyleJSON.utf8)) as! [String: Any]
+        XCTAssertEqual(obj["monoFont"] as? String, "SF Mono")
+        XCTAssertEqual(obj["baseSize"] as? Double, 14)
+        XCTAssertEqual(obj["theme"] as? String, "light")
+    }
     func testFontSizeClamps() {
         let s = Self.isolated()
         s.baseSize = 8; s.decreaseFontSize(); XCTAssertEqual(s.baseSize, 8)
