@@ -5,9 +5,12 @@
 # Steps:
 #   1. release build, locate bin dir + executable + tvmv_tvmv.bundle
 #   2. assemble dist/tvmv.app (Contents/MacOS, Contents/Resources)
-#   3. ad-hoc codesign  (resource bundle in Contents/Resources => seals clean)
+#   3. codesign  (resource bundle in Contents/Resources => seals clean)
 #   4. install to ~/Applications, register doc types via lsregister
 #   5. install the CLI shim to ~/.local/bin/tvmv
+#
+# Signing identity comes from build/signing.fish: a Developer ID Application
+# certificate when one is in the keychain, ad-hoc otherwise. See that file.
 #
 # Run from anywhere; paths are resolved relative to the repo root.
 
@@ -20,6 +23,10 @@ set -l repo_root (path resolve $script_dir/..)
 
 echo "==> repo root: $repo_root"
 cd $repo_root; or exit $fail_status
+
+# Resolve the signing identity (Developer ID when available, else ad-hoc).
+source $repo_root/build/signing.fish; or exit $fail_status
+tvmv_report_identity
 
 # --- 1. Build & locate artifacts -----------------------------------------
 echo "==> swift build -c release"
@@ -73,34 +80,45 @@ end
 echo "==> embedding QuickLook extension via build/quicklook.fish"
 fish $repo_root/build/quicklook.fish; or exit $fail_status
 
-# --- 3. Ad-hoc codesign ---------------------------------------------------
-# The deep sign seals the whole tree, but it also RE-SIGNS the embedded
-# QuickLook .appex(es) without entitlements — stripping the sandbox entitlement
-# that QuickLook requires to load each extension. So after the deep sign we
-# re-sign every embedded appex WITH its entitlements, then re-seal the app
-# WITHOUT --deep (which seals each appex by reference, leaving its signature
-# intact).
-set -l ql_ent $repo_root/quicklook/entitlements.plist
+# --- 3. Codesign ----------------------------------------------------------
+# Sign strictly INSIDE-OUT, never with --deep. Apple deprecates --deep for
+# signing, and it is actively wrong here: it re-signs the embedded appexes
+# without entitlements, stripping the sandbox entitlement QuickLook requires
+# to load them. (The old code worked around that by re-signing each appex
+# afterwards, which --deep had already invalidated.)
+#
+# quicklook.fish has already signed each appex WITH its entitlements before
+# embedding it, and cp -R preserves those signatures. So all that remains is
+# sealing the outer app, which seals each appex by reference (cdhash) and
+# leaves its signature — and its entitlements — intact.
+echo "==> codesign app (hardened runtime)"
+tvmv_sign $app; or exit $fail_status
 
-echo "==> codesign (ad-hoc, --deep --force)"
-codesign -s - --deep --force $app; or exit $fail_status
+# --- 3b. Verify the signature --------------------------------------------
+# --deep IS correct for verification (unlike signing): it walks the whole
+# nested tree. --strict rejects the malformed-bundle cases Gatekeeper rejects.
+echo "==> verifying signature"
+codesign --verify --deep --strict --verbose=2 $app; or exit $fail_status
+echo "    signature OK"
 
-set -l embedded_appexes $app/Contents/PlugIns/*.appex
-set -l resealed 0
-for appex_embedded in $embedded_appexes
+# The sandbox entitlement surviving on each appex is the exact thing --deep
+# used to break, so assert it rather than trust it.
+for appex_embedded in $app/Contents/PlugIns/*.appex
     if test -d $appex_embedded
-        echo "==> re-signing embedded appex with sandbox entitlement: "(path basename $appex_embedded)
-        codesign -s - --force --entitlements $ql_ent $appex_embedded; or exit $fail_status
-        set resealed 1
+        set -l name (path basename $appex_embedded)
+        if codesign -d --entitlements - --xml $appex_embedded 2>/dev/null | grep -q app-sandbox
+            echo "    $name: sandbox entitlement intact"
+        else
+            echo "ERROR: $name lost its sandbox entitlement — QuickLook will not load it" >&2
+            exit $fail_status
+        end
     end
 end
-if test $resealed -eq 1
-    echo "==> re-sealing app (no --deep, preserves appex signatures)"
-    codesign -s - --force $app; or exit $fail_status
-end
 
-codesign --verify --deep --strict --verbose $app; or exit $fail_status
-echo "    signature OK"
+# Informational: unnotarized Developer ID builds are rejected here by design.
+# release.fish notarizes and staples, which is what flips this to accepted.
+echo "==> Gatekeeper assessment (informational)"
+spctl -a -vv -t exec $app 2>&1 | sed 's/^/    /'
 
 # --- 4. Install + register doc types -------------------------------------
 set -l installed $HOME/Applications/TVMV.app

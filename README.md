@@ -22,9 +22,16 @@ env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer fish build/bundle.fish
 ```
 
-`bundle.fish` builds a release binary, assembles + ad-hoc-signs `TVMV.app`,
-installs it to `~/Applications`, registers it as a `.md` handler, and installs
-the `tvmv` CLI shim to `~/.local/bin`.
+`bundle.fish` builds a release binary, assembles and signs `TVMV.app`, installs
+it to `~/Applications`, registers it as a `.md` handler, and installs the `tvmv`
+CLI shim to `~/.local/bin`.
+
+Signing is resolved by `build/signing.fish`: it uses a **Developer ID
+Application** certificate when one is in the keychain, and falls back to an
+ad-hoc signature otherwise (fine for local use, but such a build runs only on
+the machine that produced it). Set `TVMV_IDENTITY` to force a specific identity,
+or `TVMV_IDENTITY=-` to force ad-hoc. The hardened runtime is enabled in both
+modes so local builds exercise exactly what ships.
 
 ## Use
 
@@ -40,7 +47,7 @@ in Finder renders it with the same theme (cmark-gfm + the warm reading CSS). It'
 installed with the app under `~/Applications`. If another markdown QuickLook
 extension is also installed (e.g. QLMarkdown), macOS may pick that one instead —
 choose TVMV under **System Settings → General → Login Items & Extensions → Quick
-Look** (enable TVMV, disable the other). The extension is ad-hoc signed with the
+Look** (enable TVMV, disable the other). The extension is signed with the
 `com.apple.security.app-sandbox` entitlement (required for QuickLook to load it).
 
 ## Custom themes (CSS)
@@ -65,15 +72,31 @@ Settings updates.
 
 ## Releasing
 
-`build/release.fish [major|minor|patch]` (default `patch`) cuts a release:
-runs the tests, bumps `CFBundleShortVersionString` + the build number, builds and
-signs `TVMV.app`, zips it, commits + tags `vX.Y.Z`, pushes, and creates a GitHub
-Release with the changelog and the zip attached.
+`build/release.fish [major|minor|patch]` (default `patch`) cuts a release: runs
+the tests, bumps `CFBundleShortVersionString` + the build number, builds and
+Developer ID signs `TVMV.app`, notarizes it with Apple and staples the ticket,
+packages a `.zip` and a notarized `.dmg`, commits + tags `vX.Y.Z`, pushes, and
+creates a GitHub Release with the changelog and both assets attached.
 
 ```sh
 fish build/release.fish minor    # 0.1.0 -> 0.2.0
 fish build/release.fish patch    # 0.2.0 -> 0.2.1
 ```
 
-Requires a git `origin` remote on GitHub, an authenticated `gh`, and a clean
-working tree. Builds are ad-hoc signed (not notarized).
+Releases are Developer ID signed, notarized, and stapled, so they launch
+normally on any Mac — no Gatekeeper prompt and no `xattr` workaround.
+
+Requires a git `origin` remote on GitHub, an authenticated `gh`, a clean working
+tree, a Developer ID Application certificate, and a `notarytool` keychain profile
+named `tvmv-notary` (override with `TVMV_NOTARY_PROFILE`). Create the profile
+once with an App Store Connect API key:
+
+```sh
+xcrun notarytool store-credentials tvmv-notary \
+    --key <AuthKey_XXXXXXXXXX.p8> --key-id <KEYID> --issuer <ISSUER-UUID>
+```
+
+Notarization needs network access and takes a few minutes per submission; a
+release makes two (the app, then the disk image). The script fails fast if the
+certificate or the notary profile is missing, and reverts its version stamp if
+anything downstream fails.

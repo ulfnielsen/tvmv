@@ -21,6 +21,10 @@ cd $repo_root; or exit $fail_status
 
 echo "==> [QL] repo root: $repo_root"
 
+# Resolve the signing identity (Developer ID when available, else ad-hoc).
+source $repo_root/build/signing.fish; or exit $fail_status
+tvmv_report_identity
+
 # --- 1. Release build (produces cmark .o objects + the renderer sources) ----
 echo "==> [QL] swift build -c release"
 swift build -c release; or exit $fail_status
@@ -90,8 +94,8 @@ cp -R Sources/tvmv/Resources/web $appex/Contents/Resources/web
 echo "    copied web/ -> Contents/Resources/web"
 
 # --- 6. Sign the appex with the sandbox entitlement (inside-out) ------------
-echo "==> [QL] codesign appex (ad-hoc, sandbox entitlement)"
-codesign -s - --force --entitlements quicklook/entitlements.plist $appex; or exit $fail_status
+echo "==> [QL] codesign appex (sandbox entitlement, hardened runtime)"
+tvmv_sign $appex --entitlements quicklook/entitlements.plist; or exit $fail_status
 codesign -d --entitlements - $appex 2>/dev/null | grep -q app-sandbox; \
     and echo "    sandbox entitlement present"; \
     or echo "    WARNING: sandbox entitlement not detected"
@@ -148,8 +152,8 @@ cp quicklook/Thumbnail-Info.plist $thumb_appex/Contents/Info.plist
 # No web/ assets: the thumbnail renders with Core Graphics + Core Text only.
 
 # --- T3. Sign the thumbnail appex with the sandbox entitlement -------------
-echo "==> [QL] codesign thumbnail appex (ad-hoc, sandbox entitlement)"
-codesign -s - --force --entitlements quicklook/entitlements.plist $thumb_appex; or exit $fail_status
+echo "==> [QL] codesign thumbnail appex (sandbox entitlement, hardened runtime)"
+tvmv_sign $thumb_appex --entitlements quicklook/entitlements.plist; or exit $fail_status
 codesign -d --entitlements - $thumb_appex 2>/dev/null | grep -q app-sandbox; \
     and echo "    sandbox entitlement present"; \
     or echo "    WARNING: sandbox entitlement not detected"
