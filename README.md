@@ -23,8 +23,11 @@ env DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer fish build/bundle.f
 ```
 
 `bundle.fish` builds a release binary, assembles and signs `TVMV.app`, installs
-it to `~/Applications`, registers it as a `.md` handler, and installs the `tvmv`
-CLI shim to `~/.local/bin`.
+it to `/Applications`, registers it as a `.md` handler, and installs the `tvmv`
+CLI shim to `~/.local/bin`. Dev builds and releases share one install location
+on purpose — with two registered copies, LaunchServices and QuickLook choose
+between them on their own terms, so a stale copy can quietly serve old builds.
+Any leftover install under `~/Applications` is unregistered and removed.
 
 Signing is resolved by `build/signing.fish`: it uses a **Developer ID
 Application** certificate when one is in the keychain, and falls back to an
@@ -44,7 +47,7 @@ Design spec and implementation plan live in `docs/superpowers/`.
 
 TVMV bundles a QuickLook **preview extension**, so pressing Space on a `.md` file
 in Finder renders it with the same theme (cmark-gfm + the warm reading CSS). It's
-installed with the app under `~/Applications`. If another markdown QuickLook
+installed with the app under `/Applications`. If another markdown QuickLook
 extension is also installed (e.g. QLMarkdown), macOS may pick that one instead —
 choose TVMV under **System Settings → General → Login Items & Extensions → Quick
 Look** (enable TVMV, disable the other). The extension is signed with the

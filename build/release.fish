@@ -90,15 +90,26 @@ end
 # tvmv_notarize <path> — submit to the notary service and wait for a verdict.
 # On rejection, fetch and print the notary log: it names the offending binary
 # and reason, which is the only practical way to debug a rejection.
+#
+# --timeout is deliberate. Plain --wait blocks forever, so a wedged submission
+# hangs the release with no diagnosis. Two hours is generous: submissions are
+# usually minutes, but 90 minutes has been observed with no incident reported
+# on Apple's status page, so a short timeout would abort perfectly good runs.
 function tvmv_notarize --inherit-variable notary_profile
     set -l target $argv[1]
     set -l out (mktemp)
-    echo "==> notarizing "(path basename $target)" — typically 1-5 minutes"
-    xcrun notarytool submit $target --keychain-profile $notary_profile --wait 2>&1 | tee $out
+    echo "==> notarizing "(path basename $target)" — usually minutes, occasionally over an hour"
+    xcrun notarytool submit $target --keychain-profile $notary_profile \
+        --wait --timeout 2h 2>&1 | tee $out
     if grep -q 'status: Accepted' $out
         echo "    notarization accepted"
         rm -f $out
         return 0
+    end
+    if grep -qi 'timed out\|timeout' $out
+        echo "error: notarization timed out after 2h for "(path basename $target)"." >&2
+        echo "  The submission may still complete — check with:" >&2
+        echo "    xcrun notarytool history --keychain-profile $notary_profile" >&2
     end
     echo "error: notarization failed for "(path basename $target) >&2
     set -l sid (grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' $out | head -n1)

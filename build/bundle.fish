@@ -121,13 +121,33 @@ echo "==> Gatekeeper assessment (informational)"
 spctl -a -vv -t exec $app 2>&1 | sed 's/^/    /'
 
 # --- 4. Install + register doc types -------------------------------------
-set -l installed $HOME/Applications/TVMV.app
-mkdir -p $HOME/Applications
-echo "==> installing to $installed"
-rm -rf $installed $HOME/Applications/tvmv.app
-cp -R $app $installed
-
+# Install to /Applications, the same place a released build lands. Installing
+# dev builds somewhere else (this used to be ~/Applications) leaves TWO
+# registered copies of the app, and LaunchServices and QuickLook then pick
+# between them by their own rules — so a stale copy can quietly win and serve
+# an old build for .md files and Space previews.
+set -l installed /Applications/TVMV.app
 set -l lsregister /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister
+
+# Migrate away from the old per-user location: unregister it before deleting,
+# or LaunchServices keeps serving the dead path until its database is rebuilt.
+for stale in $HOME/Applications/TVMV.app $HOME/Applications/tvmv.app
+    if test -d $stale
+        echo "==> removing stale install at $stale"
+        for stale_appex in $stale/Contents/PlugIns/*.appex
+            test -d $stale_appex; and pluginkit -r $stale_appex 2>/dev/null
+        end
+        $lsregister -u $stale 2>/dev/null
+        rm -rf $stale
+    end
+end
+
+echo "==> installing to $installed"
+rm -rf $installed
+# ditto, not cp -R: it preserves extended attributes and the signature exactly,
+# so a stapled notarization ticket survives the copy.
+ditto $app $installed; or exit $fail_status
+
 echo "==> registering document types via lsregister"
 $lsregister -f $installed
 echo "    registered $installed"
