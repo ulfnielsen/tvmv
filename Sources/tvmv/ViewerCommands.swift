@@ -1,3 +1,4 @@
+import TVMVCore
 import SwiftUI
 
 /// Per-window menu actions. The focused viewer window publishes these via
