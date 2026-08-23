@@ -53,6 +53,23 @@ choose TVMV under **System Settings → General → Login Items & Extensions →
 Look** (enable TVMV, disable the other). The extension is signed with the
 `com.apple.security.app-sandbox` entitlement (required for QuickLook to load it).
 
+## iOS (iPad & iPhone)
+
+TVMV also builds as a universal iOS document app sharing the same core
+(`TVMVCore`): the Files browser opens/creates `.md` documents, and rendering,
+editing, find, and the theme use the identical pipeline. Requires Xcode +
+XcodeGen:
+
+```sh
+fish build/ios.fish        # generate ios/TVMV.xcodeproj and build
+fish build/ios.fish run    # + install and launch in the iPad simulator
+```
+
+The Mac app and its build pipeline are unaffected; `ios/project.yml` is the
+committed project definition (the `.xcodeproj` is generated). Known issue: the
+launch scene's *Create Document* fails on simulators without an iCloud account
+(NSFileProvider -1005); opening existing documents is unaffected.
+
 ## Custom themes (CSS)
 
 Out of the box TVMV wears its built-in "paper & ink" theme, which has taste. If
