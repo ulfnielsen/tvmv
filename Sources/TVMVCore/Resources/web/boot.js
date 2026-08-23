@@ -152,6 +152,12 @@
     return nodes;
   }
 
+  // Highlighting is bounded (the design contract: enrichment must not scale
+  // unbounded with document size). Oversized blocks and blocks past the count
+  // cap stay plain — still styled as code by app.css, just untokenized.
+  var HIGHLIGHT_MAX_BLOCK_CHARS = 50000;
+  var HIGHLIGHT_MAX_BLOCKS = 200;
+
   function highlightCode(root) {
     // Every `pre code` EXCEPT mermaid ones (already converted away above, but
     // guard anyway in case conversion order ever changes).
@@ -160,7 +166,9 @@
     for (var i = 0; i < blocks.length; i++) {
       var el = blocks[i];
       if (el.classList.contains("language-mermaid")) continue;
+      if ((el.textContent || "").length > HIGHLIGHT_MAX_BLOCK_CHARS) continue;
       targets.push(el);
+      if (targets.length >= HIGHLIGHT_MAX_BLOCKS) break;
     }
     if (targets.length === 0) return Promise.resolve();
 
@@ -212,7 +220,13 @@
 
   /* ---- public: render -------------------------------------------------- */
 
+  // Monotonic render generation. Each render bumps it; the async enrichment
+  // chain re-checks between stages so a superseded render stops doing work on
+  // (and stops retaining) a DOM that innerHTML already replaced.
+  var _renderGen = 0;
+
   function render(bodyHTML, docBaseHref) {
+    var gen = ++_renderGen;
     try {
       // Optional <base> so relative image/link hrefs resolve against the doc.
       if (docBaseHref) {
@@ -236,14 +250,26 @@
       //    scan; also keeps $-detection from seeing diagram source).
       var mermaidNodes = convertMermaidBlocks(content);
 
+      // 2b. index sourcepos blocks now that the block set is final (mermaid
+      //     conversion replaced its <pre> nodes; enrichment below only
+      //     mutates within blocks).
+      _buildLineIndex(content);
+
       // 3. lazy enrichment in a safe order: highlight remaining code, then
       //    KaTeX (skips pre/code via ignoredTags), then mermaid diagrams.
+      //    Each stage exits when a newer render has superseded this one.
       Promise.resolve()
-        .then(function () { return highlightCode(content); })
-        .then(function () { return renderMath(content); })
-        .then(function () { return renderMermaid(content, mermaidNodes); })
-        .then(function () { post({ type: "renderComplete" }); })
-        .catch(function (e) { postError(e && e.message ? e.message : e); });
+        .then(function () { if (gen !== _renderGen) return; return highlightCode(content); })
+        .then(function () { if (gen !== _renderGen) return; return renderMath(content); })
+        .then(function () { if (gen !== _renderGen) return; return renderMermaid(content, mermaidNodes); })
+        .then(function () {
+          if (gen !== _renderGen) return;
+          post({ type: "renderComplete", gen: gen });
+        })
+        .catch(function (e) {
+          if (gen !== _renderGen) return; // stale chain: outcome no longer matters
+          postError(e && e.message ? e.message : e);
+        });
     } catch (e) {
       postError(e && e.message ? e.message : e);
     }
@@ -332,35 +358,47 @@
     return isNaN(n) ? null : n;
   }
 
-  // The deepest block whose sourcepos start is <= line (last match in document
-  // order wins, so a list item beats its containing list). Falls back to the
-  // first block when `line` precedes all blocks.
-  function _elementForLine(line) {
-    var content = document.getElementById("content");
-    if (!content) return null;
+  // Index of {line, el} in document order, built once per render. Cursor and
+  // scroll sync fire at debounce cadence; without the index each fired a
+  // querySelectorAll + full attribute parse over every rendered block.
+  var _lineIndex = [];
+
+  function _buildLineIndex(content) {
+    _lineIndex = [];
     var els = content.querySelectorAll("[data-sourcepos]");
-    var best = null, bestLine = -1;
     for (var i = 0; i < els.length; i++) {
       var start = _sourceposStart(els[i]);
-      if (start === null) continue;
-      if (start <= line && start >= bestLine) { best = els[i]; bestLine = start; }
+      if (start !== null) _lineIndex.push({ line: start, el: els[i] });
     }
-    return best || (els.length ? els[0] : null);
+  }
+
+  // The deepest block whose sourcepos start is <= line (last match in document
+  // order wins, so a list item beats its containing list). Falls back to the
+  // first block when `line` precedes all blocks. Starts in document order are
+  // nondecreasing (pre-order over source positions), so binary-search the
+  // rightmost entry with line <= target.
+  function _elementForLine(line) {
+    if (_lineIndex.length === 0) return null;
+    var lo = 0, hi = _lineIndex.length - 1, found = -1;
+    while (lo <= hi) {
+      var mid = (lo + hi) >> 1;
+      if (_lineIndex[mid].line <= line) { found = mid; lo = mid + 1; }
+      else { hi = mid - 1; }
+    }
+    return found >= 0 ? _lineIndex[found].el : _lineIndex[0].el;
   }
 
   // Source line of the topmost visible block, preferring the deepest nested
   // block (children follow parents in document order, so a visible child
   // inside a tall container wins over the container itself).
   function topVisibleSourceLine() {
-    var content = document.getElementById("content");
-    if (!content) return null;
-    var els = content.querySelectorAll("[data-sourcepos]");
     var best = null;
-    for (var i = 0; i < els.length; i++) {
-      var r = els[i].getBoundingClientRect();
+    for (var i = 0; i < _lineIndex.length; i++) {
+      var el = _lineIndex[i].el;
+      var r = el.getBoundingClientRect();
       if (r.height <= 0 || r.bottom <= 0) continue;      // empty or above viewport
       if (r.top > window.innerHeight) break;             // below viewport — done
-      if (best === null || best.contains(els[i])) best = els[i];
+      if (best === null || best.contains(el)) best = el;
       else break;                                        // left the first visible container
     }
     return best ? _sourceposStart(best) : null;
@@ -406,6 +444,7 @@
 
   var _findRanges = [];
   var _findIndex = -1;
+  var _findTotal = 0;   // true match count; can exceed the materialized ranges
 
   function _supportsHighlight() {
     return !!(window.CSS && CSS.highlights && window.Highlight);
@@ -414,6 +453,7 @@
   function clearFind() {
     _findRanges = [];
     _findIndex = -1;
+    _findTotal = 0;
     if (_supportsHighlight()) {
       CSS.highlights.delete("tvmv-find");
       CSS.highlights.delete("tvmv-find-current");
@@ -455,15 +495,25 @@
       }
     });
 
+    // Materialized Range objects (and their highlights) are capped: a short
+    // query in repetitive content can match hundreds of thousands of times,
+    // and each retained Range pins DOM state. Counting continues past the cap
+    // so the match label stays honest; navigation cycles the materialized set.
+    var MAX_RANGES = 10000;
+    var total = 0;
+
     var node;
     while ((node = walker.nextNode())) {
       var hay = node.nodeValue.toLowerCase();
       var from = 0, i;
       while ((i = hay.indexOf(q, from)) !== -1) {
-        var r = document.createRange();
-        r.setStart(node, i);
-        r.setEnd(node, i + q.length);
-        _findRanges.push(r);
+        total++;
+        if (_findRanges.length < MAX_RANGES) {
+          var r = document.createRange();
+          r.setStart(node, i);
+          r.setEnd(node, i + q.length);
+          _findRanges.push(r);
+        }
         from = i + q.length;
       }
     }
@@ -474,11 +524,12 @@
       CSS.highlights.set("tvmv-find", all);
     }
 
+    _findTotal = total;
     if (_findRanges.length > 0) {
       _findIndex = 0;
       _paintCurrent();
     }
-    return { count: _findRanges.length, index: _findRanges.length ? 1 : 0 };
+    return { count: _findTotal, index: _findRanges.length ? 1 : 0 };
   }
 
   // Move to the next (dir >= 0) or previous (dir < 0) match, wrapping around.
@@ -487,7 +538,7 @@
     var step = (dir < 0) ? -1 : 1;
     _findIndex = (_findIndex + step + _findRanges.length) % _findRanges.length;
     _paintCurrent();
-    return { count: _findRanges.length, index: _findIndex + 1 };
+    return { count: _findTotal, index: _findIndex + 1 };
   }
 
   /* ---- public: user CSS override --------------------------------------- */

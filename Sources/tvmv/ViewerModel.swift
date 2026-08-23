@@ -52,6 +52,13 @@ final class ViewerModel: ObservableObject {
     private var previewNeedsRender = false
     private var scrollSyncDebounce: DispatchWorkItem?
     private var cursorSyncDebounce: DispatchWorkItem?
+    private var findDebounce: DispatchWorkItem?
+    /// Orders find operations: results carrying a stale generation are
+    /// dropped, so fast typing can't land counts out of order.
+    private var findGeneration = 0
+    /// Query still inside the debounce window; findNext flushes it so
+    /// type-then-Return never navigates against a search that never ran.
+    private var pendingFindQuery: String?
     private var watcher: FileWatcher?
     private var cssWatcher: FileWatcher?
     private var isReady = false
@@ -398,15 +405,45 @@ final class ViewerModel: ObservableObject {
         Task { await controller?.scrollToAnchor(item.anchor) }
     }
 
+    /// Debounced: each keystroke in the find bar is a full-document scan on
+    /// the JS side, so let typing settle before searching, and drop any
+    /// result that a newer query has superseded.
     func find(_ query: String) {
-        Task {
-            let r = await controller?.find(query)
-            findCount = r?.count ?? 0
-            findIndex = r?.index ?? 0
+        findGeneration += 1
+        let gen = findGeneration
+        findDebounce?.cancel()
+        pendingFindQuery = query
+        let work = DispatchWorkItem { [weak self] in
+            Task { @MainActor [weak self] in
+                guard let self, gen == self.findGeneration else { return }
+                self.pendingFindQuery = nil
+                let r = await self.controller?.find(query)
+                guard gen == self.findGeneration else { return }   // stale result
+                self.findCount = r?.count ?? 0
+                self.findIndex = r?.index ?? 0
+            }
         }
+        findDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
     func findNext(forward: Bool) {
+        findGeneration += 1   // navigation supersedes any pending re-search
+        let gen = findGeneration
+        findDebounce?.cancel()
+        // Flush a query still inside the debounce window: searching lands on
+        // the first match, which is exactly what Return means here.
+        if let query = pendingFindQuery {
+            pendingFindQuery = nil
+            Task { @MainActor [weak self] in
+                guard let self, gen == self.findGeneration else { return }
+                let r = await self.controller?.find(query)
+                guard gen == self.findGeneration else { return }
+                self.findCount = r?.count ?? 0
+                self.findIndex = r?.index ?? 0
+            }
+            return
+        }
         Task {
             let r = await controller?.findNext(forward: forward)
             findCount = r?.count ?? 0
@@ -415,6 +452,9 @@ final class ViewerModel: ObservableObject {
     }
 
     func clearFind() {
+        findGeneration += 1
+        findDebounce?.cancel()
+        pendingFindQuery = nil
         findCount = 0
         findIndex = 0
         Task { await controller?.clearFind() }
