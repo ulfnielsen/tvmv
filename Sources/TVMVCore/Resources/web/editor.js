@@ -200,6 +200,7 @@
     getText: getText,
     applyStyle: applyStyle,
     focusEditor: focusEditor,
+    _view: view,   // debug/test hook: lets harnesses dispatch real transactions
   };
 
   post({ type: "ready" });

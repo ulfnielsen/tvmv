@@ -31,12 +31,18 @@ struct DocumentScreen: View {
             }
             .navigationTitle(fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled")
         } detail: {
-            preview
+            panes
                 .overlay(alignment: .topTrailing) { if showFind { findBar } }
                 .overlay(alignment: .bottom) {
                     if let message = model.errorMessage { errorBanner(message) }
                 }
                 .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { model.toggleEditing() } label: {
+                            Image(systemName: model.isEditing
+                                  ? "pencil.circle.fill" : "pencil.circle")
+                        }
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { showFind = true; findFocused = true } label: {
                             Image(systemName: "magnifyingglass")
@@ -44,6 +50,12 @@ struct DocumentScreen: View {
                     }
                 }
         }
+        .onAppear {
+            // Every settled edit flows into the document binding; the system
+            // document machinery autosaves and handles conflicts from there.
+            model.onTextChange = { document.text = $0 }
+        }
+        .onChange(of: settings.editorStyleJSON) { Task { await model.applyEditorStyle() } }
         .onChange(of: selection) { _, new in
             if let new, let item = model.outline.first(where: { $0.id == new }) {
                 model.scrollTo(item)
@@ -58,6 +70,34 @@ struct DocumentScreen: View {
 
     private var chromeColor: Color? {
         model.chromeColor.map { Color(red: $0.red, green: $0.green, blue: $0.blue) }
+    }
+
+    private var panes: some View {
+        HStack(spacing: 0) {
+            if model.isEditing {
+                editorPane.frame(minWidth: 280)
+                Divider()
+            }
+            preview.frame(minWidth: 280)
+        }
+    }
+
+    private var editorPane: some View {
+        EditorPaneView(
+            appWebDir: WebResources.baseURL,
+            callbacks: EditorBridgeCallbacks(
+                onReady: { model.editorReady(bridge: $0) },
+                onTextPatch: { patches, length in
+                    model.editorTextPatched(patches, expectedLength: length)
+                },
+                onCursorMoved: { line, offset in
+                    model.editorCursorMoved(line: line, offset: offset)
+                },
+                onScrolled: { model.editorScrolled(topLine: $0) },
+                onError: { model.errorMessage = $0 }
+            ),
+            onMakeBridge: { model.attach(editor: $0) }
+        )
     }
 
     private var preview: some View {
