@@ -20,6 +20,11 @@ struct DocumentScreen: View {
     @State private var showOutlineSheet = false
     @State private var showSettings = false
     @State private var pdfURL: URL?
+    /// The editor web view is created on first use and then kept alive.
+    @State private var editorCreated = false
+    /// Kept so re-entering edit mode can re-attach: the model releases its
+    /// bridge on close, and a kept-alive page fires `ready` only once.
+    @State private var editorBridge: EditorBridge?
 
     init(document: Binding<MarkdownEditableDocument>, fileURL: URL?) {
         _document = document
@@ -109,18 +114,52 @@ struct DocumentScreen: View {
     }
 
     private var panes: some View {
+        // Both web views stay ALIVE across edit toggles: tearing down a
+        // WKWebView while it is still first responder (keyboard up) is a
+        // crash-prone UIKit path, and destroying the hidden preview would
+        // disconnect the live re-render pipeline while editing.
         Group {
             if hSizeClass == .compact {
-                // One pane at a time; the toolbar pencil toggles which.
-                if model.isEditing { editorPane } else { preview }
+                // One pane visible at a time; the toolbar pencil toggles.
+                ZStack {
+                    preview
+                        .opacity(model.isEditing ? 0 : 1)
+                        .allowsHitTesting(!model.isEditing)
+                    if editorCreated {
+                        editorPane
+                            .opacity(model.isEditing ? 1 : 0)
+                            .allowsHitTesting(model.isEditing)
+                    }
+                }
             } else {
                 HStack(spacing: 0) {
-                    if model.isEditing {
-                        editorPane.frame(minWidth: 280)
-                        Divider()
+                    if editorCreated {
+                        editorPane
+                            .frame(minWidth: model.isEditing ? 280 : 0,
+                                   maxWidth: model.isEditing ? .infinity : 0)
+                            .opacity(model.isEditing ? 1 : 0)
+                            .allowsHitTesting(model.isEditing)
+                        if model.isEditing { Divider() }
                     }
                     preview.frame(minWidth: 280)
                 }
+            }
+        }
+        .onChange(of: model.isEditing) { _, editing in
+            if editing {
+                if let bridge = editorBridge {
+                    // Re-entering with the kept-alive editor: the page's
+                    // `ready` fired long ago, so re-attach and re-seed here.
+                    model.attach(editor: bridge)
+                    model.editorReady(bridge: bridge)
+                } else {
+                    editorCreated = true   // first time: `ready` drives setup
+                }
+            } else {
+                // Hidden, not torn down — so hand the keyboard back explicitly.
+                UIApplication.shared.sendAction(
+                    #selector(UIResponder.resignFirstResponder),
+                    to: nil, from: nil, for: nil)
             }
         }
     }
@@ -139,7 +178,10 @@ struct DocumentScreen: View {
                 onScrolled: { model.editorScrolled(topLine: $0) },
                 onError: { model.errorMessage = $0 }
             ),
-            onMakeBridge: { model.attach(editor: $0) }
+            onMakeBridge: { bridge in
+                editorBridge = bridge
+                model.attach(editor: bridge)
+            }
         )
     }
 

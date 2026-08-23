@@ -9,7 +9,7 @@ targets:
   TVMV:
     type: application
     platform: iOS
-    sources: [Sources]
+    sources: [Sources, Resources]
     dependencies:
       - package: tvmv
         product: TVMVCore
@@ -20,6 +20,7 @@ targets:
         SWIFT_VERSION: "6.0"
         DEVELOPMENT_TEAM: 9LTFHV87LB
         CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     info:
       path: Info.plist
       properties:

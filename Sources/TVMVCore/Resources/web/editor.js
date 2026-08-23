@@ -78,6 +78,14 @@
 
   function extensions() {
     return [
+      // CodeMirror disables system text services by default — desktop editor
+      // behavior. On touch devices (phone/tablet keyboards) prose editing
+      // wants autocorrect, auto-capitalization, and the spell underline.
+      CMSTATE.EditorView.contentAttributes.of(
+        (navigator.maxTouchPoints > 0)
+          ? { autocorrect: "on", autocapitalize: "sentences", spellcheck: "true" }
+          : {}
+      ),
       CMSTATE.history(),
       CMSTATE.drawSelection(),
       CMSTATE.highlightActiveLine(),
