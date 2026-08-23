@@ -19,6 +19,13 @@ public final class FileWatcher: @unchecked Sendable {
     private var debounceWorkItem: DispatchWorkItem?
     private var isRunning = false
 
+    /// Re-attach retry cadence when the path can't be opened (missing file).
+    /// Exponential backoff keeps a window on a deleted document from polling
+    /// at 10 Hz forever; a successful attach resets it.
+    private static let initialRetryMs = 100
+    private static let maxRetryMs = 5_000
+    private var retryDelayMs = FileWatcher.initialRetryMs
+
     public init(
         url: URL,
         debounceMilliseconds: Int = 150,
@@ -33,6 +40,7 @@ public final class FileWatcher: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self, !self.isRunning else { return }
             self.isRunning = true
+            self.retryDelayMs = Self.initialRetryMs
             self.attach()
         }
     }
@@ -48,8 +56,20 @@ public final class FileWatcher: @unchecked Sendable {
     }
 
     deinit {
-        source?.cancel()
-        if fileDescriptor >= 0 { close(fileDescriptor) }
+        // Exactly one owner per descriptor: when a source exists, its cancel
+        // handler closes the captured fd (asynchronously, on the queue).
+        // Closing here too would free the number for reuse before that handler
+        // runs, letting it close an unrelated descriptor.
+        if let src = source {
+            src.cancel()
+        } else if fileDescriptor >= 0 {
+            close(fileDescriptor)
+        }
+    }
+
+    /// Current retry delay, for tests asserting backoff behavior.
+    func retryDelayForTesting() -> Int {
+        queue.sync { retryDelayMs }
     }
 
     // MARK: - Private (all run on `queue`)
@@ -60,12 +80,15 @@ public final class FileWatcher: @unchecked Sendable {
         let path = url.resolvingSymlinksInPath().path
         let fd = open(path, O_EVTONLY)
         guard fd >= 0 else {
-            queue.asyncAfter(deadline: .now() + .milliseconds(100)) { [weak self] in
+            let delay = retryDelayMs
+            retryDelayMs = min(retryDelayMs * 2, Self.maxRetryMs)
+            queue.asyncAfter(deadline: .now() + .milliseconds(delay)) { [weak self] in
                 guard let self, self.isRunning else { return }
                 self.attach()
             }
             return
         }
+        retryDelayMs = Self.initialRetryMs
         fileDescriptor = fd
 
         let src = DispatchSource.makeFileSystemObjectSource(
