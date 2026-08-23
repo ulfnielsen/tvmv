@@ -3,109 +3,25 @@ import SwiftUI
 import AppKit
 import WebKit
 
-/// A captured editor location, used to restore cursor + scroll when the
-/// editor pane is closed and reopened. Offsets are UTF-16 code units (both
-/// CodeMirror positions and Swift's NSString-view lengths count UTF-16).
-struct EditorPosition {
-    var cursorOffset: Int   // clamped on restore
-    var topLine: Int        // 1-based
-}
-
-/// Events pushed by the editor page. All delivered on the main actor.
-struct EditorBridgeCallbacks {
-    var onReady: (@MainActor (EditorBridge) -> Void)?
-    /// Settled edits as compact patches (UTF-16 offsets against the document
-    /// as of the previous flush) plus the editor's post-change doc length.
-    var onTextPatch: (@MainActor ([TextPatcher.Patch], Int) -> Void)?
-    /// (1-based line, UTF-16 offset)
-    var onCursorMoved: (@MainActor (Int, Int) -> Void)?
-    /// 1-based first visible line
-    var onScrolled: (@MainActor (Int) -> Void)?
-    /// Editor page failed to load, or an uncaught JS error occurred — shown
-    /// to the user via the window's error banner.
-    var onError: (@MainActor (String) -> Void)?
-}
-
-/// Command surface into the CodeMirror page, mirroring MarkdownWebController's
-/// role for the preview. All calls are async JS round-trips; they no-op until
-/// the page is loaded (evaluate failures return nil).
-@MainActor
-final class EditorBridge {
-    weak var webView: WKWebView?
-
-    func setText(_ text: String, resetHistory: Bool) async {
-        await run("window.tvmvEditor.setText(\(JSString.literal(text)), \(resetHistory));")
-    }
-
-    func scrollToLine(_ line: Int, placeCursor: Bool) async {
-        await run("window.tvmvEditor.scrollToLine(\(line), \(placeCursor));")
-    }
-
-    func restore(_ p: EditorPosition) async {
-        await run("window.tvmvEditor.restore(\(p.cursorOffset), \(p.topLine));")
-    }
-
-    /// The authoritative document, for save flushes. Nil when the page is gone.
-    func getText() async -> String? {
-        await evaluate("window.tvmvEditor.getText()") as? String
-    }
-
-    func applyStyle(json: String) async {
-        await run("window.tvmvEditor.applyStyle(\(JSString.literal(json)));")
-    }
-
-    /// Keyboard focus: the web view first, then CodeMirror inside it.
-    func focus() {
-        guard let webView else { return }
-        webView.window?.makeFirstResponder(webView)
-        Task { await run("window.tvmvEditor.focusEditor();") }
-    }
-
-    @discardableResult
-    private func evaluate(_ js: String) async -> Any? {
-        guard let webView else { return nil }
-        do {
-            return try await webView.evaluateJavaScript(js, in: nil, contentWorld: .page)
-        } catch {
-            return nil
-        }
-    }
-
-    private func run(_ js: String) async {
-        _ = await evaluate(js)
-    }
-}
-
 /// NSViewRepresentable wrapping the editor WKWebView (a second, dedicated
-/// web view — the preview's pipeline is untouched).
+/// web view — the preview's pipeline is untouched). All bridge logic lives in
+/// TVMVCore's EditorCoordinator/EditorBridge; this shell only supplies the
+/// AppKit web view (with its undo decoy) and the platform lifecycle.
 struct CodeMirrorEditorPane: NSViewRepresentable {
     /// Base directory of bundled web resources (the `web/` folder).
     let appWebDir: URL
     var callbacks: EditorBridgeCallbacks = .init()
     var onMakeBridge: (@MainActor (EditorBridge) -> Void)?
 
-    func makeCoordinator() -> Coordinator { Coordinator(callbacks: callbacks) }
+    func makeCoordinator() -> EditorCoordinator { EditorCoordinator(callbacks: callbacks) }
 
     func makeNSView(context: Context) -> WKWebView {
         let coordinator = context.coordinator
-        let configuration = WKWebViewConfiguration()
-
-        let handler = AssetSchemeHandler(appBaseDir: appWebDir, docBaseDir: nil)
-        configuration.setURLSchemeHandler(handler, forURLScheme: AssetSchemeHandler.scheme)
-        configuration.userContentController.add(coordinator, name: "tvmvEditor")
-
-        let webView = EditorWebView(frame: .zero, configuration: configuration)
-        webView.navigationDelegate = coordinator
-        coordinator.webView = webView
-
-        let bridge = EditorBridge()
-        bridge.webView = webView
-        coordinator.bridge = bridge
+        let webView = EditorWebView(
+            frame: .zero,
+            configuration: coordinator.makeConfiguration(appWebDir: appWebDir))
+        let bridge = coordinator.attach(webView)
         onMakeBridge?(bridge)
-
-        if let url = URL(string: "\(AssetSchemeHandler.scheme)://app/editor.html") {
-            webView.load(URLRequest(url: url))
-        }
         return webView
     }
 
@@ -113,11 +29,8 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
         context.coordinator.callbacks = callbacks
     }
 
-    static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
-        // Explicit teardown: unregister the message handler and drop callbacks
-        // so a closing page's late events can never reach the model.
-        nsView.configuration.userContentController.removeScriptMessageHandler(forName: "tvmvEditor")
-        coordinator.callbacks = EditorBridgeCallbacks()
+    static func dismantleNSView(_ nsView: WKWebView, coordinator: EditorCoordinator) {
+        coordinator.detach(nsView)
     }
 
     /// WKWebView whose undo registrations never leave the view.
@@ -134,82 +47,5 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
     private final class EditorWebView: WKWebView {
         private let sandboxedUndoManager = UndoManager()
         override var undoManager: UndoManager? { sandboxedUndoManager }
-    }
-
-    @MainActor
-    final class Coordinator: NSObject, WKScriptMessageHandler, WKNavigationDelegate {
-        var callbacks: EditorBridgeCallbacks
-        weak var webView: WKWebView?
-        var bridge: EditorBridge?
-
-        init(callbacks: EditorBridgeCallbacks) {
-            self.callbacks = callbacks
-        }
-
-        // MARK: WKNavigationDelegate — editor page load failures
-
-        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
-            let nsError = error as NSError
-            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
-            callbacks.onError?("Editor failed to load: \(error.localizedDescription)")
-        }
-
-        func webView(
-            _ webView: WKWebView,
-            didFailProvisionalNavigation navigation: WKNavigation!,
-            withError error: Error
-        ) {
-            let nsError = error as NSError
-            if nsError.domain == NSURLErrorDomain && nsError.code == NSURLErrorCancelled { return }
-            callbacks.onError?("Editor failed to load: \(error.localizedDescription)")
-        }
-
-        nonisolated func userContentController(
-            _ userContentController: WKUserContentController,
-            didReceive message: WKScriptMessage
-        ) {
-            // WKScriptMessage delivery is main-thread; hop explicitly for Swift 6.
-            MainActor.assumeIsolated {
-                guard message.name == "tvmvEditor",
-                      let dict = message.body as? [String: Any],
-                      let type = dict["type"] as? String
-                else { return }
-
-                switch type {
-                case "ready":
-                    if let bridge { callbacks.onReady?(bridge) }
-                case "textPatch":
-                    if let raw = dict["patches"] as? [[Any]],
-                       let length = dict["length"] as? Int {
-                        let patches = raw.compactMap { entry -> TextPatcher.Patch? in
-                            guard entry.count == 3,
-                                  let from = entry[0] as? Int,
-                                  let to = entry[1] as? Int,
-                                  let insert = entry[2] as? String
-                            else { return nil }
-                            return TextPatcher.Patch(from: from, to: to, insert: insert)
-                        }
-                        // A triple that failed to parse means the payload is
-                        // incoherent — deliver an empty list so the model
-                        // resyncs rather than applying a partial edit.
-                        callbacks.onTextPatch?(patches.count == raw.count ? patches : [], length)
-                    }
-                case "cursorMoved":
-                    if let line = dict["line"] as? Int, let offset = dict["offset"] as? Int {
-                        callbacks.onCursorMoved?(line, offset)
-                    }
-                case "scrolled":
-                    if let line = dict["topLine"] as? Int {
-                        callbacks.onScrolled?(line)
-                    }
-                case "error":
-                    if let msg = dict["message"] as? String {
-                        callbacks.onError?("Editor: \(msg)")
-                    }
-                default:
-                    break
-                }
-            }
-        }
     }
 }
