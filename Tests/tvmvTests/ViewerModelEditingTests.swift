@@ -44,6 +44,24 @@ final class ViewerModelEditingTests: XCTestCase {
         XCTAssertEqual(model.text, "abcd\n")
     }
 
+    func testEditorPatchesApplyToModelText() {
+        let model = ViewerModel(text: "hello world\n", fileURL: nil, encoding: .utf8)
+        model.editorTextPatched([.init(from: 5, to: 5, insert: " brave")],
+                                expectedLength: 18)
+        XCTAssertEqual(model.text, "hello brave world\n")
+        XCTAssertTrue(model.isDirty)
+    }
+
+    func testIncoherentEditorPatchLeavesTextUntouched() {
+        // Length mismatch must never half-apply; the model falls back to a
+        // full editor pull (a no-op here — no bridge attached in tests).
+        let model = ViewerModel(text: "hello\n", fileURL: nil, encoding: .utf8)
+        model.editorTextPatched([.init(from: 0, to: 1, insert: "J")],
+                                expectedLength: 99)
+        XCTAssertEqual(model.text, "hello\n")
+        XCTAssertFalse(model.isDirty)
+    }
+
     func testEditingBackToSavedTextClearsDirty() throws {
         let url = try tempFile("a\n")
         let model = ViewerModel(text: "a\n", fileURL: url, encoding: .utf8)

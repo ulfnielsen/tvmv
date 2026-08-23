@@ -145,7 +145,9 @@ struct ViewerWindow: View {
             appWebDir: WebResources.baseURL,
             callbacks: EditorBridgeCallbacks(
                 onReady: { model.editorReady(bridge: $0) },
-                onTextChanged: { model.editorTextChanged($0) },
+                onTextPatch: { patches, length in
+                    model.editorTextPatched(patches, expectedLength: length)
+                },
                 onCursorMoved: { line, offset in model.editorCursorMoved(line: line, offset: offset) },
                 onScrolled: { line in model.editorScrolled(topLine: line) },
                 onError: { msg in model.errorMessage = msg }

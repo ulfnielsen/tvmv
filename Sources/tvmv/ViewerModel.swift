@@ -198,9 +198,18 @@ final class ViewerModel: ObservableObject {
         }
     }
 
-    /// Editor event: text changed (already debounced ~100 ms page-side).
-    func editorTextChanged(_ newText: String) {
-        textEdited(newText)
+    /// Editor event: settled edits as patches (already debounced ~100 ms
+    /// page-side). Applies them to the model's text; any incoherence — bad
+    /// ranges, length mismatch, unparseable payload — falls back to pulling
+    /// the full document, so the editor stays authoritative.
+    func editorTextPatched(_ patches: [TextPatcher.Patch], expectedLength: Int) {
+        if !patches.isEmpty,
+           let newText = TextPatcher.apply(patches, to: text,
+                                           expectedUTF16Length: expectedLength) {
+            textEdited(newText)
+        } else {
+            Task { await flushEditorText() }
+        }
     }
 
     /// Editor event: scrolled. Keep the preview's top aligned (debounced).

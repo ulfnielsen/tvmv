@@ -14,7 +14,9 @@ struct EditorPosition {
 /// Events pushed by the editor page. All delivered on the main actor.
 struct EditorBridgeCallbacks {
     var onReady: (@MainActor (EditorBridge) -> Void)?
-    var onTextChanged: (@MainActor (String) -> Void)?
+    /// Settled edits as compact patches (UTF-16 offsets against the document
+    /// as of the previous flush) plus the editor's post-change doc length.
+    var onTextPatch: (@MainActor ([TextPatcher.Patch], Int) -> Void)?
     /// (1-based line, UTF-16 offset)
     var onCursorMoved: (@MainActor (Int, Int) -> Void)?
     /// 1-based first visible line
@@ -176,9 +178,21 @@ struct CodeMirrorEditorPane: NSViewRepresentable {
                 switch type {
                 case "ready":
                     if let bridge { callbacks.onReady?(bridge) }
-                case "textChanged":
-                    if let text = dict["text"] as? String {
-                        callbacks.onTextChanged?(text)
+                case "textPatch":
+                    if let raw = dict["patches"] as? [[Any]],
+                       let length = dict["length"] as? Int {
+                        let patches = raw.compactMap { entry -> TextPatcher.Patch? in
+                            guard entry.count == 3,
+                                  let from = entry[0] as? Int,
+                                  let to = entry[1] as? Int,
+                                  let insert = entry[2] as? String
+                            else { return nil }
+                            return TextPatcher.Patch(from: from, to: to, insert: insert)
+                        }
+                        // A triple that failed to parse means the payload is
+                        // incoherent — deliver an empty list so the model
+                        // resyncs rather than applying a partial edit.
+                        callbacks.onTextPatch?(patches.count == raw.count ? patches : [], length)
                     }
                 case "cursorMoved":
                     if let line = dict["line"] as? Int, let offset = dict["offset"] as? Int {

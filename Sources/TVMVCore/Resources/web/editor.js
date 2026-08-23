@@ -25,9 +25,26 @@
   var POS_DEBOUNCE_MS = 100;
   var textTimer = null, cursorTimer = null, scrollTimer = null;
 
+  // Edits accumulate as a composed ChangeSet against the document as of the
+  // last flush; the flush posts compact [from, to, insert] patches (UTF-16
+  // offsets, ascending, non-overlapping) instead of the complete document.
+  // Native rebuilds its text from them and falls back to getText() on any
+  // mismatch. `suppressChanges` masks programmatic setText, which resets the
+  // baseline itself.
+  var pendingChanges = null;
+  var suppressChanges = false;
+
   function flushText() {
     if (textTimer !== null) { clearTimeout(textTimer); textTimer = null; }
-    post({ type: "textChanged", text: view.state.doc.toString() });
+    if (!pendingChanges) return;
+    var changes = pendingChanges;
+    pendingChanges = null;
+    var patches = [];
+    changes.iterChanges(function (fromA, toA, fromB, toB, inserted) {
+      patches.push([fromA, toA, inserted.toString()]);
+    });
+    if (patches.length === 0) return;
+    post({ type: "textPatch", patches: patches, length: view.state.doc.length });
   }
 
   function queueText() {
@@ -70,8 +87,15 @@
       CMSTATE.keymap.of(CMSTATE.defaultKeymap.concat(CMSTATE.historyKeymap)),
       themeCompartment.of([]),                       // light: bare; dark: oneDark
       CMSTATE.EditorView.updateListener.of(function (update) {
-        if (update.docChanged) { queueText(); queueCursor(); }
-        else if (update.selectionSet) { queueCursor(); }
+        if (update.docChanged) {
+          if (!suppressChanges) {
+            pendingChanges = pendingChanges
+              ? pendingChanges.compose(update.changes)
+              : update.changes;
+            queueText();
+          }
+          queueCursor();
+        } else if (update.selectionSet) { queueCursor(); }
       }),
     ];
   }
@@ -97,17 +121,28 @@
   }
 
   function setText(text, resetHistory) {
-    if (resetHistory) {
-      // Fresh state: replaced text (external reload / discard) must not be
-      // resurrectable via undo.
-      view.setState(CMSTATE.EditorState.create({ doc: text, extensions: extensions() }));
-      applyStyle(_lastStyle); // recreate loses the theme compartment's config
-    } else {
-      var sel = clampOffset(view.state.selection.main.head);
-      view.dispatch({
-        changes: { from: 0, to: view.state.doc.length, insert: text },
-        selection: { anchor: Math.min(sel, text.length) },
-      });
+    // Programmatic replacement: native already holds this text, so pending
+    // user edits against the OLD document are moot and must not be flushed
+    // (their coordinates no longer mean anything), and the replacement itself
+    // must not echo back as a patch.
+    if (textTimer !== null) { clearTimeout(textTimer); textTimer = null; }
+    pendingChanges = null;
+    suppressChanges = true;
+    try {
+      if (resetHistory) {
+        // Fresh state: replaced text (external reload / discard) must not be
+        // resurrectable via undo.
+        view.setState(CMSTATE.EditorState.create({ doc: text, extensions: extensions() }));
+        applyStyle(_lastStyle); // recreate loses the theme compartment's config
+      } else {
+        var sel = clampOffset(view.state.selection.main.head);
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: text },
+          selection: { anchor: Math.min(sel, text.length) },
+        });
+      }
+    } finally {
+      suppressChanges = false;
     }
   }
 
@@ -125,6 +160,12 @@
   }
 
   function getText() {
+    // A full pull hands native the authoritative document INCLUDING edits
+    // still pending in the composed set — so the patch baseline resets here,
+    // or those edits would later arrive as patches against an already-updated
+    // base.
+    if (textTimer !== null) { clearTimeout(textTimer); textTimer = null; }
+    pendingChanges = null;
     return view.state.doc.toString();
   }
 
