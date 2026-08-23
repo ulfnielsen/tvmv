@@ -25,20 +25,25 @@ targets:
         UILaunchScreen: {}
         UISupportsDocumentBrowser: true
         LSSupportsOpeningDocumentsInPlace: true
+        UIFileSharingEnabled: true
         CFBundleDocumentTypes:
           - CFBundleTypeName: Markdown Document
+            CFBundleTypeRole: Editor
             LSHandlerRank: Owner
             LSItemContentTypes: [net.daringfireball.markdown]
-        UTImportedTypeDeclarations:
-          - UTTypeIdentifier: net.daringfireball.markdown
-            UTTypeDescription: Markdown Document
-            UTTypeConformsTo: [public.plain-text]
-            UTTypeTagSpecification:
-              public.filename-extension: [md, markdown]
   TVMVTests:
     type: bundle.unit-test
     platform: iOS
     sources: [Tests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: TVMV
+  TVMVUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [UITests]
     settings:
       base:
         GENERATE_INFOPLIST_FILE: YES
