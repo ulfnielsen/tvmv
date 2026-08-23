@@ -53,8 +53,8 @@ end
 set -l ql_src \
     quicklook/PreviewViewController.swift \
     quicklook/PreviewAssetSchemeHandler.swift \
-    Sources/tvmv/MarkdownRenderer.swift \
-    Sources/tvmv/MarkdownText.swift
+    Sources/TVMVCore/MarkdownRenderer.swift \
+    Sources/TVMVCore/MarkdownText.swift
 
 set -l build_dir .build/quicklook
 rm -rf $build_dir
@@ -90,7 +90,7 @@ cp $exe $appex/Contents/MacOS/TVMVQuickLook
 cp quicklook/Info.plist $appex/Contents/Info.plist
 
 # Bundled web assets -> Contents/Resources/web (Bundle(for:).resourceURL/web).
-cp -R Sources/tvmv/Resources/web $appex/Contents/Resources/web
+cp -R Sources/TVMVCore/Resources/web $appex/Contents/Resources/web
 echo "    copied web/ -> Contents/Resources/web"
 
 # --- 6. Sign the appex with the sandbox entitlement (inside-out) ------------
@@ -121,7 +121,7 @@ echo "==> [QL] embedded preview appex -> $app/Contents/PlugIns/"
 # so it needs neither the scheme handler, the cmark renderer, nor WebKit.
 set -l thumb_src \
     quicklook/ThumbnailProvider.swift \
-    Sources/tvmv/MarkdownText.swift
+    Sources/TVMVCore/MarkdownText.swift
 
 set -l thumb_build_dir .build/quicklook-thumbnail
 rm -rf $thumb_build_dir

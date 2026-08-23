@@ -6,7 +6,7 @@ import cmark_gfm_extensions
 /// Enables the GFM core extensions: table, strikethrough, autolink, tasklist.
 /// - Parameter sourcePos: When true, block elements carry `data-sourcepos="line:col-line:col"`
 ///   attributes for editor/preview sync. Default false keeps output byte-identical for QuickLook.
-func renderHTML(_ markdown: String, sourcePos: Bool = false) -> String {
+public func renderHTML(_ markdown: String, sourcePos: Bool = false) -> String {
     // Register the GFM core extensions exactly once per process. This populates
     // the global registry queried by `cmark_find_syntax_extension`. Idempotent.
     cmark_gfm_core_extensions_ensure_registered()

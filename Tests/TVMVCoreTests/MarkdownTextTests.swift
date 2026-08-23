@@ -1,5 +1,5 @@
 import XCTest
-@testable import tvmv
+@testable import TVMVCore
 
 final class MarkdownTextTests: XCTestCase {
     func testUTF8() {

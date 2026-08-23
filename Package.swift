@@ -8,14 +8,16 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-cmark.git", branch: "gfm")
     ],
     targets: [
-        .executableTarget(
-            name: "tvmv",
+        .target(
+            name: "TVMVCore",
             dependencies: [
                 .product(name: "cmark-gfm", package: "swift-cmark"),
                 .product(name: "cmark-gfm-extensions", package: "swift-cmark")
             ],
             resources: [.copy("Resources/web")]
         ),
+        .executableTarget(name: "tvmv", dependencies: ["TVMVCore"]),
+        .testTarget(name: "TVMVCoreTests", dependencies: ["TVMVCore"]),
         .testTarget(name: "tvmvTests", dependencies: ["tvmv"])
     ]
 )

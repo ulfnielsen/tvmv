@@ -8,9 +8,9 @@ import Foundation
 /// colors, spacing — anything. Edit the file and it live-reloads (the viewer
 /// watches it). Override the typography *variables* (`--tvmv-…`) with
 /// `!important`, since the app sets them inline for live Settings updates.
-enum UserCSS {
+public enum UserCSS {
     /// The stylesheet contents at `url`, or `nil` if absent/unreadable.
-    static func load(_ url: URL?) -> String? {
+    public static func load(_ url: URL?) -> String? {
         guard let url, let data = try? Data(contentsOf: url) else { return nil }
         return String(data: data, encoding: .utf8)
     }

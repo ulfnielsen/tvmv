@@ -12,9 +12,9 @@ import UniformTypeIdentifiers
 /// WKURLSchemeHandler and WKURLSchemeTask are @MainActor-isolated, so this
 /// type is too.
 @MainActor
-final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
+public final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
 
-    static let scheme = "tvmv-asset"
+    public static let scheme = "tvmv-asset"
 
     /// Base directory for bundled application web resources (the `web/` folder).
     private let appBaseDir: URL
@@ -23,14 +23,14 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
     /// different documents. `nil` means "no document loaded yet".
     private var docBaseDir: URL?
 
-    init(appBaseDir: URL, docBaseDir: URL? = nil) {
+    public init(appBaseDir: URL, docBaseDir: URL? = nil) {
         self.appBaseDir = appBaseDir.standardizedFileURL
         self.docBaseDir = docBaseDir?.standardizedFileURL
         super.init()
     }
 
     /// Setter so each web view can update its current document directory.
-    func setDocumentDirectory(_ url: URL?) {
+    public func setDocumentDirectory(_ url: URL?) {
         docBaseDir = url?.standardizedFileURL
     }
 
@@ -44,7 +44,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
 
     // MARK: WKURLSchemeHandler
 
-    func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
+    public func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
         do {
             let fileURL = try resolve(urlSchemeTask.request.url)
             let data = try Data(contentsOf: fileURL)
@@ -65,7 +65,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
         }
     }
 
-    func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
+    public func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
         // Reads are synchronous & best-effort; nothing to cancel.
     }
 
@@ -121,7 +121,7 @@ final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
     }
 
     /// Derive a MIME type from a file's path extension via UTType.
-    static func mimeType(for url: URL) -> String {
+    public static func mimeType(for url: URL) -> String {
         let ext = url.pathExtension
         if !ext.isEmpty,
            let type = UTType(filenameExtension: ext),

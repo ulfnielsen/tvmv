@@ -1,5 +1,6 @@
 import XCTest
 @testable import tvmv
+import TVMVCore
 
 @MainActor
 final class ViewerModelEditingTests: XCTestCase {

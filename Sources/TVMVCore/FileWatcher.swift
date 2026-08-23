@@ -7,7 +7,7 @@ import Foundation
 ///
 /// All mutable state is confined to a private serial `DispatchQueue` so the type is
 /// safe to use from any thread. The user-supplied callback is hopped to the `MainActor`.
-final class FileWatcher: @unchecked Sendable {
+public final class FileWatcher: @unchecked Sendable {
     private let url: URL
     private let onChange: @MainActor @Sendable () -> Void
     private let debounceInterval: DispatchTimeInterval
@@ -19,7 +19,7 @@ final class FileWatcher: @unchecked Sendable {
     private var debounceWorkItem: DispatchWorkItem?
     private var isRunning = false
 
-    init(
+    public init(
         url: URL,
         debounceMilliseconds: Int = 150,
         onChange: @escaping @MainActor @Sendable () -> Void
@@ -29,7 +29,7 @@ final class FileWatcher: @unchecked Sendable {
         self.debounceInterval = .milliseconds(debounceMilliseconds)
     }
 
-    func start() {
+    public func start() {
         queue.async { [weak self] in
             guard let self, !self.isRunning else { return }
             self.isRunning = true
@@ -37,7 +37,7 @@ final class FileWatcher: @unchecked Sendable {
         }
     }
 
-    func stop() {
+    public func stop() {
         queue.async { [weak self] in
             guard let self else { return }
             self.isRunning = false

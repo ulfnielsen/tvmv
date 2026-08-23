@@ -1,12 +1,12 @@
 import Foundation
 
 /// Records which text encoding successfully decoded the source bytes.
-enum TextEncodingUsed: String, Sendable {
+public enum TextEncodingUsed: String, Sendable {
     case utf8, utf16, isoLatin1
 }
 
 /// Records which newline style the source bytes used.
-enum LineEndingUsed: String, Sendable {
+public enum LineEndingUsed: String, Sendable {
     case lf, crlf, cr
 }
 
@@ -17,8 +17,8 @@ enum LineEndingUsed: String, Sendable {
 /// the same way, so an untouched file must never compare "dirty" against the
 /// editor's echo. The original newline style is recorded and restored by
 /// `encode`, so saves round-trip the file's line endings byte-exactly.
-enum MarkdownText {
-    static func decode(_ data: Data) -> (text: String, encoding: TextEncodingUsed, lineEnding: LineEndingUsed) {
+public enum MarkdownText {
+    public static func decode(_ data: Data) -> (text: String, encoding: TextEncodingUsed, lineEnding: LineEndingUsed) {
         let (raw, encoding) = decodeBytes(data)
         let lineEnding: LineEndingUsed =
             raw.contains("\r\n") ? .crlf : (raw.contains("\r") ? .cr : .lf)
@@ -48,7 +48,7 @@ enum MarkdownText {
     /// newline style and encoding the file was read with. Falls back to UTF-8
     /// when the text is no longer representable (e.g. emoji typed into a
     /// Latin-1 file) — a readable file beats a failed save.
-    static func encode(_ text: String, encoding: TextEncodingUsed, lineEnding: LineEndingUsed = .lf) -> Data {
+    public static func encode(_ text: String, encoding: TextEncodingUsed, lineEnding: LineEndingUsed = .lf) -> Data {
         let restored: String = {
             switch lineEnding {
             case .lf: return text

@@ -1,5 +1,5 @@
 import XCTest
-@testable import tvmv
+@testable import TVMVCore
 
 @MainActor
 final class FileWatcherTests: XCTestCase {

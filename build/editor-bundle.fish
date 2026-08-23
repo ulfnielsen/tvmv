@@ -1,7 +1,7 @@
 #!/usr/bin/env fish
 #
 # editor-bundle.fish — build the vendored CodeMirror 6 bundle for the editor
-# pane. The output is COMMITTED (Sources/tvmv/Resources/web/vendor/codemirror/
+# pane. The output is COMMITTED (Sources/TVMVCore/Resources/web/vendor/codemirror/
 # codemirror.bundle.js) so normal builds never need npm; run this only to
 # upgrade CodeMirror.
 #
@@ -12,7 +12,7 @@
 
 set -l script_dir (cd (dirname (status --current-filename)); pwd)
 set -l repo_root (dirname $script_dir)
-set -l out_dir "$repo_root/Sources/tvmv/Resources/web/vendor/codemirror"
+set -l out_dir "$repo_root/Sources/TVMVCore/Resources/web/vendor/codemirror"
 set -l work (mktemp -d)
 
 echo "==> building CodeMirror bundle in $work"

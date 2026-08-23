@@ -3,7 +3,7 @@
 # bundle.fish — assemble the SwiftPM executable into a signed tvmv.app.
 #
 # Steps:
-#   1. release build, locate bin dir + executable + tvmv_tvmv.bundle
+#   1. release build, locate bin dir + executable + tvmv_TVMVCore.bundle
 #   2. assemble dist/tvmv.app (Contents/MacOS, Contents/Resources)
 #   3. codesign  (resource bundle in Contents/Resources => seals clean)
 #   4. install to ~/Applications, register doc types via lsregister
@@ -36,7 +36,7 @@ set -l bin (swift build -c release --show-bin-path)
 echo "==> bin dir: $bin"
 
 set -l exe $bin/tvmv
-set -l resbundle $bin/tvmv_tvmv.bundle
+set -l resbundle $bin/tvmv_TVMVCore.bundle
 if not test -x $exe
     echo "ERROR: executable not found at $exe" >&2
     exit $fail_status
@@ -61,8 +61,8 @@ cp $repo_root/build/Info.plist $app/Contents/Info.plist
 echo "    copied Info.plist -> Contents/Info.plist"
 
 # Resource bundle MUST live under Contents/Resources so codesign can seal it.
-cp -R $resbundle $app/Contents/Resources/tvmv_tvmv.bundle
-echo "    copied tvmv_tvmv.bundle -> Contents/Resources/"
+cp -R $resbundle $app/Contents/Resources/tvmv_TVMVCore.bundle
+echo "    copied tvmv_TVMVCore.bundle -> Contents/Resources/"
 
 # App icon (optional).
 set -l icon $repo_root/build/AppIcon.icns

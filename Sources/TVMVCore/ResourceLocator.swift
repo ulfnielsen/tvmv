@@ -6,7 +6,7 @@ import Foundation
 ///
 /// SwiftPM's generated `Bundle.module` accessor hard-codes a search for the
 /// resource bundle at the *root* of the surrounding `.app` (i.e.
-/// `tvmv.app/tvmv_tvmv.bundle`). That is wrong for two independent reasons in a
+/// `tvmv.app/tvmv_TVMVCore.bundle`). That is wrong for two independent reasons in a
 /// hand-assembled application bundle:
 ///
 ///   1. **Placement.** The canonical home for resources is
@@ -17,25 +17,25 @@ import Foundation
 ///      the signature fails. So we cannot satisfy `Bundle.module` and ship a
 ///      signable app at the same time.
 ///
-/// Resolution: copy the SwiftPM-produced `tvmv_tvmv.bundle` into
+/// Resolution: copy the SwiftPM-produced `tvmv_TVMVCore.bundle` into
 /// `Contents/Resources/` (codesigns clean) and open it explicitly with
 /// `Bundle(url:)`. A flat directory bundle needs no Info.plist of its own to be
 /// opened this way.
-enum WebResources {
+public enum WebResources {
 
     /// Name SwiftPM gives the resource bundle: `<PackageName>_<TargetName>`.
-    private static let resourceBundleName = "tvmv_tvmv.bundle"
+    private static let resourceBundleName = "tvmv_TVMVCore.bundle"
 
     /// URL of the bundled `web/` directory.
     ///
     /// Resolution order:
-    ///   1. Canonical: open `Contents/Resources/tvmv_tvmv.bundle` via
+    ///   1. Canonical: open `Contents/Resources/tvmv_TVMVCore.bundle` via
     ///      `Bundle(url:)` and append `web`.
     ///   2. Fallback: build the path directly off `Bundle.main.resourceURL`
     ///      (covers cases where `Bundle(url:)` returns nil).
     ///   3. Dev fallback for `swift run`: the loose `.bundle` SwiftPM drops next
     ///      to the executable in `.build/.../`.
-    static let baseURL: URL = {
+    public static let baseURL: URL = {
         // 1. Canonical: explicit Bundle(url:) into Contents/Resources.
         if let resources = Bundle.main.resourceURL {
             let bundleURL = resources.appendingPathComponent(resourceBundleName)
@@ -54,7 +54,7 @@ enum WebResources {
             }
         }
 
-        // 3. Dev fallback: `swift run` places tvmv_tvmv.bundle beside the
+        // 3. Dev fallback: `swift run` places tvmv_TVMVCore.bundle beside the
         // executable rather than inside a Resources/ dir.
         let besideExecutable = Bundle.main.bundleURL
             .appendingPathComponent(resourceBundleName)
