@@ -1,4 +1,5 @@
 import XCTest
+import Combine
 @testable import tvmv
 import TVMVCore
 
@@ -22,6 +23,25 @@ final class ViewerModelEditingTests: XCTestCase {
         XCTAssertFalse(model.isDirty)
         XCTAssertNil(model.saveError)
         XCTAssertEqual(try String(contentsOf: url, encoding: .utf8), "# hello world\n")
+    }
+
+    func testSteadyStateEditsDoNotRepublishTheModel() throws {
+        // The window doesn't render `text`, so keystroke batches must not
+        // invalidate the whole view tree: only the dirty-flag TRANSITION may
+        // publish, not every accepted edit.
+        let model = ViewerModel(text: "a\n", fileURL: nil, encoding: .utf8)
+        var publishes = 0
+        let sub = model.objectWillChange.sink { _ in publishes += 1 }
+        defer { sub.cancel() }
+
+        model.textEdited("ab\n")        // clean -> dirty: one publish
+        let afterFirst = publishes
+        model.textEdited("abc\n")       // still dirty: no publish
+        model.textEdited("abcd\n")      // still dirty: no publish
+        XCTAssertEqual(afterFirst, 1)
+        XCTAssertEqual(publishes, 1,
+            "steady-state edits published \(publishes - afterFirst) extra times")
+        XCTAssertEqual(model.text, "abcd\n")
     }
 
     func testEditingBackToSavedTextClearsDirty() throws {

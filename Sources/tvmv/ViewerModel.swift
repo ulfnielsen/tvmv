@@ -25,7 +25,10 @@ final class ViewerModel: ObservableObject {
     /// Newline style of the file on disk; `text` is always LF-normalized and
     /// saves restore this style.
     let lineEndingUsed: LineEndingUsed
-    @Published private(set) var text: String
+    /// Deliberately NOT @Published: no view renders the source text, and
+    /// publishing it would invalidate the whole window on every settled
+    /// keystroke batch. Views react to `isDirty` transitions instead.
+    private(set) var text: String
 
     private var lastSavedText: String
     private var controller: MarkdownWebController?
@@ -153,7 +156,10 @@ final class ViewerModel: ObservableObject {
     func textEdited(_ newText: String) {
         guard newText != text else { return }
         text = newText
-        isDirty = (newText != lastSavedText)
+        // Publish only the transition: reassigning an unchanged Bool still
+        // fires objectWillChange and invalidates the window per keystroke batch.
+        let dirty = (newText != lastSavedText)
+        if dirty != isDirty { isDirty = dirty }
         previewNeedsRender = true
         renderDebounce?.cancel()
         let work = DispatchWorkItem { [weak self] in
