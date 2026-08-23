@@ -123,7 +123,7 @@ final class ViewerModel: ObservableObject {
                 // position, preserving scroll so leaving edit mode never jumps.
                 let ratio = await self.controller?.getScrollRatio() ?? 0
                 await self.renderCurrent()
-                try? await Task.sleep(nanoseconds: 60_000_000) // let layout settle
+                await self.controller?.waitForLayoutSettle()
                 await self.controller?.setScrollRatio(ratio)
                 self.previewNeedsRender = false
             }
@@ -173,13 +173,23 @@ final class ViewerModel: ObservableObject {
             Task { @MainActor [weak self] in await self?.renderAfterEdit() }
         }
         renderDebounce = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
+        DispatchQueue.main.asyncAfter(deadline: .now() + renderDebounceDelay, execute: work)
+    }
+
+    /// Preview debounce scaled to document size: a settled edit costs a full
+    /// parse + DOM replacement, so multi-megabyte documents wait longer before
+    /// paying it while small documents keep the snappy cadence.
+    private var renderDebounceDelay: Double {
+        let bytes = text.utf8.count
+        if bytes > 4_000_000 { return 1.0 }
+        if bytes > 1_000_000 { return 0.6 }
+        return 0.25
     }
 
     private func renderAfterEdit() async {
         previewNeedsRender = false
         await renderCurrent()
-        try? await Task.sleep(nanoseconds: 60_000_000) // let layout settle
+        await controller?.waitForLayoutSettle()
         if isEditing {
             await controller?.scrollToSourceLine(lastEditorPosition.topLine)
         }
@@ -388,7 +398,7 @@ final class ViewerModel: ObservableObject {
         guard isReady, let controller else { return }
         let ratio = await controller.getScrollRatio()
         await renderCurrent()
-        try? await Task.sleep(nanoseconds: 60_000_000) // let layout settle
+        await controller.waitForLayoutSettle()
         await controller.setScrollRatio(ratio)
     }
 

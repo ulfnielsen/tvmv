@@ -187,8 +187,29 @@ final class MarkdownWebController {
     // MARK: Content
 
     func setContent(bodyHTML: String, docBaseHref: String) async {
-        let js = "window.tvmv.render(\(JSString.literal(bodyHTML)), \(JSString.literal(docBaseHref)));"
-        await run(js)
+        // Argument-based call: WebKit serializes the HTML natively instead of
+        // us JSON-encoding a second document-sized JavaScript source string.
+        guard let webView else { return }
+        _ = try? await webView.callAsyncJavaScript(
+            "window.tvmv.render(bodyHTML, docBaseHref);",
+            arguments: ["bodyHTML": bodyHTML, "docBaseHref": docBaseHref],
+            in: nil, contentWorld: .page)
+    }
+
+    /// Resolves after the page has completed a layout+paint pass (double
+    /// requestAnimationFrame). Replaces guessed fixed sleeps before scroll
+    /// restoration: correct on slow layouts, immediate on fast ones.
+    func waitForLayoutSettle() async {
+        guard let webView else { return }
+        _ = try? await webView.callAsyncJavaScript(
+            """
+            await new Promise(function (resolve) {
+                requestAnimationFrame(function () {
+                    requestAnimationFrame(function () { resolve(); });
+                });
+            });
+            """,
+            arguments: [:], in: nil, contentWorld: .page)
     }
 
     func applyStyle(json: String) async {
