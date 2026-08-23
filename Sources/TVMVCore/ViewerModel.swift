@@ -1,34 +1,37 @@
-import TVMVCore
 import SwiftUI
-import AppKit
 
 /// Owns one document window's render lifecycle: initial render after the page is
 /// ready, live reload with scroll preservation, outline, find, and print.
 @MainActor
-final class ViewerModel: ObservableObject {
-    @Published var outline: [OutlineItem] = []
-    @Published var errorMessage: String?
-    @Published var findCount = 0
-    @Published var findIndex = 0   // 1-based; 0 when no matches
-    @Published var chromeColor: NSColor?   // lightened page background, for window + sidebar
+public final class ViewerModel: ObservableObject {
+    @Published public var outline: [OutlineItem] = []
+    @Published public var errorMessage: String?
+    @Published public var findCount = 0
+    @Published public var findIndex = 0   // 1-based; 0 when no matches
+    @Published public var chromeColor: RGBAColor?   // lightened page background, for window + sidebar
 
     // MARK: Editing state
-    @Published var isEditing = false
-    @Published private(set) var isDirty = false
+    @Published public var isEditing = false
+    @Published public private(set) var isDirty = false
     /// The file changed on disk while there are unsaved edits; the UI shows a
     /// banner and the user decides (reload discards, save overwrites).
-    @Published var externalChangePending = false
-    @Published var saveError: String?
+    @Published public var externalChangePending = false
+    @Published public var saveError: String?
 
-    let fileURL: URL?
-    let encodingUsed: TextEncodingUsed
+    public let fileURL: URL?
+    public let encodingUsed: TextEncodingUsed
     /// Newline style of the file on disk; `text` is always LF-normalized and
     /// saves restore this style.
-    let lineEndingUsed: LineEndingUsed
+    public let lineEndingUsed: LineEndingUsed
     /// Deliberately NOT @Published: no view renders the source text, and
     /// publishing it would invalidate the whole window on every settled
     /// keystroke batch. Views react to `isDirty` transitions instead.
-    private(set) var text: String
+    public private(set) var text: String
+
+    /// Invoked after every adopted edit with the new full text. The iOS shell
+    /// uses it to push edits into the SwiftUI document binding (autosave);
+    /// the Mac shell leaves it nil and uses save() explicitly.
+    public var onTextChange: (@MainActor (String) -> Void)?
 
     private var lastSavedText: String
     private var controller: MarkdownWebController?
@@ -66,7 +69,7 @@ final class ViewerModel: ObservableObject {
     /// must not apply over a newer reload that already finished.
     private var reloadGeneration = 0
 
-    init(
+    public init(
         text: String,
         fileURL: URL?,
         encoding: TextEncodingUsed = .utf8,
@@ -79,20 +82,20 @@ final class ViewerModel: ObservableObject {
         self.lineEndingUsed = lineEnding
     }
 
-    func attach(controller: MarkdownWebController) {
+    public func attach(controller: MarkdownWebController) {
         self.controller = controller
     }
 
     // MARK: Editing
 
-    func attach(editor: EditorBridge) {
+    public func attach(editor: EditorBridge) {
         editorBridge = editor
         // Positioning waits for the page's `ready` event (editorReady()).
     }
 
     /// The editor page is live: seed it with the document, style, and the
     /// restore-vs-reanchor position, then hand it focus.
-    func editorReady(bridge: EditorBridge) {
+    public func editorReady(bridge: EditorBridge) {
         Task { [weak self] in
             guard let self else { return }
             await self.editorCloseSync?.value
@@ -135,7 +138,7 @@ final class ViewerModel: ObservableObject {
         controller?.focus()
     }
 
-    func toggleEditing() {
+    public func toggleEditing() {
         if isEditing {
             guard !closingEditor else { return }
             closingEditor = true
@@ -163,7 +166,7 @@ final class ViewerModel: ObservableObject {
 
     /// Editor keystrokes: adopt the text, track dirtiness, and re-render the
     /// preview debounced, re-anchored to the editor's viewport afterward.
-    func textEdited(_ newText: String) {
+    public func textEdited(_ newText: String) {
         guard newText != text else { return }
         text = newText
         // Publish only the transition: reassigning an unchanged Bool still
@@ -177,6 +180,7 @@ final class ViewerModel: ObservableObject {
         }
         renderDebounce = work
         DispatchQueue.main.asyncAfter(deadline: .now() + renderDebounceDelay, execute: work)
+        onTextChange?(newText)
     }
 
     /// Preview debounce scaled to document size: a settled edit costs a full
@@ -202,7 +206,7 @@ final class ViewerModel: ObservableObject {
     /// page-side). Applies them to the model's text; any incoherence — bad
     /// ranges, length mismatch, unparseable payload — falls back to pulling
     /// the full document, so the editor stays authoritative.
-    func editorTextPatched(_ patches: [TextPatcher.Patch], expectedLength: Int) {
+    public func editorTextPatched(_ patches: [TextPatcher.Patch], expectedLength: Int) {
         if !patches.isEmpty,
            let newText = TextPatcher.apply(patches, to: text,
                                            expectedUTF16Length: expectedLength) {
@@ -213,7 +217,7 @@ final class ViewerModel: ObservableObject {
     }
 
     /// Editor event: scrolled. Keep the preview's top aligned (debounced).
-    func editorScrolled(topLine: Int) {
+    public func editorScrolled(topLine: Int) {
         lastEditorPosition.topLine = topLine
         guard isEditing else { return }
         scrollSyncDebounce?.cancel()
@@ -227,7 +231,7 @@ final class ViewerModel: ObservableObject {
 
     /// Editor event: cursor moved. Reveal its block in the preview only if
     /// offscreen (debounced).
-    func editorCursorMoved(line: Int, offset: Int) {
+    public func editorCursorMoved(line: Int, offset: Int) {
         lastEditorPosition.cursorOffset = offset
         guard isEditing else { return }
         cursorSyncDebounce?.cancel()
@@ -242,7 +246,7 @@ final class ViewerModel: ObservableObject {
     /// Preview click: jump the editor to the clicked block's source line and
     /// hand it focus. No-op while the editor pane is closed, so plain viewing
     /// keeps its normal click behavior (selection, links).
-    func previewClicked(line: Int) {
+    public func previewClicked(line: Int) {
         guard isEditing, let bridge = editorBridge else { return }
         Task {
             await bridge.scrollToLine(line, placeCursor: true)
@@ -254,7 +258,7 @@ final class ViewerModel: ObservableObject {
 
     /// Write `text` back to the file in its original encoding. Synchronous so
     /// the window-close guard can save-and-close in one step.
-    func save() {
+    public func save() {
         guard let url = fileURL, isDirty else { return }
         do {
             try MarkdownText.encode(text, encoding: encodingUsed, lineEnding: lineEndingUsed)
@@ -272,20 +276,20 @@ final class ViewerModel: ObservableObject {
     /// saving (covers keystrokes inside the page's 100 ms debounce window).
     /// Falls back silently when the bridge is gone — the cached text is then
     /// at worst <100 ms stale, in a scenario where the editor process died.
-    func flushEditorText() async {
+    public func flushEditorText() async {
         if let bridge = editorBridge, let current = await bridge.getText() {
             textEdited(current)
         }
     }
 
     /// Flush, then save. ⌘S and the close flow's Save button use this.
-    func flushAndSave() async {
+    public func flushAndSave() async {
         await flushEditorText()
         save()
     }
 
     /// Called from MarkdownWebView's `onReady` (web view didFinish) — boot.js is live.
-    func pageReady() {
+    public func pageReady() {
         isReady = true
         Task { await renderCurrent() }
     }
@@ -300,7 +304,7 @@ final class ViewerModel: ObservableObject {
         await updateChrome()
     }
 
-    func applyUserCSS() async {
+    public func applyUserCSS() async {
         guard isReady else { return }
         await controller?.setUserCSS(UserCSS.load(AppSettings.shared.customCSSURL) ?? "")
         await updateChrome()
@@ -311,32 +315,32 @@ final class ViewerModel: ObservableObject {
     /// past the content into the app window.
     private func updateChrome() async {
         guard let controller, let css = await controller.pageBackgroundColor(),
-              let base = Self.parseCSSColor(css), base.alphaComponent > 0.05 else { return }
-        chromeColor = base.blended(withFraction: 0.16, of: .white) ?? base
+              let base = Self.parseCSSColor(css), base.alpha > 0.05 else { return }
+        chromeColor = base.blended(fraction: 0.16, of: .white)
     }
 
-    /// Parse "rgb(r, g, b)" / "rgba(r, g, b, a)" into an NSColor.
-    static func parseCSSColor(_ s: String) -> NSColor? {
+    /// Parse "rgb(r, g, b)" / "rgba(r, g, b, a)" into an RGBAColor.
+    public static func parseCSSColor(_ s: String) -> RGBAColor? {
         let nums = s.components(separatedBy: CharacterSet(charactersIn: "0123456789.").inverted)
             .filter { !$0.isEmpty }.compactMap { Double($0) }
         guard nums.count >= 3 else { return nil }
         let alpha = nums.count >= 4 ? nums[3] : 1.0
-        return NSColor(srgbRed: nums[0] / 255, green: nums[1] / 255, blue: nums[2] / 255, alpha: alpha)
+        return RGBAColor(red: nums[0] / 255, green: nums[1] / 255, blue: nums[2] / 255, alpha: alpha)
     }
 
     /// Style application is split per destination: the window observes the two
     /// JSON payloads separately, and a setting shared by both (theme, base
     /// size) must not double-send either payload.
-    func applyPreviewStyle() async {
+    public func applyPreviewStyle() async {
         guard isReady else { return }
         await controller?.applyStyle(json: AppSettings.shared.styleJSON)
     }
 
-    func applyEditorStyle() async {
+    public func applyEditorStyle() async {
         await editorBridge?.applyStyle(json: AppSettings.shared.editorStyleJSON)
     }
 
-    func startWatching() {
+    public func startWatching() {
         if let url = fileURL {
             watcher = FileWatcher(url: url) { [weak self] in
                 Task { @MainActor in await self?.reload() }
@@ -359,12 +363,12 @@ final class ViewerModel: ObservableObject {
     }
 
     /// Re-watch + re-apply when the custom-CSS path changes in Settings.
-    func cssPathChanged() {
+    public func cssPathChanged() {
         startCSSWatcher()
         Task { await applyUserCSS() }
     }
 
-    func stopWatching() {
+    public func stopWatching() {
         watcher?.stop()
         watcher = nil
         cssWatcher?.stop()
@@ -374,7 +378,7 @@ final class ViewerModel: ObservableObject {
     /// Re-read the file from disk. Own-save echoes (disk == text) are ignored;
     /// external changes while dirty raise a banner instead of clobbering edits;
     /// otherwise adopt the new text and re-render, preserving scroll.
-    func reload(force: Bool = false) async {
+    public func reload(force: Bool = false) async {
         guard let url = fileURL else { return }
         reloadGeneration += 1
         let gen = reloadGeneration
@@ -423,7 +427,7 @@ final class ViewerModel: ObservableObject {
     }
 
     /// Banner action: drop unsaved edits and adopt the on-disk content.
-    func discardAndReload() async {
+    public func discardAndReload() async {
         renderDebounce?.cancel()
         previewNeedsRender = false   // the forced reload below renders anyway
         isDirty = false
@@ -431,14 +435,14 @@ final class ViewerModel: ObservableObject {
         await reload(force: true)
     }
 
-    func scrollTo(_ item: OutlineItem) {
+    public func scrollTo(_ item: OutlineItem) {
         Task { await controller?.scrollToAnchor(item.anchor) }
     }
 
     /// Debounced: each keystroke in the find bar is a full-document scan on
     /// the JS side, so let typing settle before searching, and drop any
     /// result that a newer query has superseded.
-    func find(_ query: String) {
+    public func find(_ query: String) {
         findGeneration += 1
         let gen = findGeneration
         findDebounce?.cancel()
@@ -457,7 +461,7 @@ final class ViewerModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
-    func findNext(forward: Bool) {
+    public func findNext(forward: Bool) {
         findGeneration += 1   // navigation supersedes any pending re-search
         let gen = findGeneration
         findDebounce?.cancel()
@@ -481,7 +485,7 @@ final class ViewerModel: ObservableObject {
         }
     }
 
-    func clearFind() {
+    public func clearFind() {
         findGeneration += 1
         findDebounce?.cancel()
         pendingFindQuery = nil
@@ -490,10 +494,12 @@ final class ViewerModel: ObservableObject {
         Task { await controller?.clearFind() }
     }
 
-    func printDoc() {
+#if os(macOS)
+    public func printDoc() {
         // Use the file's base name (no extension) so the print job and the
         // Save-as-PDF default read as e.g. "ui-guide", not the app name.
         let title = fileURL?.deletingPathExtension().lastPathComponent
         controller?.printDocument(jobTitle: title)
     }
+#endif
 }

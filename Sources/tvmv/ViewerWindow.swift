@@ -33,7 +33,9 @@ struct ViewerWindow: View {
             }
             .navigationSplitViewColumnWidth(min: 180, ideal: 240)
             .scrollContentBackground(model.chromeColor == nil ? .automatic : .hidden)
-            .background(model.chromeColor.map { Color(nsColor: $0) } ?? .clear)
+            .background(model.chromeColor.map {
+                Color(red: $0.red, green: $0.green, blue: $0.blue)
+            } ?? .clear)
         } detail: {
             HSplitView {
                 if model.isEditing {
@@ -242,7 +244,7 @@ struct ViewerWindow: View {
 /// it shows the window background) and the area behind the sidebar. Chrome text
 /// (title, sidebar, traffic lights) is flipped light/dark for legibility.
 private struct WindowChrome: NSViewRepresentable {
-    var color: NSColor?
+    var color: RGBAColor?
     func makeNSView(context: Context) -> NSView { NSView() }
     func updateNSView(_ nsView: NSView, context: Context) {
         let color = color
@@ -250,11 +252,9 @@ private struct WindowChrome: NSViewRepresentable {
             guard let w = nsView.window else { return }
             if let c = color {
                 w.titlebarAppearsTransparent = true   // show the window bg in the title bar
-                w.backgroundColor = c
-                let lum: CGFloat = c.usingColorSpace(.sRGB).map {
-                    0.299 * $0.redComponent + 0.587 * $0.greenComponent + 0.114 * $0.blueComponent
-                } ?? 1
-                w.appearance = NSAppearance(named: lum < 0.6 ? .darkAqua : .aqua)
+                w.backgroundColor = NSColor(srgbRed: c.red, green: c.green,
+                                            blue: c.blue, alpha: c.alpha)
+                w.appearance = NSAppearance(named: c.luminance < 0.6 ? .darkAqua : .aqua)
             } else {
                 w.titlebarAppearsTransparent = false
                 w.backgroundColor = .windowBackgroundColor
