@@ -3,7 +3,11 @@ import PackageDescription
 
 let package = Package(
     name: "tvmv",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v14), .iOS("26.0")],
+    products: [
+        .executable(name: "tvmv", targets: ["tvmv"]),
+        .library(name: "TVMVCore", targets: ["TVMVCore"])
+    ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-cmark.git", branch: "gfm")
     ],

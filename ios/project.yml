@@ -1,0 +1,46 @@
+name: TVMV
+options:
+  deploymentTarget:
+    iOS: "26.0"
+packages:
+  tvmv:
+    path: ..
+targets:
+  TVMV:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: tvmv
+        product: TVMVCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dk.dyregod.tvmv.ios
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "6.0"
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: TVMV
+        UILaunchScreen: {}
+        UISupportsDocumentBrowser: true
+        LSSupportsOpeningDocumentsInPlace: true
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Markdown Document
+            LSHandlerRank: Owner
+            LSItemContentTypes: [net.daringfireball.markdown]
+        UTImportedTypeDeclarations:
+          - UTTypeIdentifier: net.daringfireball.markdown
+            UTTypeDescription: Markdown Document
+            UTTypeConformsTo: [public.plain-text]
+            UTTypeTagSpecification:
+              public.filename-extension: [md, markdown]
+  TVMVTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources: [Tests]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+    dependencies:
+      - target: TVMV

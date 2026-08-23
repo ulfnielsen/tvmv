@@ -7,3 +7,4 @@ dist/
 *.app/
 .verify/
 build/icon-candidates/
+ios/TVMV.xcodeproj
