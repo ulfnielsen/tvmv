@@ -1,6 +1,11 @@
 import SwiftUI
 import TVMVCore
 
+// .sheet(item:) needs Identifiable; a temp-file share URL identifies itself.
+extension URL: @retroactive Identifiable {
+    public var id: String { absoluteString }
+}
+
 struct DocumentScreen: View {
     @Binding var document: MarkdownEditableDocument
     let fileURL: URL?
@@ -8,10 +13,14 @@ struct DocumentScreen: View {
     @StateObject private var model: ViewerModel
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.horizontalSizeClass) private var hSizeClass
     @State private var selection: OutlineItem.ID?
     @State private var showFind = false
     @State private var findText = ""
     @FocusState private var findFocused: Bool
+    @State private var showOutlineSheet = false
+    @State private var showSettings = false
+    @State private var pdfURL: URL?
 
     init(document: Binding<MarkdownEditableDocument>, fileURL: URL?) {
         _document = document
@@ -37,6 +46,13 @@ struct DocumentScreen: View {
                     if let message = model.errorMessage { errorBanner(message) }
                 }
                 .toolbar {
+                    ToolbarItem(placement: .topBarLeading) {
+                        if hSizeClass == .compact {
+                            Button { showOutlineSheet = true } label: {
+                                Image(systemName: "list.bullet")
+                            }
+                        }
+                    }
                     ToolbarItem(placement: .topBarTrailing) {
                         Button { model.toggleEditing() } label: {
                             Image(systemName: model.isEditing
@@ -48,7 +64,38 @@ struct DocumentScreen: View {
                             Image(systemName: "magnifyingglass")
                         }
                     }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { sharePDF() } label: {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                    }
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button { showSettings = true } label: {
+                            Image(systemName: "textformat.size")
+                        }
+                    }
                 }
+        }
+        .sheet(isPresented: $showOutlineSheet) {
+            NavigationStack {
+                List(model.outline) { item in
+                    Button {
+                        model.scrollTo(item)
+                        showOutlineSheet = false
+                    } label: {
+                        Text(item.title)
+                            .padding(.leading, CGFloat((item.level - 1) * 12))
+                    }
+                }
+                .navigationTitle("Outline")
+            }
+            .presentationDetents([.medium, .large])
+        }
+        .sheet(isPresented: $showSettings) { IOSSettingsView() }
+        .sheet(item: $pdfURL) { url in
+            ShareLink(item: url) { Label("Share PDF", systemImage: "doc.richtext") }
+                .padding(40)
+                .presentationDetents([.medium])
         }
         .onAppear {
             // Every settled edit flows into the document binding; the system
@@ -73,12 +120,19 @@ struct DocumentScreen: View {
     }
 
     private var panes: some View {
-        HStack(spacing: 0) {
-            if model.isEditing {
-                editorPane.frame(minWidth: 280)
-                Divider()
+        Group {
+            if hSizeClass == .compact {
+                // One pane at a time; the toolbar pencil toggles which.
+                if model.isEditing { editorPane } else { preview }
+            } else {
+                HStack(spacing: 0) {
+                    if model.isEditing {
+                        editorPane.frame(minWidth: 280)
+                        Divider()
+                    }
+                    preview.frame(minWidth: 280)
+                }
             }
-            preview.frame(minWidth: 280)
         }
     }
 
@@ -146,6 +200,21 @@ struct DocumentScreen: View {
         if findText.isEmpty { return "" }
         return model.findCount == 0 ? "Not found"
             : "\(model.findIndex)/\(model.findCount)"
+    }
+
+    private func sharePDF() {
+        Task {
+            guard let data = await model.controllerPDFData() else { return }
+            let name = (fileURL?.deletingPathExtension().lastPathComponent ?? "document")
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent(name + ".pdf")
+            do {
+                try data.write(to: url)
+                pdfURL = url
+            } catch {
+                model.errorMessage = error.localizedDescription
+            }
+        }
     }
 
     private func errorBanner(_ message: String) -> some View {

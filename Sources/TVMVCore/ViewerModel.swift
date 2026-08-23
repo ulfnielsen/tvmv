@@ -439,6 +439,11 @@ public final class ViewerModel: ObservableObject {
         Task { await controller?.scrollToAnchor(item.anchor) }
     }
 
+    /// Rendered-page PDF for share/export flows.
+    public func controllerPDFData() async -> Data? {
+        await controller?.pdfData()
+    }
+
     /// Debounced: each keystroke in the find bar is a full-document scan on
     /// the JS side, so let typing settle before searching, and drop any
     /// result that a newer query has superseded.
