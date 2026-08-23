@@ -2,6 +2,9 @@
 <html>
 <head>
   <meta charset="utf-8">
+  <!-- Without this, mobile WebKit lays out at a 980px virtual width and
+       scales everything down — the editor text becomes unreadably small. -->
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="editor.css">
   <script src="vendor/codemirror/codemirror.bundle.js"></script>
 </head>
