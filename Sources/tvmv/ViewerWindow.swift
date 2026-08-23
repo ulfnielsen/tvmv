@@ -3,7 +3,8 @@ import SwiftUI
 import AppKit
 
 struct ViewerWindow: View {
-    let document: MarkdownDocument
+    // The document is consumed in init (seeds the model); storing it here would
+    // keep a second copy of the full text alive for the window's lifetime.
     let fileURL: URL?
 
     @EnvironmentObject private var settings: AppSettings
@@ -17,7 +18,6 @@ struct ViewerWindow: View {
     @FocusState private var findFocused: Bool
 
     init(document: MarkdownDocument, fileURL: URL?) {
-        self.document = document
         self.fileURL = fileURL
         _model = StateObject(wrappedValue: ViewerModel(
             text: document.text, fileURL: fileURL,

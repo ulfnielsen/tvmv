@@ -11,11 +11,9 @@ import UniformTypeIdentifiers
 struct MarkdownDocument: FileDocument {
     /// The decoded document text.
     let text: String
-    /// The raw source bytes as read from disk.
-    let data: Data
-    /// Which encoding successfully decoded `data`.
+    /// Which encoding successfully decoded the source bytes.
     let encodingUsed: TextEncodingUsed
-    /// Which newline style `data` used (text is LF-normalized; saves restore this).
+    /// Which newline style the source used (text is LF-normalized; saves restore this).
     let lineEndingUsed: LineEndingUsed
 
     // `net.daringfireball.markdown` is system-known on macOS 26.
@@ -28,9 +26,10 @@ struct MarkdownDocument: FileDocument {
         guard let bytes = configuration.file.regularFileContents else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        self.data = bytes
 
         // Decode with a fallback chain so the document always shows something.
+        // The raw bytes are deliberately NOT retained — nothing reads them
+        // after decoding, and keeping them doubles per-document memory.
         let decoded = MarkdownText.decode(bytes)
         self.text = decoded.text
         self.encodingUsed = decoded.encoding

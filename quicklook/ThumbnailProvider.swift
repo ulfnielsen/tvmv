@@ -36,8 +36,7 @@ final class ThumbnailProvider: QLThumbnailProvider {
         let url = request.fileURL
         let text: String
         do {
-            let data = try Data(contentsOf: url)
-            text = MarkdownText.decode(data).text
+            text = try Self.boundedText(of: url)
         } catch {
             handler(nil, error)
             return
@@ -47,6 +46,45 @@ final class ThumbnailProvider: QLThumbnailProvider {
         // scales it into the requested thumbnail context. No async, no window.
         let reply = Self.makeReply(text: text, request: request)
         handler(reply, nil)
+    }
+
+    /// The thumbnail shows at most `maxLines` lines, so bound the WORK to that
+    /// too: read only a prefix of the file, and truncate the decoded text before
+    /// anything (layout, the reply closure) can retain it. Reading the whole
+    /// file first would make a 50 MB document allocate 50 MB+ to draw 400 lines.
+    static let maxBytes = 512 * 1024
+    static let maxLines = 400
+
+    static func boundedText(of url: URL) throws -> String {
+        let handle = try FileHandle(forReadingFrom: url)
+        defer { try? handle.close() }
+        var data = try handle.read(upToCount: maxBytes) ?? Data()
+
+        // A mid-sequence cut would fail UTF-8/UTF-16 decoding and drag the
+        // whole prefix down the Latin-1 fallback path; trim to a clean boundary.
+        if data.count == maxBytes {
+            if data.count >= 2,
+               (data[0] == 0xFF && data[1] == 0xFE) || (data[0] == 0xFE && data[1] == 0xFF) {
+                // UTF-16 (BOM): cut on a code-unit boundary.
+                if data.count % 2 != 0 { data.removeLast() }
+            } else {
+                // UTF-8: drop trailing continuation bytes, then an incomplete leader.
+                while let last = data.last, last & 0b1100_0000 == 0b1000_0000 {
+                    data.removeLast()
+                }
+                if let last = data.last, last & 0b1000_0000 != 0 { data.removeLast() }
+            }
+        }
+
+        let decoded = MarkdownText.decode(data).text
+        // Truncate to the drawable line budget; split lazily so the cost is
+        // bounded by the cap, not the prefix size.
+        let pieces = decoded.split(separator: "\n", maxSplits: maxLines,
+                                   omittingEmptySubsequences: false)
+        if pieces.count > maxLines {
+            return pieces.prefix(maxLines).joined(separator: "\n")
+        }
+        return decoded
     }
 
     /// Build a QLThumbnailReply whose context is a portrait page that fits

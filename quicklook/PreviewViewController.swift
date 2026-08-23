@@ -139,6 +139,10 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
     private func injectDocument() {
         guard let body = pendingBodyHTML else { return }
         let base = pendingDocBase ?? "tvmv-asset://doc/"
+        // Consumed: WebKit owns the content from here; keeping the native HTML
+        // string alive for the preview's lifetime doubles peak memory.
+        pendingBodyHTML = nil
+        pendingDocBase = nil
 
         // Apply reading-theme typography first (mirrors the app defaults). Width
         // and padding are NOT set here — applyResponsiveLayout() owns those and
