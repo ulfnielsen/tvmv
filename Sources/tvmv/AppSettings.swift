@@ -70,27 +70,56 @@ final class AppSettings: ObservableObject {
         }
     }
 
+    // The JSON payloads are read on every SwiftUI evaluation (the window
+    // observes them with onChange), so they are memoized on their typed
+    // inputs: serialization runs only when a value actually changed. Returning
+    // the cached string also keeps onChange immune to JSONSerialization's
+    // nondeterministic key order.
+    private struct PreviewStyleKey: Equatable {
+        var bodyFont: String, monoFont: String
+        var baseSize: Double, measure: Double
+        var fullWidth: Bool, theme: String
+    }
+    private var previewStyleCache: (key: PreviewStyleKey, json: String)?
+
+    private struct EditorStyleKey: Equatable {
+        var monoFont: String, baseSize: Double, theme: String
+    }
+    private var editorStyleCache: (key: EditorStyleKey, json: String)?
+
     /// JSON payload for boot.js `applyStyle` — keys match the bridge contract.
     var styleJSON: String {
+        let key = PreviewStyleKey(
+            bodyFont: bodyFont, monoFont: monoFont,
+            baseSize: baseSize, measure: measure,
+            fullWidth: fullWidth, theme: resolvedTheme)
+        if let cached = previewStyleCache, cached.key == key { return cached.json }
         let dict: [String: Any] = [
-            "bodyFont": bodyFont, "monoFont": monoFont,
-            "baseSize": baseSize, "measure": measure,
-            "fullWidth": fullWidth, "theme": resolvedTheme
+            "bodyFont": key.bodyFont, "monoFont": key.monoFont,
+            "baseSize": key.baseSize, "measure": key.measure,
+            "fullWidth": key.fullWidth, "theme": key.theme
         ]
         let data = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
-        return String(data: data, encoding: .utf8) ?? "{}"
+        let json = String(data: data, encoding: .utf8) ?? "{}"
+        previewStyleCache = (key, json)
+        return json
     }
 
     /// JSON payload for editor.js `applyStyle` — the editor pane needs only
     /// a font family, size, and resolved theme. Dedicated editor overrides
     /// win when set; otherwise the editor follows the code font / base size.
     var editorStyleJSON: String {
+        let key = EditorStyleKey(
+            monoFont: editorFont.isEmpty ? monoFont : editorFont,
+            baseSize: editorFontSize > 0 ? editorFontSize : baseSize,
+            theme: resolvedTheme)
+        if let cached = editorStyleCache, cached.key == key { return cached.json }
         let dict: [String: Any] = [
-            "monoFont": editorFont.isEmpty ? monoFont : editorFont,
-            "baseSize": editorFontSize > 0 ? editorFontSize : baseSize,
-            "theme": resolvedTheme
+            "monoFont": key.monoFont, "baseSize": key.baseSize, "theme": key.theme
         ]
         let data = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data("{}".utf8)
-        return String(data: data, encoding: .utf8) ?? "{}"
+        let json = String(data: data, encoding: .utf8) ?? "{}"
+        editorStyleCache = (key, json)
+        return json
     }
 }

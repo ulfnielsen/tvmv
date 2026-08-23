@@ -75,16 +75,21 @@ struct ViewerWindow: View {
                 model.scrollTo(item)
             }
         }
-        // Live-apply typography/theme: styleJSON changes whenever any setting does.
-        .onChange(of: settings.styleJSON) { Task { await model.applyStyle() } }
-        // Editor-only settings (font, size) aren't part of styleJSON; watch
-        // the editor payload so any of them live-applies too.
-        .onChange(of: settings.editorStyleJSON) { Task { await model.applyStyle() } }
+        // Live-apply typography/theme. Each payload goes only to its own
+        // destination — a shared setting (theme, base size) changes both
+        // payloads, and must send exactly one message to each side.
+        .onChange(of: settings.styleJSON) { Task { await model.applyPreviewStyle() } }
+        .onChange(of: settings.editorStyleJSON) { Task { await model.applyEditorStyle() } }
         // Re-apply when the custom-CSS file is changed in Settings.
         .onChange(of: settings.customCSSPath) { model.cssPathChanged() }
         // Re-resolve auto theme when the system appearance flips.
         .onChange(of: colorScheme) {
-            if settings.theme == .auto { Task { await model.applyStyle() } }
+            if settings.theme == .auto {
+                Task {
+                    await model.applyPreviewStyle()
+                    await model.applyEditorStyle()
+                }
+            }
         }
         .onAppear {
             columns = settings.showOutline ? .all : .detailOnly

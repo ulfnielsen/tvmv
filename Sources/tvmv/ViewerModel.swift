@@ -295,9 +295,15 @@ final class ViewerModel: ObservableObject {
         return NSColor(srgbRed: nums[0] / 255, green: nums[1] / 255, blue: nums[2] / 255, alpha: alpha)
     }
 
-    func applyStyle() async {
+    /// Style application is split per destination: the window observes the two
+    /// JSON payloads separately, and a setting shared by both (theme, base
+    /// size) must not double-send either payload.
+    func applyPreviewStyle() async {
         guard isReady else { return }
         await controller?.applyStyle(json: AppSettings.shared.styleJSON)
+    }
+
+    func applyEditorStyle() async {
         await editorBridge?.applyStyle(json: AppSettings.shared.editorStyleJSON)
     }
 
