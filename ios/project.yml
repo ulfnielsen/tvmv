@@ -18,6 +18,8 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: dk.dyregod.tvmv.ios
         TARGETED_DEVICE_FAMILY: "1,2"
         SWIFT_VERSION: "6.0"
+        DEVELOPMENT_TEAM: 9LTFHV87LB
+        CODE_SIGN_STYLE: Automatic
     info:
       path: Info.plist
       properties:

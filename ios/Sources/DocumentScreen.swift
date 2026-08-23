@@ -14,7 +14,6 @@ struct DocumentScreen: View {
     @ObservedObject private var settings = AppSettings.shared
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.horizontalSizeClass) private var hSizeClass
-    @State private var selection: OutlineItem.ID?
     @State private var showFind = false
     @State private var findText = ""
     @FocusState private var findFocused: Bool
@@ -32,50 +31,45 @@ struct DocumentScreen: View {
     }
 
     var body: some View {
-        NavigationSplitView {
-            List(model.outline, selection: $selection) { item in
-                Text(item.title)
-                    .padding(.leading, CGFloat((item.level - 1) * 12))
-                    .lineLimit(1)
+        // No NavigationSplitView / navigationTitle here: DocumentGroup already
+        // wraps the document in its own navigation bar (back-to-browser,
+        // renameable filename, overflow menu). Nesting our own bar doubled
+        // every piece of chrome. Our controls attach to the provided bar; the
+        // outline is a sheet at every size.
+        panes
+            .overlay(alignment: .topTrailing) { if showFind { findBar } }
+            .overlay(alignment: .bottom) {
+                if let message = model.errorMessage { errorBanner(message) }
             }
-            .navigationTitle(fileURL?.deletingPathExtension().lastPathComponent ?? "Untitled")
-        } detail: {
-            panes
-                .overlay(alignment: .topTrailing) { if showFind { findBar } }
-                .overlay(alignment: .bottom) {
-                    if let message = model.errorMessage { errorBanner(message) }
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showOutlineSheet = true } label: {
+                        Image(systemName: "list.bullet")
+                    }
+                    .disabled(model.outline.isEmpty)
                 }
-                .toolbar {
-                    ToolbarItem(placement: .topBarLeading) {
-                        if hSizeClass == .compact {
-                            Button { showOutlineSheet = true } label: {
-                                Image(systemName: "list.bullet")
-                            }
-                        }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { model.toggleEditing() } label: {
-                            Image(systemName: model.isEditing
-                                  ? "pencil.circle.fill" : "pencil.circle")
-                        }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { showFind = true; findFocused = true } label: {
-                            Image(systemName: "magnifyingglass")
-                        }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { sharePDF() } label: {
-                            Image(systemName: "square.and.arrow.up")
-                        }
-                    }
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Button { showSettings = true } label: {
-                            Image(systemName: "textformat.size")
-                        }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { model.toggleEditing() } label: {
+                        Image(systemName: model.isEditing
+                              ? "pencil.circle.fill" : "pencil.circle")
                     }
                 }
-        }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showFind = true; findFocused = true } label: {
+                        Image(systemName: "magnifyingglass")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { sharePDF() } label: {
+                        Image(systemName: "square.and.arrow.up")
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button { showSettings = true } label: {
+                        Image(systemName: "textformat.size")
+                    }
+                }
+            }
         .sheet(isPresented: $showOutlineSheet) {
             NavigationStack {
                 List(model.outline) { item in
@@ -103,11 +97,6 @@ struct DocumentScreen: View {
             model.onTextChange = { document.text = $0 }
         }
         .onChange(of: settings.editorStyleJSON) { Task { await model.applyEditorStyle() } }
-        .onChange(of: selection) { _, new in
-            if let new, let item = model.outline.first(where: { $0.id == new }) {
-                model.scrollTo(item)
-            }
-        }
         .onChange(of: settings.styleJSON) { Task { await model.applyPreviewStyle() } }
         .onChange(of: colorScheme) {
             if settings.theme == .auto { Task { await model.applyPreviewStyle() } }
