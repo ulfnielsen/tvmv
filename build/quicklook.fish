@@ -52,7 +52,7 @@ end
 # Sources: the QL controller + scheme handler, plus the reused renderer files.
 set -l ql_src \
     quicklook/PreviewViewController.swift \
-    quicklook/PreviewAssetSchemeHandler.swift \
+    Sources/TVMVCore/AssetSchemeHandler.swift \
     Sources/TVMVCore/MarkdownRenderer.swift \
     Sources/TVMVCore/MarkdownText.swift
 

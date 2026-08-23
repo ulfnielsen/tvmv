@@ -15,7 +15,7 @@ import QuickLookUI
 final class PreviewViewController: NSViewController, QLPreviewingController {
 
     private var webView: WKWebView!
-    private var schemeHandler: PreviewAssetSchemeHandler!
+    private var schemeHandler: AssetSchemeHandler!
 
     // Strong refs so nothing deallocates mid-async during the preview lifecycle.
     private var navDelegate: NavDelegate?
@@ -75,17 +75,28 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
                               completionHandler handler: @escaping (Error?) -> Void) {
         self.completion = handler
 
-        // 1. Read + decode + render through TVMV's pipeline.
-        let body: String
-        do {
-            let data = try Data(contentsOf: url)
-            let decoded = MarkdownText.decode(data)
-            body = renderHTML(decoded.text)
-        } catch {
-            handler(error)
-            return
+        // 1. Read + decode + render through TVMV's pipeline — off the main
+        //    thread, so a large document doesn't stall the preview UI actor.
+        Task { @MainActor [weak self] in
+            let result: Result<String, Error> = await Task.detached(priority: .userInitiated) {
+                do {
+                    let data = try Data(contentsOf: url)
+                    let decoded = MarkdownText.decode(data)
+                    return .success(renderHTML(decoded.text))
+                } catch {
+                    return .failure(error)
+                }
+            }.value
+            guard let self else { return }
+            switch result {
+            case .failure(let error): handler(error)
+            case .success(let body): self.presentRendered(body: body, url: url, handler: handler)
+            }
         }
+    }
 
+    private func presentRendered(body: String, url: URL,
+                                 handler: @escaping (Error?) -> Void) {
         // 2. Locate the bundled web/ directory inside the appex resources.
         guard let resourceURL = Bundle(for: PreviewViewController.self).resourceURL else {
             handler(PreviewError.missingResources)
@@ -95,7 +106,7 @@ final class PreviewViewController: NSViewController, QLPreviewingController {
         let docDir = url.deletingLastPathComponent()
 
         // 3. Build the WKWebView with the tvmv-asset:// scheme handler.
-        schemeHandler = PreviewAssetSchemeHandler(appBaseDir: webDir, docBaseDir: docDir)
+        schemeHandler = AssetSchemeHandler(appBaseDir: webDir, docBaseDir: docDir)
 
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(schemeHandler, forURLScheme: "tvmv-asset")

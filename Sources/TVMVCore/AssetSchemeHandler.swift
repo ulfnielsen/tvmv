@@ -44,29 +44,84 @@ public final class AssetSchemeHandler: NSObject, WKURLSchemeHandler {
 
     // MARK: WKURLSchemeHandler
 
+    /// In-flight reads by scheme task, so `stop` can cancel abandoned requests
+    /// instead of letting them read whole files nobody will consume.
+    private var activeReads: [ObjectIdentifier: Task<Void, Never>] = [:]
+
+    /// Files stream to WebKit in bounded chunks: a large linked image never
+    /// exists as one complete extra `Data` on the main actor, and the blocking
+    /// read syscalls happen off it.
+    private nonisolated static let chunkSize = 1 << 20
+
     public func webView(_ webView: WKWebView, start urlSchemeTask: any WKURLSchemeTask) {
-        do {
-            let fileURL = try resolve(urlSchemeTask.request.url)
-            let data = try Data(contentsOf: fileURL)
-
-            let mime = Self.mimeType(for: fileURL)
-            let response = URLResponse(
-                url: urlSchemeTask.request.url ?? fileURL,
-                mimeType: mime,
-                expectedContentLength: data.count,
-                textEncodingName: nil
-            )
-
-            urlSchemeTask.didReceive(response)
-            urlSchemeTask.didReceive(data)
-            urlSchemeTask.didFinish()
-        } catch {
-            urlSchemeTask.didFailWithError(error)
+        let id = ObjectIdentifier(urlSchemeTask)
+        let requestURL = urlSchemeTask.request.url
+        // The Task inherits this class's main-actor isolation, so every
+        // urlSchemeTask callback below runs on the main actor; cancellation
+        // (also main-actor) can only interleave at await points, and each
+        // callback is preceded by a cancellation check with no await between —
+        // WebKit's "no callbacks after stop" contract holds by construction.
+        let task = Task { [weak self] in
+            defer { self?.activeReads[id] = nil }
+            guard let self else { return }
+            do {
+                let fileURL = try self.resolve(requestURL)
+                try await Self.stream(fileURL, requestURL: requestURL, to: urlSchemeTask)
+            } catch is CancellationError {
+                // Stopped by WebKit; no further callbacks allowed or needed.
+            } catch {
+                if !Task.isCancelled { urlSchemeTask.didFailWithError(error) }
+            }
         }
+        activeReads[id] = task
     }
 
     public func webView(_ webView: WKWebView, stop urlSchemeTask: any WKURLSchemeTask) {
-        // Reads are synchronous & best-effort; nothing to cancel.
+        let id = ObjectIdentifier(urlSchemeTask)
+        activeReads[id]?.cancel()
+        activeReads[id] = nil
+    }
+
+    private static func stream(
+        _ fileURL: URL,
+        requestURL: URL?,
+        to task: any WKURLSchemeTask
+    ) async throws {
+        let fd = open(fileURL.path, O_RDONLY)
+        guard fd >= 0 else { throw SchemeError.notFound }
+        defer { close(fd) }
+
+        var stats = stat()
+        let size = fstat(fd, &stats) == 0 ? Int(stats.st_size) : -1
+
+        try Task.checkCancellation()
+        task.didReceive(URLResponse(
+            url: requestURL ?? fileURL,
+            mimeType: mimeType(for: fileURL),
+            expectedContentLength: size,
+            textEncodingName: nil
+        ))
+
+        while true {
+            let chunk = try await readChunk(fd: fd)
+            try Task.checkCancellation()
+            if chunk.isEmpty { break }
+            task.didReceive(chunk)
+        }
+        task.didFinish()
+    }
+
+    /// One bounded read(2), off the main actor.
+    private static func readChunk(fd: Int32) async throws -> Data {
+        try await Task.detached(priority: .userInitiated) {
+            var buffer = Data(count: chunkSize)
+            let n = buffer.withUnsafeMutableBytes { raw in
+                read(fd, raw.baseAddress, chunkSize)
+            }
+            guard n >= 0 else { throw POSIXError(.EIO) }
+            buffer.removeSubrange(n..<chunkSize)
+            return buffer
+        }.value
     }
 
     // MARK: Resolution

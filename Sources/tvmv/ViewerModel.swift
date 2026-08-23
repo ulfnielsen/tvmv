@@ -62,6 +62,9 @@ final class ViewerModel: ObservableObject {
     private var watcher: FileWatcher?
     private var cssWatcher: FileWatcher?
     private var isReady = false
+    /// Latest-wins ordering for reloads: a slow read of one on-disk version
+    /// must not apply over a newer reload that already finished.
+    private var reloadGeneration = 0
 
     init(
         text: String,
@@ -363,15 +366,23 @@ final class ViewerModel: ObservableObject {
     /// external changes while dirty raise a banner instead of clobbering edits;
     /// otherwise adopt the new text and re-render, preserving scroll.
     func reload(force: Bool = false) async {
-        guard let url = fileURL, let data = try? Data(contentsOf: url) else { return }
+        guard let url = fileURL else { return }
+        reloadGeneration += 1
+        let gen = reloadGeneration
+        // Read and decode off the main actor: reload fires on every watcher
+        // event, and a multi-megabyte read would stall the UI.
+        let decodedResult = await Task.detached(priority: .userInitiated) {
+            (try? Data(contentsOf: url)).map { MarkdownText.decode($0).text }
+        }.value
+        guard gen == reloadGeneration, let decoded = decodedResult else { return }
         // Adopt any keystrokes still inside the editor page's debounce window
         // before judging dirtiness, or an external change racing a fresh
         // keystroke would clobber it. Never on the force path: discard means
         // the editor's unsaved content is intentionally being dropped.
         if isEditing && !force {
             await flushEditorText()
+            guard gen == reloadGeneration else { return }
         }
-        let decoded = MarkdownText.decode(data).text
         if decoded == text && !force {
             // Buffer already matches disk. If we were dirty, the external
             // write caught up with our edits — nothing left unsaved, so any
