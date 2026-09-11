@@ -10,6 +10,13 @@ by the macOS, iOS and Linux apps.
 - Mermaid 11.15.0 — MIT — https://github.com/mermaid-js/mermaid
 - CodeMirror 6 — MIT — https://github.com/codemirror
 
+KaTeX's entry covers the font files under `vendor/katex/fonts/` — they ship as
+part of KaTeX and under the same licence. No other font is bundled: the default
+body font (Source Serif 4) and monospace (DejaVu Sans Mono) are asked of the
+system by name, so neither carries a licence obligation here. The earlier plan
+to bundle Source Serif 4 belonged to the Flatpak, which is not the distribution
+path.
+
 ## Markdown parser
 
 apple/swift-cmark (cmark-gfm) — BSD-2-Clause + MIT.

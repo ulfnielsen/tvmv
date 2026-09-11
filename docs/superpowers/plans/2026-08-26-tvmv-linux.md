@@ -349,8 +349,10 @@ Verified end to end into a scratch prefix: 86 files installed, the installed bin
 
 **Files:** Modify `README.md`, `THIRD-PARTY-LICENSES.md`
 
-- [ ] **Step 1: Linux section** — build deps, `build/linux.fish`, Flatpak install, the DMABuf workaround.
-- [ ] **Step 2: Document every preview surface** — thumbnails, Dolphin's Information Panel, `--peek`, the context menu, plus copy-pasteable `yazi` / `ranger` / `lf` preview-command snippets.
-- [ ] **Step 3: Record the honest limit** — Space in Nautilus stays Sushi's until the upstream markdown viewer lands; state the workaround (context menu / a WM keybinding on `tvmv --peek`).
-- [ ] **Step 4: Licenses** — add Source Serif 4 (OFL) and the bundled mono font.
+- [x] **Step 1: Linux section** — build deps, `build/linux.fish` (including the per-user prefix), the DMABuf workaround and the AppArmor/sandbox situation. **No Flatpak install instructions**: the manifest stays in the tree, but it is not the recommended path (slower here, and it picks up the runtime's theming rather than the desktop's), so documenting it as one would be misleading.
+- [x] **Step 2: Every preview surface**, as a table of what works and what does not — file-manager thumbnails, the context menu, `--peek`, Dolphin (nothing, pending the KIO plugin), Nautilus's spacebar (Sushi's, permanently). Plus `yazi` / `ranger` / `lf` snippets. The `tvmv` commands in those are verified; **the three configurations are not** — none of the programs is installed here, and the README says so rather than implying otherwise.
+- [x] **Step 3: The honest limit** recorded in that table: Sushi compiles its viewers into gresource bundles with no plugin API, so there is no extension point to take. Workarounds named — the context menu, or a WM keybinding on `tvmv --peek`.
+- [x] **Step 4: Licenses** — nothing to add, which took checking: no font is bundled at all. Source Serif 4 and DejaVu Sans Mono are asked of the system by name, and the KaTeX entry already covers the font files under `vendor/katex/fonts/`. Bundling Source Serif 4 belonged to the Flatpak, which is not the distribution path. Recorded in `THIRD-PARTY-LICENSES.md` so the question is not re-asked.
+
+  Separately: **`Source Serif 4` is not packaged on Ubuntu at all**, and `app.css` falls back to the generic serif silently, so a stock Linux install does not look like the screenshots. The installer now checks `fc-list` and says so, and the README has a Fonts section.
 - [ ] **Step 5: Final cross-platform gate** — Swift suite green on the Mac, `cargo test` green on Linux, golden tests green in both.

@@ -90,9 +90,9 @@ PREFIX=$HOME/.local fish build/linux.fish     # or per-user, no root
 fish build/linux.fish uninstall
 ```
 
-Installs the binary, web assets, desktop entry, icons, the thumbnailer, the
-AppArmor profile, and — where the bindings are present — a file-manager context
-menu. `cargo test --manifest-path linux/Cargo.toml` runs the suite.
+Installs the binary, web assets, desktop entry, AppStream metainfo, icons, the
+thumbnailer, the AppArmor profile, and — where the bindings are present — a
+file-manager context menu. `cargo test --manifest-path linux/Cargo.toml` runs the suite.
 
 ### Use
 
@@ -103,15 +103,72 @@ menu. `cargo test --manifest-path linux/Cargo.toml` runs the suite.
 
 | | |
 |---|---|
-| `Ctrl+E` | editor pane | 
+| `Ctrl+E` | editor pane |
 | `Ctrl+S` | save |
 | `Ctrl+F` | find, with match count |
 | `F9` | outline sidebar |
 | `Ctrl+P` / `Ctrl+Shift+P` | print / save as PDF |
 | `Ctrl+,` | settings |
 
+In a `--peek` window: `Escape` closes it, `Enter` opens it as a real window, and
+`Ctrl+E` does that with the editor already open. All three keep your place in
+the document.
+
 Non-interactive modes: `--html`, `--pdf out.pdf in.md`, `--peek file.md`
 (chromeless preview), `--thumbnail in.md out.png 256`.
+
+### Preview surfaces
+
+Every place a desktop can show you a `.md` without opening it, and what TVMV
+does about each:
+
+| Surface | Status |
+|---|---|
+| File-manager thumbnails (Nautilus, Nemo, Caja, PCManFM, Thunar) | **Works** — one `.thumbnailer` covers all five; Thunar goes through tumbler. Draws a paper card, ~40 ms, no WebKit. |
+| Right-click → **Preview with TVMV** (Nautilus, Nemo, Caja) | **Works** where `python3-nautilus` is installed; the installer skips managers that are absent. |
+| `tvmv --peek file.md` | **Works** — chromeless window, 0.07 s warm, `Enter` promotes it to a real one. Bind it to a key in your WM for a QuickLook-shaped gesture. |
+| Dolphin thumbnails and its Information Panel | **Not available.** Dolphin ignores freedesktop `.thumbnailer` files and wants a KIO plugin; see *Not done* below. |
+| Spacebar preview in Nautilus | **Stays GNOME Sushi's.** Sushi's viewers are compiled into gresource bundles with no plugin API, so there is no extension point to take — not something TVMV can fix. Use the context menu, or a WM keybinding on `tvmv --peek`. |
+
+**Terminal file managers.** Nothing to install; they just need pointing at the
+right command. The recipes below use `tvmv --thumbnail` (a PNG, for managers
+that draw images) and `tvmv --peek` (a real window, for the ones that don't.)
+The `tvmv` commands in them are verified; the three configurations are not —
+none of these programs is installed here, so treat them as recipes.
+
+```toml
+# yazi — ~/.config/yazi/keymap.toml
+# The table was [[manager.prepend_keymap]] before yazi 25.5, and the `shell`
+# syntax has moved around too; check the docs for your version.
+[[mgr.prepend_keymap]]
+on   = [ "p", "v" ]
+run  = 'shell "tvmv --peek \"$0\""'
+desc = "Preview with TVMV"
+```
+
+```sh
+# ranger — ~/.config/ranger/scope.sh, in the image-preview branch
+# (needs `set preview_images true`). Exit 6 means "an image is waiting".
+*.md|*.markdown)
+    tvmv --thumbnail "$FILE_PATH" "$IMAGE_CACHE_PATH" 1024 && exit 6
+    ;;
+```
+
+```
+# lf — ~/.config/lf/lfrc
+map V ${{ tvmv --peek "$f" }}
+cmd open ${{ case "$f" in *.md|*.markdown) tvmv "$f" ;; *) xdg-open "$f" ;; esac }}
+```
+
+### Fonts
+
+The default body font is `Source Serif 4`, which is what the Mac app uses and
+what the reading theme was drawn around. **No Ubuntu package provides it**, and
+`app.css` falls back to the generic serif without comment, so a stock Linux
+install renders in DejaVu Serif and looks subtly unlike the screenshots. Install
+Source Serif 4 (SIL OFL, from Adobe's releases) for the intended look, or pick
+another body font in settings — the installer says so too when it does not find
+it. The default monospace is `DejaVu Sans Mono`, which Ubuntu does ship.
 
 ### Two things specific to Linux
 
@@ -131,7 +188,7 @@ policy and falls back with a warning rather than aborting.
 ### Not done
 
 No Flatpak recommendation (it measured slower and picks up the runtime's theming
-rather than the desktop's), no `.deb`, no AppStream metainfo. Dolphin gets no
+rather than the desktop's), and no `.deb`. Dolphin gets no
 thumbnails: it ignores freedesktop `.thumbnailer` files and needs a KIO plugin,
 and while the C ABI that plugin would draw through is built and tested
 (`tvmv_card_render_png`), **the C++ shim itself is not written** — this machine
