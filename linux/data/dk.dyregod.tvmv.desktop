@@ -1,0 +1,16 @@
+[Desktop Entry]
+Type=Application
+Name=TVMV
+GenericName=Markdown Viewer
+Comment=Read and edit Markdown with a warm paper & ink theme
+Exec=tvmv %F
+Icon=dk.dyregod.tvmv
+Terminal=false
+Categories=Office;Viewer;
+Keywords=markdown;md;viewer;editor;preview;
+MimeType=text/markdown;text/x-markdown;
+# Must match the GTK application id, or the shell shows a second, iconless entry
+# in the dock instead of grouping windows under the launcher. Verified against
+# the running app: WM_CLASS is ("tvmv", "tvmv").
+StartupWMClass=tvmv
+StartupNotify=true

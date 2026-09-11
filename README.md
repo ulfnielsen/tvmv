@@ -4,12 +4,18 @@
 
 ![TVMV rendering its own README](docs/screenshot.png)
 
-A native macOS Markdown viewer. Opens `.md` files in real windows and renders
-GitHub-Flavored Markdown (via cmark-gfm) in a `WKWebView` with a warm "paper &
-ink" reading theme, syntax highlighting, KaTeX math, and Mermaid diagrams.
-Select & copy, find-in-page (with match count), an outline sidebar, live reload
-on file change, print / Save-as-PDF, and font/size/measure/theme settings. No
-editing. Fully offline (all assets vendored).
+A native Markdown viewer and editor for macOS, iOS and Linux. Opens `.md` files
+in real windows and renders GitHub-Flavored Markdown (via cmark-gfm) with a warm
+"paper & ink" reading theme, syntax highlighting, KaTeX math, and Mermaid
+diagrams. Select & copy, find-in-page (with match count), an outline sidebar,
+a CodeMirror editor with live preview, live reload on file change, print /
+Save-as-PDF, and font/size/measure/theme settings. Fully offline — all assets
+are vendored.
+
+The rendering layer (`Sources/TVMVCore/Resources/web/`) is shared verbatim by
+all three platforms; only the shell differs — SwiftUI + `WKWebView` on Apple
+platforms, Rust + GTK4 + WebKitGTK on Linux. Both link the same pinned
+cmark-gfm revision, so the HTML is byte-identical.
 
 ## Build & install
 
@@ -69,6 +75,70 @@ The Mac app and its build pipeline are unaffected; `ios/project.yml` is the
 committed project definition (the `.xcodeproj` is generated). Known issue: the
 launch scene's *Create Document* fails on simulators without an iCloud account
 (NSFileProvider -1005); opening existing documents is unaffected.
+
+## Linux
+
+A native GTK4 + WebKitGTK app sharing the **same** web layer as the Mac app —
+`app.css`, `boot.js`, the CodeMirror editor and the vendored KaTeX / Mermaid /
+highlight.js are used unmodified, so a document renders identically on both.
+Only the shell is rewritten (Rust, in `linux/`); no Swift is ported.
+
+```sh
+sudo apt install libgtk-4-dev libwebkitgtk-6.0-dev pkg-config   # Ubuntu 24.04
+fish build/linux.fish                # build + install to /usr/local
+PREFIX=$HOME/.local fish build/linux.fish     # or per-user, no root
+fish build/linux.fish uninstall
+```
+
+Installs the binary, web assets, desktop entry, icons, the thumbnailer, the
+AppArmor profile, and — where the bindings are present — a file-manager context
+menu. `cargo test --manifest-path linux/Cargo.toml` runs the suite.
+
+### Use
+
+- `tvmv file.md …` — one window per file, reusing a running instance.
+- `tvmv` with no file opens a document chooser.
+- Double-click a `.md` in Files; the installer registers TVMV as the handler.
+- Right-click → **Preview with TVMV** (needs `python3-nautilus`).
+
+| | |
+|---|---|
+| `Ctrl+E` | editor pane | 
+| `Ctrl+S` | save |
+| `Ctrl+F` | find, with match count |
+| `F9` | outline sidebar |
+| `Ctrl+P` / `Ctrl+Shift+P` | print / save as PDF |
+| `Ctrl+,` | settings |
+
+Non-interactive modes: `--html`, `--pdf out.pdf in.md`, `--peek file.md`
+(chromeless preview), `--thumbnail in.md out.png 256`.
+
+### Two things specific to Linux
+
+**Scrolling on NVIDIA.** Debian and Ubuntu patch WebKitGTK to disable its dmabuf
+renderer whenever an NVIDIA proprietary driver is present, which forces every
+frame through a CPU copy: measured here, that cost a full core and dropped a
+1200×1200 window from 61 fps to 20. TVMV sets `WEBKIT_FORCE_DMABUF_RENDERER=1`
+(the same patch's own override) at startup. `TVMV_NO_FORCE_DMABUF=1` opts out.
+Upstream WebKit declined that patch — it is distribution-only.
+
+**The WebKit sandbox.** Ubuntu 24.04 denies unprivileged user namespaces to
+unconfined processes, which bubblewrap needs. The installer adds an AppArmor
+profile (modelled on Ubuntu's own `epiphany` one) so TVMV runs sandboxed. Run
+straight out of `linux/target/` there is no profile, so it detects the kernel
+policy and falls back with a warning rather than aborting.
+
+### Not done
+
+No Flatpak recommendation (it measured slower and picks up the runtime's theming
+rather than the desktop's), no `.deb`, no AppStream metainfo. Dolphin gets no
+thumbnails: it ignores freedesktop `.thumbnailer` files and needs a KIO plugin,
+and while the C ABI that plugin would draw through is built and tested
+(`tvmv_card_render_png`), **the C++ shim itself is not written** — this machine
+has neither `cmake` nor the KDE development packages. `linux/kio-thumbnail/README.md`
+records the build recipe and the KF5/KF6 detection Ubuntu 24.04 forces. GNOME
+Sushi's spacebar preview cannot be extended: its viewers are compiled into
+gresource bundles with no plugin API.
 
 ## Custom themes (CSS)
 

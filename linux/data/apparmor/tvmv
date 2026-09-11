@@ -1,0 +1,24 @@
+# AppArmor profile for TVMV.
+#
+# Ubuntu 24.04 sets kernel.apparmor_restrict_unprivileged_userns=1, which denies
+# unprivileged user namespaces to unconfined processes. WebKitGTK confines its
+# web processes with bubblewrap, which needs one — so without this profile the
+# app aborts at launch with "bwrap: setting up uid map: Permission denied".
+#
+# Modelled on Ubuntu's own /etc/apparmor.d/epiphany: this does not restrict the
+# app, it only gives it a name instead of the "unconfined" label, which is what
+# the userns permission is granted against.
+#
+# Installed to /etc/apparmor.d/tvmv by build/linux.fish (needs root). The paths
+# cover a system install and a per-user one under ~/.local/bin, since a
+# user-level install cannot write /etc but still wants a working sandbox.
+
+abi <abi/4.0>,
+include <tunables/global>
+
+profile tvmv /usr/{bin,local/bin}/tvmv @{HOME}/.local/bin/tvmv flags=(unconfined) {
+  userns,
+
+  # Site-specific additions and overrides.
+  include if exists <local/tvmv>
+}

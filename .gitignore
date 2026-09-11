@@ -8,3 +8,6 @@ dist/
 .verify/
 build/icon-candidates/
 ios/TVMV.xcodeproj
+linux/target/
+.flatpak-builder/
+build-flatpak/
