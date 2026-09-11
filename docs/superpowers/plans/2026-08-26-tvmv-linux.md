@@ -10,6 +10,48 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-26-tvmv-linux-design.md`
 
+## State, and what a Mac needs to do (2026-09-11)
+
+Everything in this plan that can be done without a Mac is done, committed, and
+verified — see Task 20 Step 5 for the recorded gate. The Linux app builds,
+renders, installs and uninstalls cleanly, and its render is byte-identical to
+the pre-Linux Mac output. These commits sit on top of `Release v1.0.2`, rebased
+onto it rather than merged (this history has no merge commits).
+
+**Owed on a Mac, in this order:**
+
+1. **The Swift suite, unchanged by any of this.** Nothing under `Sources/` was
+   touched by the Linux work, so this is a confirmation rather than a fix. Run
+   it first: everything below assumes a green baseline.
+2. **Task 2 Step 4 — `Tests/TVMVCoreTests/GoldenRenderTests.swift`.** The
+   fixtures and expectations are in `Fixtures/golden/`, generated from the
+   vendored cmark-gfm and already asserted byte-for-byte by
+   `linux/tests/golden.rs`. The Swift half asserts the same files, which is what
+   makes "both platforms emit identical HTML" a test rather than a claim.
+3. **Task 1 — promote the web layer to `/web`.** Left until last on purpose: it
+   is the only work here that touches the Swift build, and nothing depends on
+   it. Everything on the Linux side already looks for `web/` first and the
+   SwiftPM resource directory second (`resources.rs`, `build.rs`,
+   `tests/settings.rs`, `theme.rs`'s test), so the move needs no Linux edit.
+
+**One gap this work did not close, and it is the most interesting item left.**
+`a8318a0` taught the shared `boot.js` to report the clicked *word* and its
+ordinal within a block, and added `SourceClickResolver.swift` to map that back
+to a source offset — so on the Mac, clicking a word in the preview puts the
+caret on that word. The Linux shell decodes the message and throws it away
+(`window.rs`, the `PreviewMessage::SourceClick` arm, whose comment still says
+"Task 10" and is stale). Nothing is broken — the extra payload fields are
+ignored, and the suite is green — but the platforms now differ in behaviour,
+which is the one outcome the shared-web-layer design exists to prevent. The
+Linux side needs the equivalent of `SourceClickResolver`: same word class
+(`[\p{L}\p{N}_]`), same "nth occurrence within the block's source range" rule,
+then `Editor::place_caret`-shaped plumbing to move the caret and focus the pane.
+
+**Not pushed.** This machine has no SSH key and does not trust `github.com`, so
+`git push` cannot run here; the commits are local only. See the working copy's
+`review.md`, too — an August performance review, still untracked, left alone
+because it predates this work and publishing it is not mine to decide.
+
 ## Global Constraints
 
 - **The Mac and iOS apps must not change observably.** Only Task 1 touches them at all, and only the resource path. After Task 1 the full Swift suite passes on the Mac.
@@ -361,7 +403,7 @@ Verified end to end into a scratch prefix: 86 files installed, the installed bin
   Separately: **`Source Serif 4` is not packaged on Ubuntu at all**, and `app.css` falls back to the generic serif silently, so a stock Linux install does not look like the screenshots. The installer now checks `fc-list` and says so, and the README has a Fonts section.
 - [~] **Step 5: Final cross-platform gate** — the **Linux half is green**; the Mac half still needs a Mac.
 
-  Recorded 2026-09-11, at `cfcf872`:
+  Recorded 2026-09-11, and re-run unchanged after the rebase onto `Release v1.0.2`:
 
   | Gate | Result |
   |---|---|
@@ -369,7 +411,7 @@ Verified end to end into a scratch prefix: 86 files installed, the installed bin
   | `cargo clippy --all-targets` | clean |
   | Golden HTML (both option modes) | 7 passing |
   | `--html Fixtures/showcase.md` | byte-identical to `Fixtures/golden/showcase.html` |
-  | `--snapshot` | MD5 `d876035c…`, unchanged since before the embedding work |
+  | `--snapshot` | MD5 `d876035c…` — unchanged by the embedding work *and* by rebasing onto v1.0.2, whose `app.css` change is print-only |
   | `--pdf`, `--thumbnail` | 3.2 MB PDF, 15 KB PNG |
   | `examples/reload_scroll_probe` | PASS |
   | `examples/peek_promote_probe` | PASS |
