@@ -14,6 +14,7 @@
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use gtk4::gio;
 use gtk4::prelude::*;
@@ -104,6 +105,13 @@ fn router_for(view: Option<&WebView>) -> Option<AssetRouter> {
 
 pub struct Preview {
     pub web_view: WebView,
+    /// A scroll position captured before a re-render, waiting to be put back.
+    ///
+    /// Lives here rather than in the window because it belongs to this view's
+    /// page, and because both ends of the bracket already hold the `Preview` —
+    /// the reload path and the `renderComplete` handler — so nothing else has
+    /// to be threaded through.
+    pending_scroll: Rc<Cell<Option<f64>>>,
 }
 
 impl Preview {
@@ -137,7 +145,7 @@ impl Preview {
         tune_for_reading(&web_view);
         set_document_directory_for(&web_view, None);
 
-        Self { web_view }
+        Self { web_view, pending_scroll: Rc::new(Cell::new(None)) }
     }
 
     /// Load the template page. `boot.js` is callable once loading finishes.
@@ -235,6 +243,71 @@ impl Preview {
     pub fn apply_user_css(&self, css: &str) {
         self.eval(&format!("window.tvmv.applyUserCSS({});", js::literal(css)));
     }
+
+    /// Remember the reading position, then run `then`.
+    ///
+    /// `window.tvmv.render` replaces `#content` outright, which drops the page
+    /// to the top — so a live reload of the document the user is reading loses
+    /// their place unless the position is carried across. `ViewerModel.reload`
+    /// brackets its render the same way on the Mac.
+    ///
+    /// The value arrives from the web process on a later main-loop turn, so the
+    /// caller's re-render is scheduled from `then` rather than after the call.
+    /// Ordering the other way would let the DOM be replaced before the capture
+    /// landed, and the ratio read back would be the new page's zero.
+    pub fn capture_scroll_ratio(&self, then: impl FnOnce() + 'static) {
+        let slot = Rc::clone(&self.pending_scroll);
+        self.eval_json("window.tvmv.getScrollRatio()", move |value| {
+            slot.set(captured_ratio(value));
+            then();
+        });
+    }
+
+    /// Put a captured position back, if there is one. Consumes it either way.
+    ///
+    /// Call on `renderComplete`: that fires after the lazy highlight, KaTeX and
+    /// Mermaid passes, all of which change the document's height. Restoring
+    /// before them would land against a `scrollHeight` that is about to grow.
+    pub fn restore_scroll_ratio(&self) {
+        if let Some(script) = restore_script(self.pending_scroll.take()) {
+            self.eval(&script);
+        }
+    }
+}
+
+/// Decode what `getScrollRatio` returned, keeping only a position worth
+/// restoring.
+///
+/// A page at the very top needs nothing put back — a fresh render starts there
+/// — so `0` is dropped along with a missing or non-numeric reply. The clamp
+/// also strips NaN and infinity, neither of which survives a trip through
+/// `format!` into JS as a number.
+fn captured_ratio(value: Option<serde_json::Value>) -> Option<f64> {
+    let ratio = value?.as_f64()?;
+    (ratio.is_finite() && ratio > 0.0).then(|| ratio.min(1.0))
+}
+
+/// The restore script, or `None` when there is nothing to restore.
+///
+/// **Deliberately not `requestAnimationFrame`.** `PreviewBridge` on the Mac
+/// waits two frames for layout to settle, and the direct port of that does not
+/// work: WebKit stops serving frames to a window it considers unviewable, so
+/// the callbacks never run and the position is silently never restored.
+/// `examples/reload_scroll_probe` caught it — `raf` was still `0` a full second
+/// after `renderComplete`. That is not a quirk of the probe: a live reload
+/// happens *because* the user is working in another application, so an
+/// unfocused or occluded window is the normal case here, not the exception.
+///
+/// Reading `scrollHeight` instead forces a synchronous layout, which is all the
+/// scroll needs. `renderComplete` already means the DOM is final, so a flushed
+/// layout gives the finished height without waiting for anything to be painted.
+/// `boot.js`'s `maxScroll` reads it too; the explicit read is insurance against
+/// that changing.
+fn restore_script(ratio: Option<f64>) -> Option<String> {
+    let ratio = ratio?;
+    Some(format!(
+        "void document.documentElement.scrollHeight;window.tvmv.setScrollRatio({ratio});"
+    ))
 }
 
 /// Settings that matter for a document reader.
@@ -351,5 +424,88 @@ fn parse_message(value: &javascriptcore::Value) -> Option<PreviewMessage> {
             parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string(),
         )),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{captured_ratio, restore_script};
+    use serde_json::json;
+
+    #[test]
+    fn a_real_position_round_trips() {
+        assert_eq!(captured_ratio(Some(json!(0.42))), Some(0.42));
+    }
+
+    /// The top of the page is where a fresh render already lands, so there is
+    /// nothing to put back and no reason to touch the page.
+    #[test]
+    fn the_top_of_the_page_is_not_worth_restoring() {
+        assert_eq!(captured_ratio(Some(json!(0.0))), None);
+        assert_eq!(restore_script(captured_ratio(Some(json!(0.0)))), None);
+    }
+
+    /// A dead web process, a page without `boot.js` yet, or a JS exception all
+    /// arrive as a missing or non-numeric value. None of them should scroll.
+    #[test]
+    fn a_missing_or_non_numeric_reply_restores_nothing() {
+        assert_eq!(captured_ratio(None), None);
+        assert_eq!(captured_ratio(Some(json!(null))), None);
+        assert_eq!(captured_ratio(Some(json!("0.5"))), None);
+        assert_eq!(captured_ratio(Some(json!({"ratio": 0.5}))), None);
+    }
+
+    #[test]
+    fn an_out_of_range_ratio_clamps() {
+        assert_eq!(captured_ratio(Some(json!(1.5))), Some(1.0));
+    }
+
+    /// The ratio is interpolated into JS as a bare number, so it has to be one:
+    /// `f64::INFINITY` formats as `inf`, which is an undefined identifier in JS,
+    /// not a number. `captured_ratio` is the only producer, and it rejects both
+    /// non-finite values.
+    #[test]
+    fn the_emitted_ratio_is_always_a_js_number() {
+        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert_eq!(captured_ratio(Some(json!(value))), None, "{value}");
+        }
+        let script = restore_script(Some(0.5)).expect("a script for a real ratio");
+        assert!(script.contains("setScrollRatio(0.5)"), "{script}");
+        assert!(!script.contains("inf") && !script.contains("NaN"), "{script}");
+    }
+
+    /// The restore must not depend on a frame being served. WebKit withholds
+    /// frames from a window it thinks nobody is looking at, and that is exactly
+    /// the window a live reload lands in — see `restore_script`.
+    #[test]
+    fn the_restore_never_waits_for_a_frame() {
+        let script = restore_script(Some(0.25)).expect("a script for a real ratio");
+        assert!(!script.contains("requestAnimationFrame"), "{script}");
+        assert!(!script.contains("setTimeout"), "{script}");
+        // A layout flush first, so the height the ratio is applied to is final.
+        assert!(script.contains("scrollHeight"), "{script}");
+        assert!(
+            script.find("scrollHeight") < script.find("setScrollRatio"),
+            "the flush has to come before the scroll: {script}"
+        );
+    }
+
+    /// Both halves of the bracket are `boot.js` functions. The shared web layer
+    /// is the contract, so a rename there has to fail here rather than at
+    /// runtime, where a silent `undefined is not a function` just loses the
+    /// scroll position.
+    #[test]
+    fn boot_js_exposes_both_scroll_helpers() {
+        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
+        let boot = ["web/boot.js", "Sources/TVMVCore/Resources/web/boot.js"]
+            .iter()
+            .map(|c| root.join(c))
+            .find(|p| p.exists())
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .expect("the shared boot.js");
+
+        for name in ["getScrollRatio", "setScrollRatio"] {
+            assert!(boot.contains(&format!("{name}: {name}")), "window.tvmv.{name} is gone");
+        }
     }
 }

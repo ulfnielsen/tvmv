@@ -214,6 +214,11 @@ impl DocumentWindow {
                     // colours the window too. Until this fires the window wears
                     // the built-in theme's paper (see `theme::paper`).
                     if let Some(preview) = preview_slot.borrow().clone() {
+                        // A live reload captured the reading position before
+                        // replacing the DOM; now that the enrichment passes have
+                        // settled, the page is tall enough to put it back.
+                        preview.restore_scroll_ratio();
+
                         let scope = scope.clone();
                         let provider = tint_provider.clone();
                         preview.eval_json(
@@ -657,7 +662,21 @@ fn adopt_reloaded(
     window: &ApplicationWindow,
 ) {
     window.set_title(Some(&document.borrow().title()));
-    schedule_render(generation, document, preview_slot);
+
+    // Keep the reader's place across the reload: capture the scroll position
+    // first, render from the capture's completion so the two cannot race, and
+    // let `renderComplete` put it back.
+    match preview_slot.borrow().clone() {
+        Some(preview) => {
+            let generation = Rc::clone(generation);
+            let document = Rc::clone(document);
+            let preview_slot = Rc::clone(preview_slot);
+            preview.capture_scroll_ratio(move || {
+                schedule_render(&generation, &document, &preview_slot);
+            });
+        }
+        None => schedule_render(generation, document, preview_slot),
+    }
 
     if let Some(editor) = editor_slot.borrow().clone()
         && editor.web_view.is_visible()

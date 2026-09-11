@@ -162,7 +162,7 @@ succeeded.
 
 ## Phase C — GUI
 
-### Task 8: Application, window, and the preview bridge — **PARTLY DONE** (open: Step 6 scroll ratio, Step 8 embedding)
+### Task 8: Application, window, and the preview bridge — **PARTLY DONE** (open: Step 8 embedding)
 
 **Files:** `linux/src/{app,window,preview,resources,js,sandbox,main}.rs`
 
@@ -174,7 +174,13 @@ succeeded.
 - [x] **Step 4: Render path** — read file, `render_html(.., source_pos: true)`, `window.tvmv.render`, `applyStyle` from `Settings`. Verified end to end: a `settings.toml` with `theme`, `base_size`, `measure` and `body_font` visibly drives the render.
 - [x] **Step 4b: `--snapshot <out.png> <file.md>`** renders offscreen and writes a PNG, waiting on the page's own `renderComplete` — which fires only after the lazy highlight/KaTeX/Mermaid passes settle, so the image is the finished render rather than a race with it. This is how the GUI gets verified without a desktop session in the loop, and it is the groundwork Task 16's `--peek` and Task 14's thumbnailer build on.
 - [x] **Step 5: DMABuf renderer forced** — `startup::force_dmabuf_renderer`. Debian/Ubuntu's `disable-dmabuf-nvidia.patch` drops every frame through a CPU copy on NVIDIA: measured at 1200x1200, 19.7 fps and 109% of a core against 61.2 fps and 0.0% with the patch's own override set. Opt-out via `TVMV_NO_FORCE_DMABUF=1`, and an explicit `WEBKIT_*_DMABUF_RENDERER` already in the environment is never overridden.
-- [~] **Step 6: Live reload** — watcher wired (see Task 10 Step 6): a clean document reloads silently, a dirty one prompts. **Scroll ratio is not preserved.** The shared `boot.js` exposes `getScrollRatio`/`setScrollRatio` and `ViewerModel.swift` brackets its re-render with them; the Linux `adopt_reloaded` re-renders from the top, so a reload of the open document jumps to the start. Divergence from the Mac, still open.
+- [x] **Step 6: Live reload**, scroll position included. Watcher wired in Task 10 Step 6; the position is carried across by `Preview::capture_scroll_ratio` before the render and `restore_scroll_ratio` on `renderComplete`, the same bracket as `ViewerModel.reload`.
+
+  Two things the implementation got wrong first, both caught by `examples/reload_scroll_probe` (which drives the real stack: inotify, both debounces, the promise chain behind `renderComplete`):
+
+  - **The original diagnosis was wrong.** Replacing `#content` does *not* drop WebKitGTK to the top — the scroll offset survives in pixels. So the bug was never a jump to the start; it was that a document whose length changed kept the old *absolute* offset where the Mac keeps the *relative* one. A reload that shortens the document pinned the reader to the bottom (ratio 1.0 against an expected 0.5). The first version of the probe used an equal-length document and passed with the restore commented out, proving nothing; the lengths have to differ for it to discriminate.
+  - **`requestAnimationFrame` is not a usable settle on Linux.** `PreviewBridge.waitForLayoutSettle` waits two frames, and the direct port never ran: WebKit withholds frames from a window it considers unviewable, and `raf` was still `0` a second after `renderComplete`. That is the *normal* case for live reload — the user is editing in another application, so our window is unfocused. Reading `scrollHeight` to force a synchronous layout replaces it, which is all a scroll needs once the DOM is final.
+
 - [x] **Step 7: Portal appearance** — closed by Task 11 Step 4. `appearance.rs` reads `org.freedesktop.appearance` `color-scheme` from the XDG portal, falling back to GTK's setting when no portal is running. The original TODO was right that `gtk-application-prefer-dark-theme` is not a reliable signal — `GTK_THEME=Adwaita:dark` does not set it, so `theme: auto` stayed light under a dark GTK theme.
 - [ ] **Step 8: Embed the web layer in the binary.** `resources.rs` currently resolves `web/` at runtime (env override, installed path, dev fallbacks — mirroring `ResourceLocator.swift`). Embedding is still wanted so the binary is self-contained.
 
