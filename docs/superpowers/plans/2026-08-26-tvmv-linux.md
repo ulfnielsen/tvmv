@@ -359,4 +359,21 @@ Verified end to end into a scratch prefix: 86 files installed, the installed bin
 - [x] **Step 4: Licenses** — nothing to add, which took checking: no font is bundled at all. Source Serif 4 and DejaVu Sans Mono are asked of the system by name, and the KaTeX entry already covers the font files under `vendor/katex/fonts/`. Bundling Source Serif 4 belonged to the Flatpak, which is not the distribution path. Recorded in `THIRD-PARTY-LICENSES.md` so the question is not re-asked.
 
   Separately: **`Source Serif 4` is not packaged on Ubuntu at all**, and `app.css` falls back to the generic serif silently, so a stock Linux install does not look like the screenshots. The installer now checks `fc-list` and says so, and the README has a Fonts section.
-- [ ] **Step 5: Final cross-platform gate** — Swift suite green on the Mac, `cargo test` green on Linux, golden tests green in both.
+- [~] **Step 5: Final cross-platform gate** — the **Linux half is green**; the Mac half still needs a Mac.
+
+  Recorded 2026-09-11, at `cfcf872`:
+
+  | Gate | Result |
+  |---|---|
+  | `cargo test` | 134 passing, 0 failing |
+  | `cargo clippy --all-targets` | clean |
+  | Golden HTML (both option modes) | 7 passing |
+  | `--html Fixtures/showcase.md` | byte-identical to `Fixtures/golden/showcase.html` |
+  | `--snapshot` | MD5 `d876035c…`, unchanged since before the embedding work |
+  | `--pdf`, `--thumbnail` | 3.2 MB PDF, 15 KB PNG |
+  | `examples/reload_scroll_probe` | PASS |
+  | `examples/peek_promote_probe` | PASS |
+  | `desktop-file-validate`, `appstreamcli validate --pedantic` | both clean |
+  | `linux.fish install` then `uninstall` | round trip leaves only `mimeinfo.cache` |
+
+  Still owed on the Mac: the Swift suite, `GoldenRenderTests.swift` (Task 2 Step 4), and Task 1.
