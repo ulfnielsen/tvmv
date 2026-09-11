@@ -29,6 +29,9 @@ pub struct DocumentWindow {
     pub preview: Rc<Preview>,
     editor: Rc<Editor>,
     outline_widget: gtk4::ScrolledWindow,
+    /// The Ctrl+E action, kept so `start_editing` can reuse it rather than
+    /// reimplementing the lazy load of CodeMirror.
+    toggle_editing: Rc<dyn Fn()>,
     /// Held so live reload keeps working — dropping it stops the watch.
     _watcher: crate::watcher::FileWatcher,
 }
@@ -416,6 +419,30 @@ impl DocumentWindow {
             toggle_editor.connect_clicked(move |_| toggle());
         }
 
+        // Promotion: the peek window's whole purpose is to be temporary, so the
+        // way out of it is a full window on the same document — same reading
+        // position, and straight into the editor when that was the gesture.
+        //
+        // Reading the position is asynchronous, so the open and the close both
+        // happen in the callback, in that order: closing first would leave the
+        // application with no windows and end it.
+        let promote = {
+            let app = app.clone();
+            let path = path.to_path_buf();
+            let preview = Rc::clone(&preview);
+            let window = window.clone();
+            move |editing: bool| {
+                let app = app.clone();
+                let path = path.clone();
+                let window = window.clone();
+                preview.scroll_ratio(move |ratio| {
+                    if crate::app::promote_peek(&app, &path, ratio, editing).is_some() {
+                        window.close();
+                    }
+                });
+            }
+        };
+
         let do_print = {
             let preview = Rc::clone(&preview);
             let window = window.clone();
@@ -463,6 +490,7 @@ impl DocumentWindow {
             let show_settings_for_keys = show_settings.clone();
             let print_for_keys = do_print.clone();
             let peek_window = window.clone();
+            let promote_for_keys = promote.clone();
             let save_pdf_for_keys = save_pdf.clone();
             let save_doc = Rc::clone(&document);
             let save_window = window.clone();
@@ -489,8 +517,20 @@ impl DocumentWindow {
                         show_settings_for_keys();
                         gtk4::glib::Propagation::Stop
                     }
+                    // A peek window has no editor: editing means this document
+                    // is worth a real window, so Ctrl+E promotes into one.
+                    Key::e if ctrl && peek => {
+                        promote_for_keys(true);
+                        gtk4::glib::Propagation::Stop
+                    }
                     Key::e if ctrl => {
                         toggle_editing_for_keys();
+                        gtk4::glib::Propagation::Stop
+                    }
+                    // Enter is the "keep this one" gesture, the counterpart to
+                    // Escape. Only a peek window has anything to promote to.
+                    Key::Return | Key::KP_Enter if peek => {
+                        promote_for_keys(false);
                         gtk4::glib::Propagation::Stop
                     }
                     Key::s if ctrl => {
@@ -589,6 +629,7 @@ impl DocumentWindow {
             preview,
             editor: Rc::clone(&editor),
             outline_widget: outline.widget.clone(),
+            toggle_editing: Rc::new(toggle_editing.clone()),
             _watcher: watcher,
         }
     }
@@ -601,6 +642,17 @@ impl DocumentWindow {
     /// stylesheet through `applyUserCSS`, which is appended after the built-in
     /// theme so it overrides it. Reading the file here rather than in the
     /// settings window keeps the "no stylesheet" case a single empty string.
+    /// Open the editor pane if it is not already open.
+    ///
+    /// Idempotent, unlike the Ctrl+E toggle: a promoted peek window asks for
+    /// editing exactly once, and a toggle would close a pane that a future
+    /// caller had already opened.
+    pub fn start_editing(&self) {
+        if !self.editor.web_view.is_visible() {
+            (self.toggle_editing)();
+        }
+    }
+
     pub fn apply_settings(&self, settings: &Settings) {
         let dark = system_prefers_dark();
         self.preview.apply_style(&settings.style_json(dark));

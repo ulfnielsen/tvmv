@@ -257,10 +257,31 @@ impl Preview {
     /// landed, and the ratio read back would be the new page's zero.
     pub fn capture_scroll_ratio(&self, then: impl FnOnce() + 'static) {
         let slot = Rc::clone(&self.pending_scroll);
-        self.eval_json("window.tvmv.getScrollRatio()", move |value| {
-            slot.set(captured_ratio(value));
+        self.scroll_ratio(move |ratio| {
+            slot.set(ratio);
             then();
         });
+    }
+
+    /// Read the reading position without staging it for a restore.
+    ///
+    /// `None` for the top of the page, or for a page that cannot answer — see
+    /// `captured_ratio`. Used when the position is going somewhere other than
+    /// this view, as when a peek window promotes itself.
+    pub fn scroll_ratio(&self, then: impl FnOnce(Option<f64>) + 'static) {
+        self.eval_json("window.tvmv.getScrollRatio()", move |value| {
+            then(captured_ratio(value));
+        });
+    }
+
+    /// Stage a position for the next render to restore.
+    ///
+    /// Set before the page has loaded, this makes the *first* render land where
+    /// a previous view was — how a promoted peek window keeps the reader's
+    /// place. Restoring goes through the same `renderComplete` path as a live
+    /// reload rather than a second mechanism.
+    pub fn set_pending_scroll(&self, ratio: Option<f64>) {
+        self.pending_scroll.set(ratio);
     }
 
     /// Put a captured position back, if there is one. Consumes it either way.

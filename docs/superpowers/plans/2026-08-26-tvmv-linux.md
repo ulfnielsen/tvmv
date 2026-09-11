@@ -301,7 +301,7 @@ Each window registered the `tvmv-asset://` handler on the **shared default** `We
 
 - [x] **Step 1–3: Chromeless preview** — no toolbar, no find bar, no sidebar; Escape closes.
 - [x] **Step 4: Warm-open latency measured at 0.07 s.** It routes through `GApplication::open` with a hint, which forwards to the already-running instance and its warm WebProcess. A hint has no command-line spelling, so `--peek` registers and calls `open` directly.
-- [ ] **Step 5: Promotion** of a peek window to a full one.
+- [x] **Step 5: Promotion** — **Enter** opens a full window on the same document; **Ctrl+E** does the same and opens the editor with it, because a peek window has no editor of its own and doing nothing would be worse than promoting. Both keep the reading position, staged through `Preview::set_pending_scroll` so the first render restores it by the same path a live reload uses. The open happens before the close: no window at all, even for an instant, ends the application. `examples/peek_promote_probe` asserts all three — full chrome (a peek has no find bar), editor open, position carried.
 
 > `run` must be called even when the instance is remote: it is what unregisters from D-Bus, and returning without it logs "did not unregister from D-Bus before destruction".
 

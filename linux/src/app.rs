@@ -172,6 +172,33 @@ pub fn open_window(
     path: &Path,
     on_render_complete: Option<crate::window::OnRenderComplete>,
 ) -> Option<ApplicationWindow> {
+    open(app, path, on_render_complete, None, false)
+}
+
+/// Take over from a `--peek` preview: a full window on the same document, at
+/// the same reading position, with the editor already open when that was the
+/// gesture the user made.
+///
+/// The position rides in through `set_pending_scroll`, so the first render puts
+/// it back through the same `renderComplete` path a live reload uses rather
+/// than a second mechanism. The caller closes the peek window only once this
+/// has returned a window — a moment with none at all would end the application.
+pub fn promote_peek(
+    app: &Application,
+    path: &Path,
+    scroll: Option<f64>,
+    editing: bool,
+) -> Option<ApplicationWindow> {
+    open(app, path, None, scroll, editing)
+}
+
+fn open(
+    app: &Application,
+    path: &Path,
+    on_render_complete: Option<crate::window::OnRenderComplete>,
+    scroll: Option<f64>,
+    editing: bool,
+) -> Option<ApplicationWindow> {
     let Some(web_dir) = resources::web_dir() else {
         eprintln!(
             "tvmv: could not find the web/ resources.\n\
@@ -183,6 +210,14 @@ pub fn open_window(
     let settings = shared_settings();
     let doc = DocumentWindow::new(app, &web_dir, path, &settings.borrow(), on_render_complete);
     let window = doc.window.clone();
+
+    // Both of these land before the main loop runs again, so before the page
+    // can report a render: the position is staged for the first one, and the
+    // editor pane is open from the moment the window appears.
+    doc.preview.set_pending_scroll(scroll);
+    if editing {
+        doc.start_editing();
+    }
 
     // Drop our state when the window goes away, so watcher threads do not
     // outlive their windows.
