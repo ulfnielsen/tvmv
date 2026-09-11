@@ -30,6 +30,7 @@ set -l bindir  $prefix/bin
 set -l datadir $prefix/share
 set -l appdir  $datadir/applications
 set -l icondir $datadir/icons/hicolor
+set -l metadir $datadir/metainfo
 set -l webdir  $datadir/tvmv/web
 set -l apparmor /etc/apparmor.d/tvmv
 
@@ -84,6 +85,12 @@ switch $action
             $appdir/dk.dyregod.tvmv.desktop
         step "$appdir/dk.dyregod.tvmv.desktop"
 
+        # AppStream metadata, so GNOME Software and Discover can describe the
+        # app rather than showing a bare desktop entry.
+        asroot install -Dm644 $repo/linux/data/dk.dyregod.tvmv.metainfo.xml \
+            $metadir/dk.dyregod.tvmv.metainfo.xml
+        step "$metadir/dk.dyregod.tvmv.metainfo.xml"
+
         for size in 16 24 32 48 64 128 256 512
             set -l png $repo/linux/data/icons/hicolor/{$size}x{$size}/apps/dk.dyregod.tvmv.png
             test -f $png; and asroot install -Dm644 $png \
@@ -123,11 +130,26 @@ switch $action
         command -q gtk4-update-icon-cache; and asroot gtk4-update-icon-cache -qtf $icondir 2>/dev/null
         command -q xdg-mime; and xdg-mime default dk.dyregod.tvmv.desktop text/markdown 2>/dev/null
 
+        # The default body font is the Mac's, and no Ubuntu package provides it,
+        # so most Linux installs quietly fall back to the generic serif and the
+        # reading theme looks subtly off. Say so once, here, rather than leaving
+        # it to be noticed.
+        if command -q fc-list
+            set -l found (fc-list : family 2>/dev/null | grep -ci "source serif")
+            if test "$found" -eq 0
+                echo "  note: the default body font 'Source Serif 4' is not installed, so"
+                echo "        text falls back to the generic serif. Install it (SIL OFL,"
+                echo "        from Adobe's Source Serif releases) for the intended look,"
+                echo "        or choose another body font in settings (Ctrl+,)."
+            end
+        end
+
         echo "==> done. `tvmv file.md`, or open a .md from Files."
 
     case uninstall
         echo "==> removing from $prefix"
-        for path in $bindir/tvmv $appdir/dk.dyregod.tvmv.desktop
+        for path in $bindir/tvmv $appdir/dk.dyregod.tvmv.desktop \
+                    $metadir/dk.dyregod.tvmv.metainfo.xml
             test -e $path; and asroot rm -f $path; and step "removed $path"
         end
         test -d $webdir; and asroot rm -rf (dirname $webdir); and step "removed $webdir"
@@ -145,24 +167,6 @@ switch $action
             sudo apparmor_parser -R $apparmor 2>/dev/null
             sudo rm -f $apparmor; and step "removed $apparmor"
         end
-        # Thumbnailer: one file registers with the shared freedesktop spec,
-        # which covers Nautilus, Nemo, Caja, PCManFM and Thunar (via tumbler).
-        asroot install -Dm644 $repo/linux/data/tvmv.thumbnailer \
-            $datadir/thumbnailers/tvmv.thumbnailer
-        step "$datadir/thumbnailers/tvmv.thumbnailer"
-
-        # Context menu, into whichever file managers are actually present. A
-        # soft dependency: absent bindings just mean no menu entry.
-        for fm in nautilus nemo caja
-            set -l extdir $HOME/.local/share/$fm-python/extensions
-            if test -d $HOME/.local/share/$fm-python; or test -d /usr/share/$fm-python
-                mkdir -p $extdir
-                install -Dm644 $repo/linux/data/extensions/tvmv-preview.py \
-                    $extdir/tvmv-preview.py
-                step "$extdir/tvmv-preview.py"
-            end
-        end
-
         command -q update-desktop-database; and asroot update-desktop-database -q $appdir 2>/dev/null
         command -q gtk4-update-icon-cache; and asroot gtk4-update-icon-cache -qtf $icondir 2>/dev/null
         echo "==> done."

@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  AppStream metadata, so GNOME Software and KDE Discover can describe the app
+  rather than listing a bare desktop entry.
+
+  Deliberately no <screenshots>: the specification wants absolute http(s) URLs,
+  and there is nowhere public to point at yet. A URL that 404s would show as a
+  broken image in both stores, which is worse than the "no screenshots" notice
+  `appstreamcli validate` prints. Add the block when the repository is public.
+-->
+<component type="desktop-application">
+  <id>dk.dyregod.tvmv</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <!-- As declared by linux/Cargo.toml, the repository's only license statement. -->
+  <project_license>MIT</project_license>
+
+  <name>TVMV</name>
+  <summary>Read and edit Markdown with a warm paper and ink theme</summary>
+
+  <description>
+    <p>
+      TVMV opens Markdown files in real windows and renders GitHub-Flavored
+      Markdown with a warm reading theme built for long documents rather than
+      for a code editor's sidebar.
+    </p>
+    <p>
+      The same rendering layer runs on macOS, iOS and Linux, over the same
+      pinned cmark-gfm revision, so a document looks the same wherever it is
+      opened. Everything is offline: no network access at any point.
+    </p>
+    <p>Features:</p>
+    <ul>
+      <li>Syntax highlighting, KaTeX math and Mermaid diagrams</li>
+      <li>An outline sidebar, and find-in-page with a match count</li>
+      <li>A CodeMirror editor beside the preview, scrolling in step with it</li>
+      <li>Live reload when the file changes on disk, keeping your place</li>
+      <li>Print and Save-as-PDF through the desktop's own dialogs</li>
+      <li>Thumbnails in the file manager, and a chromeless quick preview</li>
+      <li>Body font, text size, line width and theme, plus your own stylesheet</li>
+    </ul>
+  </description>
+
+  <launchable type="desktop-id">dk.dyregod.tvmv.desktop</launchable>
+  <provides>
+    <binary>tvmv</binary>
+  </provides>
+
+  <categories>
+    <category>Office</category>
+    <category>Viewer</category>
+  </categories>
+
+  <keywords>
+    <keyword>markdown</keyword>
+    <keyword>md</keyword>
+    <keyword>viewer</keyword>
+    <keyword>editor</keyword>
+    <keyword>preview</keyword>
+  </keywords>
+
+  <url type="homepage">https://github.com/ulfnielsen/tvmv</url>
+  <url type="bugtracker">https://github.com/ulfnielsen/tvmv/issues</url>
+
+  <developer id="dk.dyregod">
+    <name>Ulf Nielsen</name>
+  </developer>
+
+  <!-- A Markdown viewer with no network access: nothing to rate. -->
+  <content_rating type="oars-1.1"/>
+
+  <supports>
+    <control>keyboard</control>
+    <control>pointing</control>
+  </supports>
+
+  <releases>
+    <release version="0.1.0" date="2026-09-11">
+      <description>
+        <p>First Linux release: GTK4 and WebKitGTK over the shared web layer.</p>
+      </description>
+    </release>
+  </releases>
+</component>

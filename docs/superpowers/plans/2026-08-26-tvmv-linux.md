@@ -269,7 +269,7 @@ Each window registered the `tvmv-asset://` handler on the **shared default** `We
 - [x] **Step 1: Hicolor icon set** — 16/24/32/48/64/128/256/512 generated from `build/icon-1024.png`.
 - [x] **Step 2: `.desktop` entry** with `MimeType=text/markdown;text/x-markdown;`, `Exec=tvmv %F`, and **`StartupWMClass=tvmv`** — verified against the running app's actual `WM_CLASS`, without which the shell shows a second iconless dock entry instead of grouping windows. `desktop-file-validate` passes with no hints.
 - [x] **Step 5: AppArmor profile** — see Task 18; required for the WebKit sandbox on Ubuntu 24.04.
-- [ ] **Step 3: AppStream metainfo** for GNOME Software / Discover.
+- [x] **Step 3: AppStream metainfo** — `linux/data/dk.dyregod.tvmv.metainfo.xml`, installed to `$PREFIX/share/metainfo/`. `appstreamcli validate --pedantic` passes clean. **No `<screenshots>`**: the spec wants absolute http(s) URLs and there is nowhere public to point at yet, and a URL that 404s shows as a broken image in both stores. Add the block when the repository is public.
 - [x] **Step 4: Verified** — `xdg-mime query default text/markdown` returns `dk.dyregod.tvmv.desktop`. Confirmed against a per-user install (`PREFIX=$HOME/.local`), not a root one; the root path is the same code in `build/linux.fish`.
 
 ### Task 14: Thumbnail card + freedesktop thumbnailer — **DONE**
@@ -321,7 +321,7 @@ Each window registered the `tvmv-asset://` handler on the **shared default** `We
 Verified end to end into a scratch prefix: 86 files installed, the installed binary finds its web assets with no environment variable and runs at **60.0 fps / 1.0 vsync per frame**, and `uninstall` removes everything it placed.
 
 - [x] **Step 1: `cargo build --release`**, then install binary, web assets, `.desktop`, icons, and the AppArmor profile.
-- [x] **Step 2: `uninstall`** removes what it installed and refreshes the desktop and icon caches. `share/applications/mimeinfo.cache` is deliberately left — it is a shared cache owned by the desktop database, not by us.
+- [x] **Step 2: `uninstall`** removes what it installed — **it did not.** A copy-pasted block left the thumbnailer and the file-manager extension being *re-installed* at the end of the uninstall branch, so both survived it. Caught by running install and uninstall against a scratch `PREFIX` (and a scratch `HOME`, so the extension could not touch the real one) and diffing the tree: the round trip now leaves only `mimeinfo.cache`. and refreshes the desktop and icon caches. `share/applications/mimeinfo.cache` is deliberately left — it is a shared cache owned by the desktop database, not by us.
 - [x] **Step 3: Refuses to run on non-Linux**, pointing at `build/bundle.fish`, so it can never be confused with the macOS bundler.
 - [x] **Step 4: Root only where needed** — it probes the nearest existing ancestor of `PREFIX`, so a prefix under `$HOME` needs no `sudo`. The AppArmor profile always needs root, and failing to load it is a warning rather than a failure: the app detects the situation and falls back.
 
