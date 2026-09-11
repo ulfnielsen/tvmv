@@ -161,6 +161,19 @@
     view.dispatch(spec);
   }
 
+  // Put the caret on an exact line/column (1-based, column in UTF-16 units —
+  // the same unit CodeMirror counts in) and bring it into view. Used by the
+  // preview's click-to-edit sync, which resolves a clicked word to a position.
+  function placeCursor(line, column) {
+    var l = view.state.doc.line(clampLine(line));
+    var col = Math.max(1, Number(column) || 1);
+    var pos = Math.min(l.to, l.from + (col - 1));
+    view.dispatch({
+      selection: { anchor: pos },
+      effects: CMSTATE.EditorView.scrollIntoView(pos, { y: "center" }),
+    });
+  }
+
   function restore(cursorOffset, topLine) {
     view.dispatch({ selection: { anchor: clampOffset(cursorOffset) } });
     var pos = view.state.doc.line(clampLine(topLine)).from;
@@ -204,6 +217,7 @@
   window.tvmvEditor = {
     setText: setText,
     scrollToLine: scrollToLine,
+    placeCursor: placeCursor,
     restore: restore,
     getText: getText,
     applyStyle: applyStyle,

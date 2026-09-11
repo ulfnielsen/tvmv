@@ -195,7 +195,7 @@ struct DocumentScreen: View {
                     if !model.isEditing { model.errorMessage = message }
                 },
                 onReady: { model.pageReady() },
-                onSourceClick: { model.previewClicked(line: $0) }
+                onSourceClick: { model.previewClicked($0) }
             ),
             onMakeController: { model.attach(controller: $0) }
         )

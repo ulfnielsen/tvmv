@@ -243,13 +243,29 @@ public final class ViewerModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
-    /// Preview click: jump the editor to the clicked block's source line and
-    /// hand it focus. No-op while the editor pane is closed, so plain viewing
-    /// keeps its normal click behavior (selection, links).
-    public func previewClicked(line: Int) {
+    /// Preview click: jump the editor to the clicked word and hand it focus.
+    /// No-op while the editor pane is closed, so plain viewing keeps its normal
+    /// click behavior (selection, links).
+    ///
+    /// When the click landed on a word, the caret goes to that exact word in the
+    /// source; otherwise (whitespace, an image, a diagram) it falls back to the
+    /// start of the block, which is what this used to do for every click.
+    public func previewClicked(_ click: SourceClick) {
         guard isEditing, let bridge = editorBridge else { return }
+        let target = click.word.flatMap {
+            SourceClickResolver.resolve(
+                in: text,
+                word: $0,
+                ordinal: click.ordinal,
+                startLine: click.line,
+                endLine: click.endLine)
+        }
         Task {
-            await bridge.scrollToLine(line, placeCursor: true)
+            if let target {
+                await bridge.placeCursor(line: target.line, column: target.column)
+            } else {
+                await bridge.scrollToLine(click.line, placeCursor: true)
+            }
             bridge.focus()
         }
     }

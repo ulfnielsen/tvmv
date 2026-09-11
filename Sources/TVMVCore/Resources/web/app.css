@@ -276,6 +276,12 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
   #content.markdown-body blockquote,
   #content.markdown-body .mermaid,
   #content.markdown-body .katex-display { break-inside: avoid; page-break-inside: avoid; }
+  /* Collapsed borders are centred on the cell edges, so the outer half of the
+     right-hand border is painted OUTSIDE the table's box. On screen the content
+     column has padding to spare; in print it spans the whole printable width, so
+     a table wide enough to fill that width has its right border clipped away by
+     the page edge. Reserving a pixel keeps the border on the page. */
+  #content.markdown-body table { margin-right: 1px; }
   #content.markdown-body a[href^="http"]::after {
     content: " (" attr(href) ")"; font-size: 85%; word-break: break-all;
   }

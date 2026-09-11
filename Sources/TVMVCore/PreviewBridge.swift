@@ -4,6 +4,26 @@ import WebKit
 import AppKit
 #endif
 
+/// A click on a rendered preview block, as reported by boot.js.
+///
+/// `line`/`endLine` are the block's 1-based source span (cmark sourcepos).
+/// `word` and `ordinal` describe the word under the pointer — which occurrence
+/// of it the click landed on within that block — and are absent when the click
+/// was not on text. See `SourceClickResolver`.
+public struct SourceClick: Equatable, Sendable {
+    public var line: Int
+    public var endLine: Int
+    public var word: String?
+    public var ordinal: Int
+
+    public init(line: Int, endLine: Int, word: String? = nil, ordinal: Int = 1) {
+        self.line = line
+        self.endLine = endLine
+        self.word = word
+        self.ordinal = ordinal
+    }
+}
+
 /// Delivers messages from the JS side back to SwiftUI.
 /// A delegate closure is sufficient for our needs.
 public struct MarkdownWebViewCallbacks {
@@ -13,16 +33,16 @@ public struct MarkdownWebViewCallbacks {
     /// Fired when the template page finishes loading (boot.js is live and the
     /// `window.tvmv` API is callable). The owner renders content on this signal.
     public var onReady: (@MainActor () -> Void)?
-    /// Fired when the user clicks a rendered block; carries the block's
-    /// 1-based source line (from data-sourcepos) for preview→editor jumps.
-    public var onSourceClick: (@MainActor (Int) -> Void)?
+    /// Fired when the user clicks a rendered block; carries the block's source
+    /// line span and the clicked word, for preview→editor jumps.
+    public var onSourceClick: (@MainActor (SourceClick) -> Void)?
 
     public init(
         onOutline: (@MainActor ([OutlineItem]) -> Void)? = nil,
         onRenderComplete: (@MainActor () -> Void)? = nil,
         onError: (@MainActor (String) -> Void)? = nil,
         onReady: (@MainActor () -> Void)? = nil,
-        onSourceClick: (@MainActor (Int) -> Void)? = nil
+        onSourceClick: (@MainActor (SourceClick) -> Void)? = nil
     ) {
         self.onOutline = onOutline
         self.onRenderComplete = onRenderComplete
@@ -106,7 +126,12 @@ public final class PreviewCoordinator: NSObject, WKScriptMessageHandler, WKNavig
 
             case "sourceClick":
                 if let line = dict["line"] as? Int {
-                    callbacks.onSourceClick?(line)
+                    callbacks.onSourceClick?(SourceClick(
+                        line: line,
+                        endLine: dict["endLine"] as? Int ?? line,
+                        word: dict["word"] as? String,
+                        ordinal: dict["ordinal"] as? Int ?? 1
+                    ))
                 }
 
             case "error":

@@ -58,6 +58,12 @@ public final class EditorBridge {
         await run("window.tvmvEditor.scrollToLine(\(line), \(placeCursor));")
     }
 
+    /// Put the caret on an exact 1-based line/column and scroll it into view.
+    /// `column` counts UTF-16 units, matching CodeMirror's document offsets.
+    public func placeCursor(line: Int, column: Int) async {
+        await run("window.tvmvEditor.placeCursor(\(line), \(column));")
+    }
+
     public func restore(_ p: EditorPosition) async {
         await run("window.tvmvEditor.restore(\(p.cursorOffset), \(p.topLine));")
     }

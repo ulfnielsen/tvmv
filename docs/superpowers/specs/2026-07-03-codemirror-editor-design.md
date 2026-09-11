@@ -145,7 +145,9 @@ CM keystrokes ──(100ms debounce / blur flush)──> textChanged ──> mod
 model.textEdited ──(250ms debounce)──> renderCurrent ──> preview (unchanged)
 CM scroll ──> scrolled{topLine} ──> model ──> preview scrollToSourceLine (unchanged shape)
 CM cursor ──> cursorMoved{line} ──> model ──> preview revealSourceLine (unchanged shape)
-preview click ──> sourceClick{line} ──> model.previewClicked ──> bridge.scrollToLine (unchanged)
+preview click ──> sourceClick{line,endLine,word,ordinal} ──> model.previewClicked
+                 ──> SourceClickResolver ──> bridge.placeCursor{line,column}
+                 (no word under the pointer ──> bridge.scrollToLine, the original behaviour)
 ⌘S ──> flush(getText) ──> save()   |   close ──> flush ──> prompt ──> save/discard
 external reload / discard ──> bridge.setText(resetHistory: true)
 ```

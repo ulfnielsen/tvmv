@@ -136,7 +136,7 @@ struct ViewerWindow: View {
                 // there (mermaid draws its own in-place error graphic anyway).
                 onError: { msg in if !model.isEditing { model.errorMessage = msg } },
                 onReady: { model.pageReady() },
-                onSourceClick: { line in model.previewClicked(line: line) }
+                onSourceClick: { click in model.previewClicked(click) }
             ),
             onMakeController: { controller in model.attach(controller: controller) }
         )

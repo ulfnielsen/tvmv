@@ -427,6 +427,92 @@
   // A click on a rendered block reports its source line so the app can jump
   // the editor there. The native side ignores it unless the editor pane is
   // open. Clicks on links keep their normal navigation behavior.
+  //
+  // sourcepos is block-level, so a bare line number only ever gets the caret to
+  // the top of the block. To reach the exact word, the click also reports the
+  // word under the pointer and WHICH occurrence of that word it is within the
+  // block's rendered text; native looks the same occurrence up in the source.
+
+  function _sourceposEnd(el) {
+    var sp = el.getAttribute("data-sourcepos");
+    if (!sp) return null;
+    var dash = sp.indexOf("-");           // "12:1-14:8" -> 14
+    if (dash < 0) return null;
+    var n = parseInt(sp.slice(dash + 1), 10);
+    return isNaN(n) ? null : n;
+  }
+
+  // Letters, digits and underscore, Unicode-aware — the Swift side uses the
+  // same class, so "grød" is one word on both ends.
+  var WORD_CHAR = /[\p{L}\p{N}_]/u;
+
+  function _isWordChar(ch) {
+    return ch !== "" && WORD_CHAR.test(ch);
+  }
+
+  // The caret position under (x, y), as {node, offset}, across both spellings
+  // of the API.
+  function _caretAt(x, y) {
+    if (document.caretRangeFromPoint) {
+      var r = document.caretRangeFromPoint(x, y);
+      return r ? { node: r.startContainer, offset: r.startOffset } : null;
+    }
+    if (document.caretPositionFromPoint) {
+      var p = document.caretPositionFromPoint(x, y);
+      return p ? { node: p.offsetNode, offset: p.offset } : null;
+    }
+    return null;
+  }
+
+  // Offset of `node`'s text within `root`'s concatenated text content.
+  function _textOffsetWithin(root, node) {
+    var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+    var total = 0;
+    while (walker.nextNode()) {
+      if (walker.currentNode === node) return total;
+      total += walker.currentNode.nodeValue.length;
+    }
+    return null;
+  }
+
+  // {word, ordinal} for the click, or null when the pointer was on whitespace,
+  // punctuation, or something that is not text (an image, a mermaid diagram).
+  function _clickedWord(block, x, y) {
+    var caret = _caretAt(x, y);
+    if (!caret || !caret.node || caret.node.nodeType !== 3) return null;
+    if (!block.contains(caret.node)) return null;
+
+    var value = caret.node.nodeValue || "";
+    var i = Math.max(0, Math.min(caret.offset, value.length));
+    var start = i, end = i;
+    while (start > 0 && _isWordChar(value.charAt(start - 1))) start--;
+    while (end < value.length && _isWordChar(value.charAt(end))) end++;
+    if (start === end) return null;
+
+    var word = value.slice(start, end);
+    var base = _textOffsetWithin(block, caret.node);
+    if (base === null) return null;
+    var at = base + start;
+
+    // Which whole-word occurrence of `word` within the block this is. Rendered
+    // text is not source text, so native treats this as a hint and degrades to
+    // the nearest match rather than trusting it blindly.
+    var text = block.textContent || "";
+    var ordinal = 0, from = 0, hit;
+    while ((hit = text.indexOf(word, from)) >= 0) {
+      var beforeOK = hit === 0 || !_isWordChar(text.charAt(hit - 1));
+      var afterOK = hit + word.length >= text.length
+        || !_isWordChar(text.charAt(hit + word.length));
+      // The clicked occurrence always counts, even if concatenated cell text
+      // makes its neighbours look like word characters.
+      if ((beforeOK && afterOK) || hit === at) {
+        ordinal++;
+        if (hit === at) return { word: word, ordinal: ordinal };
+      }
+      from = hit + 1;
+    }
+    return null;
+  }
 
   document.addEventListener("click", function (ev) {
     var target = ev.target;
@@ -435,7 +521,11 @@
     var el = target.closest("[data-sourcepos]");
     if (!el) return;
     var line = _sourceposStart(el);
-    if (line !== null) post({ type: "sourceClick", line: line });
+    if (line === null) return;
+    var msg = { type: "sourceClick", line: line, endLine: _sourceposEnd(el) || line };
+    var word = _clickedWord(el, ev.clientX, ev.clientY);
+    if (word) { msg.word = word.word; msg.ordinal = word.ordinal; }
+    post(msg);
   });
 
   /* ---- public: find in page ------------------------------------------- */
