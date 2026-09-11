@@ -15,6 +15,7 @@ use gtk4::{
 };
 use webkit6::prelude::*;
 
+use crate::assets::WebSource;
 use crate::chrome;
 use crate::document::Document;
 use crate::editor::{Editor, EditorMessage};
@@ -71,12 +72,12 @@ fn read_user_css(settings: &Settings) -> String {
 impl DocumentWindow {
     pub fn new(
         app: &Application,
-        web_dir: &Path,
+        web: &WebSource,
         path: &Path,
         settings: &Settings,
         on_render_complete: Option<OnRenderComplete>,
     ) -> Self {
-        Self::build(app, web_dir, path, settings, on_render_complete, false)
+        Self::build(app, web, path, settings, on_render_complete, false)
     }
 
     /// A chromeless preview: no toolbar, no sidebar, Escape closes.
@@ -86,16 +87,16 @@ impl DocumentWindow {
     /// starting a second one.
     pub fn peek(
         app: &Application,
-        web_dir: &Path,
+        web: &WebSource,
         path: &Path,
         settings: &Settings,
     ) -> Self {
-        Self::build(app, web_dir, path, settings, None, true)
+        Self::build(app, web, path, settings, None, true)
     }
 
     fn build(
         app: &Application,
-        web_dir: &Path,
+        web: &WebSource,
         path: &Path,
         settings: &Settings,
         on_render_complete: Option<OnRenderComplete>,
@@ -200,7 +201,7 @@ impl DocumentWindow {
 
         // --- preview ------------------------------------------------------
 
-        let preview = Rc::new(Preview::new(web_dir, {
+        let preview = Rc::new(Preview::new(web, {
             let outline_slot = Rc::clone(&outline_slot);
             let preview_slot = Rc::clone(&preview_slot);
             let done = Rc::clone(&done);
@@ -369,7 +370,7 @@ impl DocumentWindow {
         }
 
         // Tint the window before the page exists, so there is no cold flash.
-        let paper = crate::theme::paper(web_dir, system_prefers_dark());
+        let paper = crate::theme::paper(web, system_prefers_dark());
         preview.set_background(paper);
         let initial = chrome::Rgba { red: paper.0, green: paper.1, blue: paper.2, alpha: 1.0 };
         chrome::apply_tint(&scope, initial, &tint_provider);

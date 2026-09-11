@@ -14,7 +14,7 @@
 //! rendered page. Task 9 brings that here; until then a custom stylesheet with a
 //! very different background will still flash.
 
-use std::path::Path;
+use crate::assets::{AssetRouter, SCHEME, WebSource};
 
 /// `--paper` from `:root` in `app.css`.
 const FALLBACK_LIGHT_HEX: &str = "#FBF8F2";
@@ -38,9 +38,22 @@ pub fn paper_for(dark: bool) -> (f64, f64, f64) {
 }
 
 /// The page background for the given theme, as linear 0..1 RGB.
-pub fn paper(web_dir: &Path, dark: bool) -> (f64, f64, f64) {
-    let Ok(css) = std::fs::read_to_string(web_dir.join("app.css")) else {
+///
+/// Reads `app.css` through the same router the web view does, so the embedded
+/// stylesheet and an overridden directory both answer here — a colour parsed
+/// from a stylesheet the page is not actually using would be worse than the
+/// fallback.
+pub fn paper(source: &WebSource, dark: bool) -> (f64, f64, f64) {
+    let router = AssetRouter::new(source.clone());
+    let Ok(asset) = router.resolve(&format!("{SCHEME}://app/app.css")) else {
         return fallback(dark);
+    };
+    let css = match asset {
+        crate::assets::Asset::Bytes(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+        crate::assets::Asset::File(path) => match std::fs::read_to_string(&path) {
+            Ok(css) => css,
+            Err(_) => return fallback(dark),
+        },
     };
     parse_paper(&css, dark).unwrap_or_else(|| fallback(dark))
 }
@@ -72,9 +85,19 @@ fn parse_hex(value: &str) -> Option<(f64, f64, f64)> {
 mod tests {
     use super::*;
 
+    /// The embedded stylesheet is what the app actually serves, so it is what
+    /// the pre-render colour has to be read from.
     #[test]
-    fn parses_both_themes_from_the_real_stylesheet() {
-        // Whichever location the shared web layer is in (see Task 1).
+    fn parses_both_themes_from_the_embedded_stylesheet() {
+        // Parsed, not fallen back to: assert against app.css's actual values.
+        assert_eq!(paper(&WebSource::Embedded, false), parse_hex("#FBF8F2").unwrap());
+        assert_eq!(paper(&WebSource::Embedded, true), parse_hex("#181410").unwrap());
+    }
+
+    /// A directory source must agree with the embedded one — same stylesheet,
+    /// same colour, whichever way it is reached.
+    #[test]
+    fn a_directory_source_gives_the_same_colours() {
         let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
         let dir = ["web", "Sources/TVMVCore/Resources/web"]
             .iter()
@@ -82,16 +105,16 @@ mod tests {
             .find(|p| p.join("app.css").is_file())
             .expect("shared web layer found");
 
-        // Parsed, not fallen back to: assert against app.css's actual values.
-        assert_eq!(paper(&dir, false), parse_hex("#FBF8F2").unwrap());
-        assert_eq!(paper(&dir, true), parse_hex("#181410").unwrap());
+        for dark in [false, true] {
+            assert_eq!(paper(&WebSource::Directory(dir.clone()), dark), paper(&WebSource::Embedded, dark));
+        }
     }
 
     #[test]
     fn falls_back_when_the_stylesheet_is_missing() {
-        let dir = std::path::Path::new("/nonexistent-tvmv-web");
-        assert_eq!(paper(dir, false), fallback(false));
-        assert_eq!(paper(dir, true), fallback(true));
+        let dir = WebSource::Directory("/nonexistent-tvmv-web".into());
+        assert_eq!(paper(&dir, false), fallback(false));
+        assert_eq!(paper(&dir, true), fallback(true));
     }
 
     #[test]

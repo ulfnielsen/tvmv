@@ -153,9 +153,9 @@ pub const PEEK_HINT: &str = "peek";
 
 /// Open a chromeless preview window.
 pub fn open_peek(app: &Application, path: &Path) -> Option<ApplicationWindow> {
-    let web_dir = resources::web_dir()?;
+    let web = resources::web_source();
     let settings = shared_settings();
-    let doc = DocumentWindow::peek(app, &web_dir, path, &settings.borrow());
+    let doc = DocumentWindow::peek(app, &web, path, &settings.borrow());
     let window = doc.window.clone();
 
     window.connect_destroy(|window| {
@@ -199,16 +199,9 @@ fn open(
     scroll: Option<f64>,
     editing: bool,
 ) -> Option<ApplicationWindow> {
-    let Some(web_dir) = resources::web_dir() else {
-        eprintln!(
-            "tvmv: could not find the web/ resources.\n\
-             Set TVMV_WEB_DIR, or install them to /usr/share/tvmv/web."
-        );
-        return None;
-    };
-
+    let web = resources::web_source();
     let settings = shared_settings();
-    let doc = DocumentWindow::new(app, &web_dir, path, &settings.borrow(), on_render_complete);
+    let doc = DocumentWindow::new(app, &web, path, &settings.borrow(), on_render_complete);
     let window = doc.window.clone();
 
     // Both of these land before the main loop runs again, so before the page

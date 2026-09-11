@@ -34,11 +34,6 @@ set -l metadir $datadir/metainfo
 set -l webdir  $datadir/tvmv/web
 set -l apparmor /etc/apparmor.d/tvmv
 
-# The shared web layer: /web after the Task 1 promotion, the SwiftPM resource
-# directory before it.
-set -l websrc $repo/web
-test -f $websrc/boot.js; or set websrc $repo/Sources/TVMVCore/Resources/web
-
 # Root only where it is actually needed, so a PREFIX under $HOME needs none.
 # The prefix may not exist yet, so test the nearest ancestor that does.
 set -l probe $prefix
@@ -75,11 +70,10 @@ switch $action
         asroot install -Dm755 $repo/linux/target/release/tvmv $bindir/tvmv
         step "$bindir/tvmv"
 
-        # Assets are found relative to the executable ($bin/../share/tvmv/web).
-        asroot rm -rf $webdir
-        asroot mkdir -p (dirname $webdir)
-        asroot cp -r $websrc $webdir
-        step "$webdir"
+        # No web assets are installed: the binary compiles the whole web layer
+        # in, so there is nothing to find at runtime and no way for a leftover
+        # copy from an older install to be served instead of this build's own.
+        # The uninstall branch still removes one, for exactly that reason.
 
         asroot install -Dm644 $repo/linux/data/dk.dyregod.tvmv.desktop \
             $appdir/dk.dyregod.tvmv.desktop
@@ -152,6 +146,7 @@ switch $action
                     $metadir/dk.dyregod.tvmv.metainfo.xml
             test -e $path; and asroot rm -f $path; and step "removed $path"
         end
+        # Older installs put the web layer here; the binary carries it now.
         test -d $webdir; and asroot rm -rf (dirname $webdir); and step "removed $webdir"
         set -l thumb $datadir/thumbnailers/tvmv.thumbnailer
         test -e $thumb; and asroot rm -f $thumb; and step "removed $thumb"

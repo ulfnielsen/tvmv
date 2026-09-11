@@ -162,7 +162,7 @@ succeeded.
 
 ## Phase C — GUI
 
-### Task 8: Application, window, and the preview bridge — **PARTLY DONE** (open: Step 8 embedding)
+### Task 8: Application, window, and the preview bridge — **DONE**
 
 **Files:** `linux/src/{app,window,preview,resources,js,sandbox,main}.rs`
 
@@ -182,7 +182,11 @@ succeeded.
   - **`requestAnimationFrame` is not a usable settle on Linux.** `PreviewBridge.waitForLayoutSettle` waits two frames, and the direct port never ran: WebKit withholds frames from a window it considers unviewable, and `raf` was still `0` a second after `renderComplete`. That is the *normal* case for live reload — the user is editing in another application, so our window is unfocused. Reading `scrollHeight` to force a synchronous layout replaces it, which is all a scroll needs once the DOM is final.
 
 - [x] **Step 7: Portal appearance** — closed by Task 11 Step 4. `appearance.rs` reads `org.freedesktop.appearance` `color-scheme` from the XDG portal, falling back to GTK's setting when no portal is running. The original TODO was right that `gtk-application-prefer-dark-theme` is not a reliable signal — `GTK_THEME=Adwaita:dark` does not set it, so `theme: auto` stayed light under a dark GTK theme.
-- [ ] **Step 8: Embed the web layer in the binary.** `resources.rs` currently resolves `web/` at runtime (env override, installed path, dev fallbacks — mirroring `ResourceLocator.swift`). Embedding is still wanted so the binary is self-contained.
+- [x] **Step 8: The web layer is compiled into the binary.** `build.rs` walks it and generates a sorted `(key, include_bytes!)` table; `AssetRouter` gained a `WebSource` (`Embedded` by default, `Directory` for `TVMV_WEB_DIR`) and returns `Asset::Bytes | Asset::File`, so the scheme handler streams static bytes for the `app` host while a document's own images keep coming from disk. `theme::paper` reads `app.css` through the same router, since a colour parsed from a stylesheet the page is not using would be worse than the fallback. 8.4 MB binary, and `build/linux.fish` no longer installs `share/tvmv/web` — it only removes an older one, so a leftover copy cannot be served instead of this build's own.
+
+  Verified by identity, not by inspection: `--snapshot` of `Fixtures/showcase.md` is **byte-identical** (same MD5) across embedded, `TVMV_WEB_DIR`, and the pre-embedding build — including from the *installed* binary run out of `/tmp` with no web layer anywhere on disk. `tests/assets.rs` also walks the on-disk layer and asserts every file is embedded *and* current, so a stale table fails the suite rather than a lazy pass at runtime.
+
+  One thing this found: a mistyped `TVMV_WEB_DIR` used to be honoured silently, which 404s every asset — the page never loads, and `--snapshot` and `--pdf` wait forever for a `renderComplete` that cannot come. It now warns and falls back to the built-in layer.
 
 #### Crate versions are pinned to the system libraries
 

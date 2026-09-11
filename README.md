@@ -90,9 +90,11 @@ PREFIX=$HOME/.local fish build/linux.fish     # or per-user, no root
 fish build/linux.fish uninstall
 ```
 
-Installs the binary, web assets, desktop entry, AppStream metainfo, icons, the
-thumbnailer, the AppArmor profile, and — where the bindings are present — a
-file-manager context menu. `cargo test --manifest-path linux/Cargo.toml` runs the suite.
+Installs the binary, desktop entry, AppStream metainfo, icons, the thumbnailer,
+the AppArmor profile, and — where the bindings are present — a file-manager
+context menu. **The web layer is compiled into the binary** (8.4 MB all in), so
+nothing is installed beside it and no stale copy on disk can be served instead;
+`TVMV_WEB_DIR` points it at another one for experiments. `cargo test --manifest-path linux/Cargo.toml` runs the suite.
 
 ### Use
 

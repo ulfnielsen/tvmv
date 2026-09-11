@@ -22,7 +22,7 @@ use webkit6::prelude::*;
 use webkit6::javascriptcore;
 use webkit6::{URISchemeRequest, UserContentManager, WebContext, WebView};
 
-use crate::assets::{AssetRouter, SCHEME, mime_type};
+use crate::assets::{Asset, AssetRouter, SCHEME, WebSource, mime_type};
 use crate::js;
 
 /// One entry from the document outline, matching `OutlineItem.swift`.
@@ -54,7 +54,7 @@ pub enum PreviewMessage {
 #[derive(Default)]
 struct SchemeRegistry {
     /// The bundled web layer, identical for every view.
-    app_base: Option<PathBuf>,
+    app: Option<WebSource>,
     /// Document directory per view. Views compare by pointer, and the count is
     /// one or two per window, so a vector beats hashing an object.
     documents: Vec<(WebView, Option<PathBuf>)>,
@@ -66,8 +66,8 @@ thread_local! {
 }
 
 /// Register the asset scheme on the default context, exactly once per process.
-fn ensure_scheme_registered(context: &WebContext, app_base: &Path) {
-    REGISTRY.with(|r| r.borrow_mut().app_base = Some(app_base.to_path_buf()));
+fn ensure_scheme_registered(context: &WebContext, app: &WebSource) {
+    REGISTRY.with(|r| r.borrow_mut().app = Some(app.clone()));
 
     if SCHEME_REGISTERED.with(|f| f.replace(true)) {
         return;
@@ -93,7 +93,7 @@ fn forget_view(view: &WebView) {
 fn router_for(view: Option<&WebView>) -> Option<AssetRouter> {
     REGISTRY.with(|r| {
         let registry = r.borrow();
-        let mut router = AssetRouter::new(registry.app_base.clone()?);
+        let mut router = AssetRouter::new(registry.app.clone()?);
         if let Some(view) = view
             && let Some((_, dir)) = registry.documents.iter().find(|(v, _)| v == view)
         {
@@ -120,13 +120,13 @@ impl Preview {
     /// `on_message` receives everything the page posts. It runs on the GTK main
     /// thread, so it can touch widgets directly.
     pub fn new(
-        web_dir: &Path,
+        web: &WebSource,
         on_message: impl Fn(PreviewMessage) + 'static,
     ) -> Self {
         let context = WebContext::default().expect("a default WebKit context");
 
         // Seam 1: the asset scheme, registered once for the whole process.
-        ensure_scheme_registered(&context, web_dir);
+        ensure_scheme_registered(&context, web);
 
         // Seam 2: JS -> native.
         let content_manager = UserContentManager::new();
@@ -395,7 +395,15 @@ fn serve(request: &URISchemeRequest) {
     };
 
     match router.resolve(uri.as_str()) {
-        Ok(path) => {
+        // Compiled in: hand WebKit a stream over the static bytes. No copy —
+        // `from_static` borrows them for the life of the process, which is how
+        // long they live anyway.
+        Ok(Asset::Bytes(bytes)) => {
+            let stream = gio::MemoryInputStream::from_bytes(&glib::Bytes::from_static(bytes));
+            let mime = mime_type(Path::new(asset_path(uri.as_str())));
+            request.finish(&stream, bytes.len() as i64, Some(mime));
+        }
+        Ok(Asset::File(path)) => {
             let file = gio::File::for_path(&path);
             match file.read(gio::Cancellable::NONE) {
                 Ok(stream) => {
@@ -410,6 +418,19 @@ fn serve(request: &URISchemeRequest) {
         Err(e) => {
             request.finish_error(&mut glib::Error::new(gio::IOErrorEnum::NotFound, &e.to_string()));
         }
+    }
+}
+
+/// The path part of an asset URI, for typing an embedded asset by extension.
+///
+/// Only the extension is read from it, so the query and fragment have to go —
+/// `boot.js?v=2` must still be served as JavaScript, not octet-stream, and that
+/// failure would be silent.
+fn asset_path(uri: &str) -> &str {
+    let uri = uri.split(['?', '#']).next().unwrap_or(uri);
+    match uri.rfind('/') {
+        Some(i) => &uri[i + 1..],
+        None => uri,
     }
 }
 
