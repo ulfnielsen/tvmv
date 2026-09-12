@@ -1,0 +1,149 @@
+import XCTest
+@testable import TVMVCore
+
+/// Golden HTML tests — the Swift half of the cross-platform rendering gate.
+///
+/// The same corpus and the same expectations are asserted by the Rust suite
+/// (`linux/tests/golden.rs`). Both shells compile the same pinned cmark-gfm
+/// revision with the same options and the same four extensions in the same
+/// order, so the expectations are each platform's output by construction. If
+/// the two ever stop agreeing, one of these suites goes red rather than a user
+/// discovering it as a sync bug.
+///
+/// Every assertion below has a counterpart in `golden.rs`; keep them in step.
+final class GoldenRenderTests: XCTestCase {
+
+    // MARK: Corpus
+
+    /// Repo root, found relative to this file rather than to the working
+    /// directory, so the tests run the same from Xcode and from `swift test`.
+    private static let fixturesURL = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()   // TVMVCoreTests
+        .deletingLastPathComponent()   // Tests
+        .deletingLastPathComponent()   // <repo root>
+        .appendingPathComponent("Fixtures")
+
+    /// Every `<name>.md` with a committed expectation, plus the showcase
+    /// document, which lives one directory up.
+    private func cases() throws -> [(name: String, url: URL)] {
+        let golden = Self.fixturesURL.appendingPathComponent("golden")
+        let entries = try FileManager.default.contentsOfDirectory(
+            at: golden, includingPropertiesForKeys: nil)
+
+        var cases = entries
+            .filter { $0.pathExtension == "md" }
+            // README.md documents the corpus; it is not part of it.
+            .filter { $0.deletingPathExtension().lastPathComponent != "README" }
+            .map { (name: $0.deletingPathExtension().lastPathComponent, url: $0) }
+
+        cases.append((name: "showcase",
+                      url: Self.fixturesURL.appendingPathComponent("showcase.md")))
+        cases.sort { $0.name < $1.name }
+
+        XCTAssertGreaterThan(cases.count, 1, "fixture corpus is missing")
+        return cases
+    }
+
+    private func assertMatches(
+        _ name: String, _ input: URL, sourcePos: Bool,
+        file: StaticString = #filePath, line: UInt = #line
+    ) throws {
+        let suffix = sourcePos ? "sourcepos.html" : "html"
+        let expectedURL = Self.fixturesURL
+            .appendingPathComponent("golden")
+            .appendingPathComponent("\(name).\(suffix)")
+
+        let markdown = try String(contentsOf: input, encoding: .utf8)
+        let expected = try String(contentsOf: expectedURL, encoding: .utf8)
+        let actual = renderHTML(markdown, sourcePos: sourcePos)
+
+        guard actual != expected else { return }
+
+        // Point at the first differing line; a whole-document diff of a 2KB
+        // expectation is unreadable in test output.
+        let (number, exp, act) = Self.firstDifference(expected: expected, actual: actual)
+        XCTFail("""
+            golden mismatch for \(name) (sourcePos=\(sourcePos))
+            first difference at line \(number):
+            expected: \(exp)
+            actual:   \(act)
+
+            If cmark-gfm was intentionally re-pinned, regenerate with:
+              cargo run --manifest-path linux/Cargo.toml --release -- <fixture> [--source-pos]
+            and re-run the Rust suite on Linux before landing.
+            """, file: file, line: line)
+    }
+
+    private static func firstDifference(
+        expected: String, actual: String
+    ) -> (line: Int, expected: String, actual: String) {
+        let e = expected.components(separatedBy: "\n")
+        let a = actual.components(separatedBy: "\n")
+        for index in 0..<min(e.count, a.count) where e[index] != a[index] {
+            return (index + 1, e[index], a[index])
+        }
+        let n = min(e.count, a.count)
+        return (n + 1,
+                n < e.count ? e[n] : "<end of file>",
+                n < a.count ? a[n] : "<end of file>")
+    }
+
+    // MARK: Byte equality against the shared expectations
+
+    func testGoldenHTMLMatches() throws {
+        for (name, url) in try cases() {
+            try assertMatches(name, url, sourcePos: false)
+        }
+    }
+
+    func testGoldenSourceposHTMLMatches() throws {
+        for (name, url) in try cases() {
+            try assertMatches(name, url, sourcePos: true)
+        }
+    }
+
+    // MARK: Independent assertions on the renderer's contract
+    //
+    // These do not compare against the corpus. A golden file regenerated from a
+    // build with an option wired up wrong would otherwise pass silently.
+
+    /// `data-sourcepos` is the anchor the editor/preview sync maps through.
+    func testSourceposOptionActuallyApplies() {
+        let markdown = "# Heading\n\npara\n"
+        XCTAssertFalse(renderHTML(markdown, sourcePos: false).contains("data-sourcepos"))
+        XCTAssertTrue(renderHTML(markdown, sourcePos: true).contains("data-sourcepos"))
+    }
+
+    /// The four GFM core extensions are attached, so their nodes emit extension
+    /// HTML rather than plain text.
+    func testGFMExtensionsAreAttached() {
+        let html = renderHTML("| a |\n| --- |\n| b |\n\n~~s~~\n\nwww.example.com\n\n- [x] done\n")
+        XCTAssertTrue(html.contains("<table>"), "table extension: \(html)")
+        XCTAssertTrue(html.contains("<del>"), "strikethrough extension: \(html)")
+        XCTAssertTrue(html.contains("<a href=\"http://www.example.com\""), "autolink: \(html)")
+        XCTAssertTrue(html.contains("type=\"checkbox\""), "tasklist extension: \(html)")
+    }
+
+    /// The safe default must survive: raw HTML stripped, dangerous URL schemes
+    /// neutralised. boot.js injects this straight into the DOM and does not
+    /// sanitise, so this is the only thing standing between a document and the
+    /// preview's script context.
+    func testUnsafeContentIsStrippedByDefault() {
+        let html = renderHTML("<script>alert(1)</script>\n\n[x](javascript:alert(1))\n")
+        XCTAssertFalse(html.contains("<script>"), "raw HTML leaked: \(html)")
+        XCTAssertFalse(html.contains("javascript:"), "javascript: URL leaked: \(html)")
+    }
+
+    /// Embedded NULs truncate the document under `withCString`-style APIs, which
+    /// pair the pointer with `strlen` rather than the string's real length. The
+    /// Rust side passes an explicit length and keeps the content; this side must
+    /// agree, or the same file renders differently on the two platforms.
+    func testEmbeddedNULDoesNotTruncate() {
+        let html = renderHTML("before\0after\n")
+        XCTAssertTrue(html.contains("after"), "content lost after NUL: \(html)")
+    }
+
+    func testEmptyInputRendersEmpty() {
+        XCTAssertEqual(renderHTML(""), "")
+    }
+}

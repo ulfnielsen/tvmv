@@ -28,8 +28,18 @@ public func renderHTML(_ markdown: String, sourcePos: Bool = false) -> String {
     }
 
     // Feed the source bytes and build the document node tree.
-    markdown.withCString { cString in
-        cmark_parser_feed(parser, cString, strlen(cString))
+    //
+    // The length is the string's real UTF-8 byte count, NOT strlen: a document
+    // containing an embedded NUL would otherwise be silently truncated at the
+    // first one, rendering part of the file with no indication that the rest was
+    // dropped. The Rust shell passes an explicit length for the same reason, and
+    // `GoldenRenderTests.testEmbeddedNULDoesNotTruncate` holds the two in step.
+    let utf8 = Array(markdown.utf8)
+    utf8.withUnsafeBufferPointer { buffer in
+        guard let base = buffer.baseAddress else { return }   // empty document
+        base.withMemoryRebound(to: CChar.self, capacity: buffer.count) { bytes in
+            cmark_parser_feed(parser, bytes, buffer.count)
+        }
     }
     guard let document = cmark_parser_finish(parser) else { return "" }
     defer { cmark_node_free(document) }
