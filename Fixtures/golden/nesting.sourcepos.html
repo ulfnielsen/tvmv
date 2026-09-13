@@ -1,0 +1,36 @@
+<h1 data-sourcepos="1:1-1:9">Nesting</h1>
+<blockquote data-sourcepos="3:1-15:22">
+<p data-sourcepos="3:3-3:28">A quote containing a list:</p>
+<ol data-sourcepos="5:3-14:1">
+<li data-sourcepos="5:3-8:1">
+<p data-sourcepos="5:6-5:10">first</p>
+<p data-sourcepos="7:6-7:39">A loose paragraph inside the item.</p>
+</li>
+<li data-sourcepos="9:3-14:1">
+<p data-sourcepos="9:6-9:11">second</p>
+<pre data-sourcepos="11:6-13:8"><code class="language-rust">fn main() {}
+</code></pre>
+</li>
+</ol>
+<p data-sourcepos="15:3-15:22">Trailing quote line.</p>
+</blockquote>
+<ul data-sourcepos="17:1-23:0">
+<li data-sourcepos="17:1-21:34">outer
+<ul data-sourcepos="18:3-21:34">
+<li data-sourcepos="18:3-21:34">
+<p data-sourcepos="18:5-18:10">middle</p>
+<ul data-sourcepos="19:5-20:0">
+<li data-sourcepos="19:5-20:0">inner</li>
+</ul>
+<p data-sourcepos="21:5-21:34">Paragraph belonging to middle.</p>
+</li>
+</ul>
+</li>
+<li data-sourcepos="22:1-23:0">sibling</li>
+</ul>
+<p data-sourcepos="24:1-24:15">Term paragraph.</p>
+<pre data-sourcepos="26:5-28:0"><code>An indented code block
+spanning two lines.
+</code></pre>
+<!-- raw HTML omitted -->
+<p data-sourcepos="31:1-31:45">Final paragraph with a <a href="https://example.com" title="Title">reference link</a>.</p>

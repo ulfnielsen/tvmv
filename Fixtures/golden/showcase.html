@@ -1,0 +1,52 @@
+<h1>tvmv Showcase</h1>
+<h2>Text</h2>
+<p><strong>Bold</strong>, <em>italic</em>, <del>strikethrough</del>, <code>inline code</code>, and a link to <a href="https://example.com">https://example.com</a>.</p>
+<blockquote>
+<p>A blockquote with a nested list:</p>
+<ul>
+<li>item one</li>
+<li>item two
+<ul>
+<li>nested</li>
+</ul>
+</li>
+</ul>
+</blockquote>
+<h2>Table</h2>
+<table>
+<thead>
+<tr>
+<th>Feature</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tables</td>
+<td>✅</td>
+</tr>
+<tr>
+<td>Task lists</td>
+<td>✅</td>
+</tr>
+</tbody>
+</table>
+<h2>Task list</h2>
+<ul>
+<li><input type="checkbox" checked="" disabled="" /> Parse GFM</li>
+<li><input type="checkbox" disabled="" /> Conquer the world</li>
+</ul>
+<h2>Code</h2>
+<pre><code class="language-swift">func greet(_ name: String) -&gt; String { &quot;Hello, \(name)&quot; }
+</code></pre>
+<pre><code class="language-python">def greet(name): return f&quot;Hello, {name}&quot;
+</code></pre>
+<h2>Math</h2>
+<p>Inline $E = mc^2$ and display:</p>
+<p>$$\int_0^\infty e^{-x^2},dx = \frac{\sqrt{\pi}}{2}$$</p>
+<h2>Diagram</h2>
+<pre><code class="language-mermaid">flowchart LR
+  A[Open .md] --&gt; B{cmark-gfm}
+  B --&gt; C[WKWebView]
+  C --&gt; D[Rendered]
+</code></pre>

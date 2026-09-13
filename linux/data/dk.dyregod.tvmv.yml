@@ -1,0 +1,45 @@
+# Flatpak manifest for TVMV.
+#
+# Primary distribution artefact, for two reasons:
+#
+#   1. The GNOME runtime pins the WebKitGTK version, removing distro skew — the
+#      largest source of breakage for a WebView app.
+#   2. It builds WebKitGTK from UNPATCHED upstream sources. Debian and Ubuntu
+#      carry `disable-dmabuf-nvidia.patch`, which forces WebKit onto shared-memory
+#      buffers on any NVIDIA proprietary driver; that costs a full CPU core and
+#      roughly half the frame rate at large window sizes. Upstream WebKit declined
+#      that change (bug 262607, WONTFIX), so the runtime does not have it.
+#
+# This variant installs a binary built on the host, for fast iteration. The
+# shipping manifest should build from source inside the sandbox with the Rust
+# SDK extension and a vendored cargo registry (offline build).
+app-id: dk.dyregod.tvmv
+runtime: org.gnome.Platform
+runtime-version: '50'
+sdk: org.gnome.Sdk
+command: tvmv
+
+finish-args:
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --share=ipc
+  # Zero-copy buffer sharing needs the render node.
+  - --device=dri
+  # Documents are opened from anywhere the user points us; the portal file
+  # chooser covers the interactive case, but CLI arguments need real paths.
+  - --filesystem=host:ro
+  - --filesystem=xdg-documents
+
+modules:
+  - name: tvmv
+    buildsystem: simple
+    build-commands:
+      - install -Dm755 tvmv /app/bin/tvmv
+      - mkdir -p /app/share/tvmv
+      - cp -r web /app/share/tvmv/web
+    sources:
+      - type: file
+        path: ../target/release/tvmv
+      - type: dir
+        path: ../../Sources/TVMVCore/Resources/web
+        dest: web

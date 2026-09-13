@@ -1,0 +1,4 @@
+[Thumbnailer Entry]
+TryExec=tvmv
+Exec=tvmv --thumbnail %i %o %s
+MimeType=text/markdown;text/x-markdown;
