@@ -83,12 +83,26 @@ A native GTK4 + WebKitGTK app sharing the **same** web layer as the Mac app —
 highlight.js are used unmodified, so a document renders identically on both.
 Only the shell is rewritten (Rust, in `linux/`); no Swift is ported.
 
+Clone **with submodules** — the Markdown parser is the pinned
+`linux/vendor/swift-cmark`, and a plain `git clone` leaves it empty and fails the
+build:
+
 ```sh
-sudo apt install libgtk-4-dev libwebkitgtk-6.0-dev pkg-config   # Ubuntu 24.04
+git clone --recurse-submodules https://github.com/ulfnielsen/tvmv.git
+# already cloned without it:  git submodule update --init --recursive
+```
+
+Needs Rust 1.85 or newer (the crate is edition 2024), a C compiler for cmark, and
+`fish` to run the install script:
+
+```sh
+sudo apt install libgtk-4-dev libwebkitgtk-6.0-dev pkg-config fish build-essential   # Ubuntu 24.04
 fish build/linux.fish                # build + install to /usr/local
 PREFIX=$HOME/.local fish build/linux.fish     # or per-user, no root
 fish build/linux.fish uninstall
 ```
+
+There is no binary release for Linux — building from source is the install path.
 
 Installs the binary, desktop entry, AppStream metainfo, icons, the thumbnailer,
 the AppArmor profile, and — where the bindings are present — a file-manager
