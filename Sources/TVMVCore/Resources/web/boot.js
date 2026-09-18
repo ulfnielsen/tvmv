@@ -514,6 +514,27 @@
     return null;
   }
 
+  // In-document links. render() installs <base href="<doc dir>"> so relative
+  // image paths resolve against the document, but that also makes a bare
+  // "#slug" resolve to "<doc dir>#slug" — a *different* document — so the
+  // platform shell sees a cross-document navigation instead of a same-page
+  // jump and the click goes nowhere. Resolve fragment links here instead.
+  document.addEventListener("click", function (ev) {
+    if (ev.defaultPrevented || ev.button !== 0) return;
+    if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+    var target = ev.target;
+    if (!target || typeof target.closest !== "function") return;
+    var a = target.closest("a[href]");
+    if (!a) return;
+    var href = a.getAttribute("href") || "";
+    if (href.charAt(0) !== "#") return;
+    ev.preventDefault();
+    var id = href.slice(1);
+    try { id = decodeURIComponent(id); } catch (e) { /* keep raw */ }
+    if (id === "" || id === "top") { window.scrollTo(0, 0); return; }
+    scrollToAnchor(id);
+  });
+
   document.addEventListener("click", function (ev) {
     var target = ev.target;
     if (!target || typeof target.closest !== "function") return;
