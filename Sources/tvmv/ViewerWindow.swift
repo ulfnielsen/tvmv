@@ -72,6 +72,22 @@ struct ViewerWindow: View {
         // DocumentGroup(viewing:) window "edited" drags in AppKit's autosave
         // machinery, which can't save this document and alerts about it.
         .navigationSubtitle(model.isDirty ? "Edited" : "")
+        .toolbar {
+            ToolbarItemGroup {
+                Text("\(Int((model.readingProgress * 100).rounded()))%")
+                    .monospacedDigit()
+                    .help("Reading progress")
+                Button { Task { await model.saveBookmark() } } label: {
+                    Image(systemName: "bookmark")
+                }
+                .help("Bookmark current place")
+                Button { Task { await model.goToBookmark() } } label: {
+                    Image(systemName: "bookmark.fill")
+                }
+                .disabled(!model.hasBookmark)
+                .help("Go to bookmark")
+            }
+        }
         .onChange(of: selection) { _, new in
             if let new, let item = model.outline.first(where: { $0.id == new }) {
                 model.scrollTo(item)
@@ -130,13 +146,14 @@ struct ViewerWindow: View {
             docDir: fileURL?.deletingLastPathComponent(),
             callbacks: MarkdownWebViewCallbacks(
                 onOutline: { items in model.outline = items },
-                onRenderComplete: { },
+                onRenderComplete: { model.renderCompleted() },
                 // While editing, half-typed mermaid/math makes nearly every
                 // debounced re-render reject transiently — suppress the banner
                 // there (mermaid draws its own in-place error graphic anyway).
                 onError: { msg in if !model.isEditing { model.errorMessage = msg } },
                 onReady: { model.pageReady() },
-                onSourceClick: { click in model.previewClicked(click) }
+                onSourceClick: { click in model.previewClicked(click) },
+                onReadingProgress: { model.readingProgressChanged($0) }
             ),
             onMakeController: { controller in model.attach(controller: controller) }
         )

@@ -9,6 +9,8 @@ public final class ViewerModel: ObservableObject {
     @Published public var findCount = 0
     @Published public var findIndex = 0   // 1-based; 0 when no matches
     @Published public var chromeColor: RGBAColor?   // lightened page background, for window + sidebar
+    @Published public private(set) var readingProgress = 0.0
+    @Published public private(set) var hasBookmark = false
 
     // MARK: Editing state
     @Published public var isEditing = false
@@ -68,6 +70,15 @@ public final class ViewerModel: ObservableObject {
     /// Latest-wins ordering for reloads: a slow read of one on-disk version
     /// must not apply over a newer reload that already finished.
     private var reloadGeneration = 0
+    private var initialReadingPositionRestored = false
+    private var initialReadingPositionRestoring = false
+    private var sessionBookmark: Double?
+    private var readingKey: String? {
+        fileURL.map { "readingPosition.\($0.standardizedFileURL.path)" }
+    }
+    private var bookmarkKey: String? {
+        fileURL.map { "bookmark.\($0.standardizedFileURL.path)" }
+    }
 
     public init(
         text: String,
@@ -80,6 +91,11 @@ public final class ViewerModel: ObservableObject {
         self.fileURL = fileURL
         self.encodingUsed = encoding
         self.lineEndingUsed = lineEnding
+        if let url = fileURL {
+            let path = url.standardizedFileURL.path
+            readingProgress = UserDefaults.standard.double(forKey: "readingPosition.\(path)")
+            hasBookmark = UserDefaults.standard.object(forKey: "bookmark.\(path)") != nil
+        }
     }
 
     public func attach(controller: MarkdownWebController) {
@@ -308,6 +324,49 @@ public final class ViewerModel: ObservableObject {
     public func pageReady() {
         isReady = true
         Task { await renderCurrent() }
+    }
+
+    /// Restore only after the first render, including its async layout passes.
+    public func renderCompleted() {
+        guard !initialReadingPositionRestored, !initialReadingPositionRestoring else { return }
+        initialReadingPositionRestoring = true
+        Task { [weak self] in
+            guard let self, let controller = self.controller else { return }
+            await controller.waitForLayoutSettle()
+            await controller.setScrollRatio(self.readingProgress)
+            self.readingProgress = await controller.getScrollRatio()
+            self.initialReadingPositionRestored = true
+            self.initialReadingPositionRestoring = false
+        }
+    }
+
+    public func readingProgressChanged(_ ratio: Double) {
+        guard initialReadingPositionRestored, ratio.isFinite else { return }
+        let value = min(1, max(0, ratio))
+        readingProgress = value
+        if let readingKey { UserDefaults.standard.set(value, forKey: readingKey) }
+    }
+
+    public func saveBookmark() async {
+        guard let controller else { return }
+        let ratio = min(1, max(0, await controller.getScrollRatio()))
+        sessionBookmark = ratio
+        hasBookmark = true
+        if let bookmarkKey { UserDefaults.standard.set(ratio, forKey: bookmarkKey) }
+    }
+
+    public func goToBookmark() async {
+        guard let controller else { return }
+        let ratio: Double?
+        if let sessionBookmark {
+            ratio = sessionBookmark
+        } else if let bookmarkKey {
+            ratio = UserDefaults.standard.object(forKey: bookmarkKey) as? Double
+        } else {
+            ratio = nil
+        }
+        guard let ratio else { return }
+        await controller.setScrollRatio(ratio)
     }
 
     private func renderCurrent() async {

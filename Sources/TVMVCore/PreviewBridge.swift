@@ -36,19 +36,23 @@ public struct MarkdownWebViewCallbacks {
     /// Fired when the user clicks a rendered block; carries the block's source
     /// line span and the clicked word, for preview→editor jumps.
     public var onSourceClick: (@MainActor (SourceClick) -> Void)?
+    /// Current preview scroll fraction (0...1).
+    public var onReadingProgress: (@MainActor (Double) -> Void)?
 
     public init(
         onOutline: (@MainActor ([OutlineItem]) -> Void)? = nil,
         onRenderComplete: (@MainActor () -> Void)? = nil,
         onError: (@MainActor (String) -> Void)? = nil,
         onReady: (@MainActor () -> Void)? = nil,
-        onSourceClick: (@MainActor (SourceClick) -> Void)? = nil
+        onSourceClick: (@MainActor (SourceClick) -> Void)? = nil,
+        onReadingProgress: (@MainActor (Double) -> Void)? = nil
     ) {
         self.onOutline = onOutline
         self.onRenderComplete = onRenderComplete
         self.onError = onError
         self.onReady = onReady
         self.onSourceClick = onSourceClick
+        self.onReadingProgress = onReadingProgress
     }
 }
 
@@ -123,6 +127,12 @@ public final class PreviewCoordinator: NSObject, WKScriptMessageHandler, WKNavig
 
             case "renderComplete":
                 callbacks.onRenderComplete?()
+
+            case "readingProgress":
+                if let ratio = (dict["ratio"] as? NSNumber)?.doubleValue,
+                   ratio.isFinite {
+                    callbacks.onReadingProgress?(min(1, max(0, ratio)))
+                }
 
             case "sourceClick":
                 if let line = dict["line"] as? Int {

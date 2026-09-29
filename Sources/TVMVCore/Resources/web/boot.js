@@ -265,6 +265,7 @@
         .then(function () {
           if (gen !== _renderGen) return;
           post({ type: "renderComplete", gen: gen });
+          reportReadingProgress();
         })
         .catch(function (e) {
           if (gen !== _renderGen) return; // stale chain: outcome no longer matters
@@ -344,7 +345,21 @@
   function setScrollRatio(r) {
     var ratio = Math.min(1, Math.max(0, Number(r) || 0));
     window.scrollTo(0, ratio * maxScroll());
+    reportReadingProgress();
   }
+
+  var _progressTimer = null;
+  function reportReadingProgress() {
+    post({ type: "readingProgress", ratio: getScrollRatio() });
+  }
+  window.addEventListener("scroll", function () {
+    if (_progressTimer !== null) clearTimeout(_progressTimer);
+    _progressTimer = setTimeout(function () {
+      _progressTimer = null;
+      reportReadingProgress();
+    }, 150);
+  }, { passive: true });
+  window.addEventListener("resize", reportReadingProgress);
 
   /* ---- public: sourcepos scroll sync ------------------------------------ */
   // Rendered blocks carry data-sourcepos="startLine:col-endLine:col" (cmark

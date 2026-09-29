@@ -47,6 +47,12 @@ modes so local builds exercise exactly what ships.
 - `tvmv file.md …` from the terminal — one window per file, reuses a running instance.
 - Double-click a `.md` in Finder (set TVMV as the default handler via Get Info → Open With → Change All).
 
+The reader shows your position as a percentage. It remembers the last reading
+position for each file and returns there when you reopen it. Use the bookmark
+button to save a place and the adjacent button to jump back to it. On iOS these
+actions are in the percentage menu. Reading positions and bookmarks are app
+data; they do not modify the Markdown file.
+
 Design spec and implementation plan live in `docs/superpowers/`.
 
 ## QuickLook
@@ -120,6 +126,7 @@ nothing is installed beside it and no stale copy on disk can be served instead;
 | | |
 |---|---|
 | `Ctrl+E` | editor pane |
+| Toolbar bookmark buttons | save this place / return to it |
 | `Ctrl+S` | save |
 | `Ctrl+F` | find, with match count |
 | `F9` | outline sidebar |

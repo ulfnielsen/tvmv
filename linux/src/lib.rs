@@ -18,6 +18,7 @@ pub mod editor;
 pub mod find;
 pub mod js;
 pub mod preview;
+pub mod reading;
 pub mod print;
 pub mod render;
 pub mod startup;

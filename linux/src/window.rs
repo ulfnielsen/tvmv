@@ -5,13 +5,13 @@
 //! have made impossible. Every icon is referenced by freedesktop name so it
 //! follows the installed theme; none are shipped.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use gtk4::prelude::*;
 use gtk4::{
-    Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, Orientation, Paned,
+    Application, ApplicationWindow, Box as GtkBox, Button, CssProvider, Label, Orientation, Paned,
 };
 use webkit6::prelude::*;
 
@@ -22,6 +22,7 @@ use crate::editor::{Editor, EditorMessage};
 use crate::find::{Find, FindAction};
 use crate::outline::Outline;
 use crate::preview::{Preview, PreviewMessage};
+use crate::reading::{self, ReadingState};
 use crate::render::render_html;
 use crate::settings::Settings;
 
@@ -144,6 +145,10 @@ impl DocumentWindow {
         let preview_slot: Rc<RefCell<Option<Rc<Preview>>>> = Rc::new(RefCell::new(None));
         let outline_slot: Rc<RefCell<Option<Rc<Outline>>>> = Rc::new(RefCell::new(None));
         let find_slot: Rc<RefCell<Option<Rc<Find>>>> = Rc::new(RefCell::new(None));
+        let saved_reading = reading::load(path);
+        let reading_position = Rc::new(Cell::new(saved_reading.position));
+        let bookmark = Rc::new(Cell::new(saved_reading.bookmark));
+        let progress_label = Label::new(Some(&format!("{}%", (saved_reading.position * 100.0).round() as i32)));
         let tint_provider = CssProvider::new();
         // Each window tints only itself: GTK4 providers are display-wide, so the
         // selectors are scoped by a per-window class.
@@ -207,6 +212,8 @@ impl DocumentWindow {
             let done = Rc::clone(&done);
             let scope = scope.clone();
             let tint_provider = tint_provider.clone();
+            let reading_position = Rc::clone(&reading_position);
+            let progress_label = progress_label.clone();
             move |message| match message {
                 PreviewMessage::Outline(items) => {
                     if let Some(outline) = outline_slot.borrow().as_ref() {
@@ -244,11 +251,18 @@ impl DocumentWindow {
                     }
                 }
                 PreviewMessage::Error(msg) => eprintln!("tvmv: preview: {msg}"),
+                PreviewMessage::ReadingProgress(ratio) => {
+                    reading_position.set(ratio);
+                    progress_label.set_text(&format!("{}%", (ratio * 100.0).round() as i32));
+                }
                 // Editor sync lands in Task 10.
                 PreviewMessage::SourceClick { .. } => {}
             }
         }));
         *preview_slot.borrow_mut() = Some(Rc::clone(&preview));
+        if saved_reading.position > 0.0 {
+            preview.set_pending_scroll(Some(saved_reading.position.clamp(0.0, 1.0)));
+        }
 
         // --- editor -------------------------------------------------------
 
@@ -330,9 +344,20 @@ impl DocumentWindow {
         open_settings.set_tooltip_text(Some("Settings (Ctrl+,)"));
         open_settings.add_css_class("flat");
 
+        let save_bookmark = Button::from_icon_name("bookmark-new-symbolic");
+        save_bookmark.set_tooltip_text(Some("Bookmark current place"));
+        save_bookmark.add_css_class("flat");
+        let go_bookmark = Button::from_icon_name("go-jump-symbolic");
+        go_bookmark.set_tooltip_text(Some("Go to bookmark"));
+        go_bookmark.add_css_class("flat");
+        go_bookmark.set_sensitive(saved_reading.bookmark.is_some());
+
         toolbar.append(&toggle_outline);
         toolbar.append(&open_find);
         toolbar.append(&toggle_editor);
+        toolbar.append(&progress_label);
+        toolbar.append(&save_bookmark);
+        toolbar.append(&go_bookmark);
         toolbar.append(&print_button);
         toolbar.append(&open_settings);
 
@@ -391,6 +416,36 @@ impl DocumentWindow {
         {
             let find = Rc::clone(&find);
             open_find.connect_clicked(move |_| find.open());
+        }
+        {
+            let preview = Rc::clone(&preview);
+            let bookmark = Rc::clone(&bookmark);
+            let go_bookmark = go_bookmark.clone();
+            let path = path.to_path_buf();
+            let reading_position = Rc::clone(&reading_position);
+            save_bookmark.connect_clicked(move |_| {
+                let bookmark = Rc::clone(&bookmark);
+                let go_bookmark = go_bookmark.clone();
+                let path = path.clone();
+                let reading_position = Rc::clone(&reading_position);
+                preview.scroll_ratio(move |ratio| {
+                    let ratio = ratio.unwrap_or(0.0);
+                    bookmark.set(Some(ratio));
+                    go_bookmark.set_sensitive(true);
+                    reading::save(&path, ReadingState {
+                        position: reading_position.get(), bookmark: Some(ratio),
+                    });
+                });
+            });
+        }
+        {
+            let preview = Rc::clone(&preview);
+            let bookmark = Rc::clone(&bookmark);
+            go_bookmark.connect_clicked(move |_| {
+                if let Some(ratio) = bookmark.get() {
+                    preview.eval(&format!("window.tvmv.setScrollRatio({ratio});"));
+                }
+            });
         }
 
         // Toggling the pane on loads editor.html the first time — CodeMirror is
@@ -614,7 +669,13 @@ impl DocumentWindow {
         // Close guard: unsaved edits must not disappear with the window.
         {
             let document = Rc::clone(&document);
+            let path = path.to_path_buf();
+            let reading_position = Rc::clone(&reading_position);
+            let bookmark = Rc::clone(&bookmark);
             window.connect_close_request(move |window| {
+                reading::save(&path, ReadingState {
+                    position: reading_position.get(), bookmark: bookmark.get(),
+                });
                 if !document.borrow().is_dirty() {
                     return gtk4::glib::Propagation::Proceed;
                 }

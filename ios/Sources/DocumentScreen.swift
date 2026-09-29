@@ -48,6 +48,20 @@ struct DocumentScreen: View {
             }
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button("Bookmark Here", systemImage: "bookmark") {
+                            Task { await model.saveBookmark() }
+                        }
+                        Button("Go to Bookmark", systemImage: "bookmark.fill") {
+                            Task { await model.goToBookmark() }
+                        }
+                        .disabled(!model.hasBookmark)
+                    } label: {
+                        Text("\(Int((model.readingProgress * 100).rounded()))%")
+                            .monospacedDigit()
+                    }
+                }
+                ToolbarItem(placement: .topBarTrailing) {
                     Button { showOutlineSheet = true } label: {
                         Image(systemName: "list.bullet")
                     }
@@ -191,11 +205,13 @@ struct DocumentScreen: View {
             docDir: fileURL?.deletingLastPathComponent(),
             callbacks: MarkdownWebViewCallbacks(
                 onOutline: { model.outline = $0 },
+                onRenderComplete: { model.renderCompleted() },
                 onError: { message in
                     if !model.isEditing { model.errorMessage = message }
                 },
                 onReady: { model.pageReady() },
-                onSourceClick: { model.previewClicked($0) }
+                onSourceClick: { model.previewClicked($0) },
+                onReadingProgress: { model.readingProgressChanged($0) }
             ),
             onMakeController: { model.attach(controller: $0) }
         )

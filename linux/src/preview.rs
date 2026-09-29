@@ -38,6 +38,7 @@ pub struct OutlineItem {
 pub enum PreviewMessage {
     Outline(Vec<OutlineItem>),
     RenderComplete,
+    ReadingProgress(f64),
     SourceClick { line: i64 },
     Error(String),
 }
@@ -461,6 +462,9 @@ fn parse_message(value: &javascriptcore::Value) -> Option<PreviewMessage> {
             Some(PreviewMessage::Outline(items))
         }
         "renderComplete" => Some(PreviewMessage::RenderComplete),
+        "readingProgress" => parsed.get("ratio")?.as_f64()
+            .filter(|ratio| ratio.is_finite())
+            .map(|ratio| PreviewMessage::ReadingProgress(ratio.clamp(0.0, 1.0))),
         "sourceClick" => Some(PreviewMessage::SourceClick { line: parsed.get("line")?.as_i64()? }),
         "error" => Some(PreviewMessage::Error(
             parsed.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string(),
