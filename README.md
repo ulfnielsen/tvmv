@@ -8,7 +8,8 @@ A native Markdown viewer and editor for macOS, iOS and Linux. Opens `.md` files
 in real windows and renders GitHub-Flavored Markdown (via cmark-gfm) with a warm
 "paper & ink" reading theme, syntax highlighting, KaTeX math, and Mermaid
 diagrams. Select & copy, find-in-page (with match count), an outline sidebar,
-a CodeMirror editor with live preview, live reload on file change, print /
+editing (on macOS in place, in the rendered document; on iOS and Linux in a
+CodeMirror editor with live preview), live reload on file change, print /
 Save-as-PDF, and font/size/measure/theme settings. Fully offline — all assets
 are vendored.
 
@@ -52,6 +53,12 @@ position for each file and returns there when you reopen it. Use the bookmark
 button to save a place and the adjacent button to jump back to it. On iOS these
 actions are in the percentage menu. Reading positions and bookmarks are app
 data; they do not modify the Markdown file.
+
+On macOS you edit the document where you read it: press ⌘E and type. Markdown
+renders as you write — type `*word*` and it turns italic — and the markup stays
+hidden. To see or change it, double-click a formatted span or press ⌘' (Esc, or
+moving away, hides it again); ⌥⌘M shows all the Markdown. ⌘B and ⌘I format a
+selection. Spelling and grammar are the system's, and skip code and URLs.
 
 Design spec and implementation plan live in `docs/superpowers/`.
 
@@ -225,7 +232,11 @@ gresource bundles with no plugin API.
 Out of the box TVMV wears its built-in "paper & ink" theme, which has taste. If
 you don't, you can override it with your own CSS — TVMV won't judge.
 
-Open **Settings (⌘,) → Custom CSS → Choose…** and pick a `.css` file. TVMV injects
+Custom CSS applies on Linux. The macOS app now renders documents natively and
+does not load custom CSS (styling options will return in another form); its
+print and Save as PDF use the built-in theme.
+
+Open **Settings (Ctrl+,) → Custom CSS → Choose…** and pick a `.css` file. TVMV injects
 it after the built-in theme (overriding it), tints the window chrome — sidebar,
 window, and title bar — to a slightly-lightened version of your background color,
 and **live-reloads** as you edit the file. *Reset to default* goes back to the
