@@ -200,4 +200,21 @@ final class DocumentTextViewTests: XCTestCase {
         pump(3)
         XCTAssertTrue(hiddenMatchesAFreshParse())
     }
+
+    func testTypingInALargeDocumentRunsOneBackgroundParseAtATime() {
+        // Final review: every keystroke above 64 KB started its own
+        // uncancellable full parse; the newest result queued behind
+        // obsolete work. One parse in flight, then one for the latest text.
+        view.isEditable = true
+        view.load(bigDocument())
+        for i in 0..<5 {
+            view.insertText("w", replacementRange: NSRange(location: 9 + i, length: 0))
+        }
+        XCTAssertEqual(view.backgroundParsesStarted, 1)
+        let deadline = Date().addingTimeInterval(10)
+        while view.layout != MarkdownLayoutParser.parse(view.string), Date() < deadline { pump() }
+        XCTAssertEqual(view.layout, MarkdownLayoutParser.parse(view.string))
+        XCTAssertLessThanOrEqual(view.backgroundParsesStarted, 2)
+        XCTAssertTrue(hiddenMatchesAFreshParse())
+    }
 }

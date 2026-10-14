@@ -41,6 +41,12 @@ final class DocumentTextView: NSTextView {
 
     private let hooks = Hooks()
     private var parseGeneration = 0
+    /// Background parses started (observability for large-document typing).
+    private(set) var backgroundParsesStarted = 0
+    /// At most one background parse runs; edits meanwhile queue one more
+    /// parse of whatever the text is when it finishes.
+    private var parseInFlight = false
+    private var parseQueued = false
     /// Characters at the start and end of the text unchanged since `layout` was computed.
     private var unchangedPrefix = Int.max
     private var unchangedSuffix = Int.max
@@ -124,9 +130,17 @@ final class DocumentTextView: NSTextView {
         if storage.length <= Self.syncParseLimit {
             applyParsed(MarkdownLayoutParser.parse(text), from: old, edit: edit, delta: delta, generation: generation)
         } else {
+            guard !parseInFlight else { parseQueued = true; return }
+            parseInFlight = true
+            backgroundParsesStarted += 1
             Task {
                 let new = await Task.detached(priority: .userInitiated) { MarkdownLayoutParser.parse(text) }.value
+                self.parseInFlight = false
                 self.applyParsed(new, from: old, edit: edit, delta: delta, generation: generation)
+                if self.parseQueued {
+                    self.parseQueued = false
+                    self.textChanged()
+                }
             }
         }
     }
