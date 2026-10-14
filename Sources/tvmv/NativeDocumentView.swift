@@ -176,10 +176,6 @@ struct NativeDocumentView: NSViewRepresentable {
         }
 
         context.coordinator.observeScrolling(scroll.contentView, model: model, controller: controller)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak view, weak scroll] in
-            guard let view, let scroll else { return }
-            FileHandle.standardError.write(Data("DIAG scroll \(scroll.contentSize.width) view \(view.frame.width) inset \(view.textContainerInset.width) container \(view.textContainer!.size.width)\n".utf8))
-        }
         DispatchQueue.main.async {
             controller.restore(model.nativeReadingPosition)
             context.coordinator.restored = true
