@@ -35,6 +35,14 @@ public final class ViewerModel: ObservableObject {
     /// the Mac shell leaves it nil and uses save() explicitly.
     public var onTextChange: (@MainActor (String) -> Void)?
 
+    /// False for the macOS native view: it renders the text itself, so edits
+    /// must not schedule web-preview renders.
+    public var rendersPreview = true
+
+    /// The file changed on disk and was adopted (there were no unsaved
+    /// edits). The macOS native view replaces its text with it.
+    public var onExternalTextAdopted: (@MainActor (String) -> Void)?
+
     private var lastSavedText: String
     private var controller: MarkdownWebController?
     private var editorBridge: EditorBridge?
@@ -95,6 +103,7 @@ public final class ViewerModel: ObservableObject {
             let path = url.standardizedFileURL.path
             readingProgress = UserDefaults.standard.double(forKey: "readingPosition.\(path)")
             hasBookmark = UserDefaults.standard.object(forKey: "bookmark.\(path)") != nil
+                || UserDefaults.standard.object(forKey: "bookmarkOffset.\(path)") != nil
         }
     }
 
@@ -189,13 +198,15 @@ public final class ViewerModel: ObservableObject {
         // fires objectWillChange and invalidates the window per keystroke batch.
         let dirty = (newText != lastSavedText)
         if dirty != isDirty { isDirty = dirty }
-        previewNeedsRender = true
-        renderDebounce?.cancel()
-        let work = DispatchWorkItem { [weak self] in
-            Task { @MainActor [weak self] in await self?.renderAfterEdit() }
+        if rendersPreview {
+            previewNeedsRender = true
+            renderDebounce?.cancel()
+            let work = DispatchWorkItem { [weak self] in
+                Task { @MainActor [weak self] in await self?.renderAfterEdit() }
+            }
+            renderDebounce = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + renderDebounceDelay, execute: work)
         }
-        renderDebounce = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + renderDebounceDelay, execute: work)
         onTextChange?(newText)
     }
 
@@ -347,6 +358,28 @@ public final class ViewerModel: ObservableObject {
         if let readingKey { UserDefaults.standard.set(value, forKey: readingKey) }
     }
 
+    // MARK: Native reading position (macOS native view)
+
+    private var readingStore: ReadingPositionStore? {
+        fileURL.map { ReadingPositionStore(fileURL: $0) }
+    }
+
+    /// Where to open the document: a character offset, or a legacy fraction.
+    public var nativeReadingPosition: ReadingPositionStore.Position? { readingStore?.readingPosition }
+    public var nativeBookmark: ReadingPositionStore.Position? { readingStore?.bookmark }
+
+    /// The native view scrolled: remember the top character and show progress.
+    public func nativeReadingChanged(offset: Int, progress: Double) {
+        readingStore?.setReadingOffset(offset)
+        let value = min(1, max(0, progress))
+        if abs(value - readingProgress) > 0.001 { readingProgress = value }
+    }
+
+    public func nativeSaveBookmark(offset: Int) {
+        readingStore?.setBookmarkOffset(offset)
+        hasBookmark = true
+    }
+
     public func saveBookmark() async {
         guard let controller else { return }
         let ratio = min(1, max(0, await controller.getScrollRatio()))
@@ -488,6 +521,7 @@ public final class ViewerModel: ObservableObject {
         }
         text = decoded
         lastSavedText = decoded
+        onExternalTextAdopted?(decoded)
         if isEditing, let bridge = editorBridge {
             // Programmatic replacement: fresh history so ⌘Z can't resurrect
             // the pre-reload text. The resulting textChanged echo is a no-op
