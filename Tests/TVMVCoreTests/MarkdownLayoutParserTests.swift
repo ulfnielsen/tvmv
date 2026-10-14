@@ -55,6 +55,9 @@ final class MarkdownLayoutParserTests: XCTestCase {
 
     func testUnclosedFenceHidesOnlyTheOpeningLine() {
         XCTAssertEqual(hidden("```\nstill open\n"), ["```\n"])
+        // Final review: a last line that starts with backticks but carries an
+        // info string can't close a fence; it is code and must stay visible.
+        XCTAssertEqual(hidden("Intro\n\n```\nsome code\n```python\n"), ["```\n"])
     }
 
     func testCodeSpansHideTheirBacktickRuns() {

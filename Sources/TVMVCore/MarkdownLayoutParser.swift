@@ -247,8 +247,11 @@ struct LayoutBuilder {
             addMarker(open, unit: unit, collapsesLine: true)
             body = NSRange(location: NSMaxRange(open), length: max(0, NSMaxRange(r) - NSMaxRange(open)))
             let close = lineRange(at: NSMaxRange(r) - 1)
-            if close.location > open.location,
-               ns.substring(with: close).trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix(fence) {
+            // A closing fence is only fence characters (at least as many as
+            // opened it); "```python" on the last line is still code.
+            let closeText = ns.substring(with: close).trimmingCharacters(in: .whitespacesAndNewlines)
+            if close.location > open.location, closeText.count >= fence.count,
+               closeText.allSatisfy({ String($0) == String(fence.prefix(1)) }) {
                 addMarker(close, unit: unit, collapsesLine: true)
                 body.length = max(0, close.location - body.location)
             }
