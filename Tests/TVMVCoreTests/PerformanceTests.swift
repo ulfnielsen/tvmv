@@ -87,6 +87,25 @@ final class PerformanceTests: XCTestCase {
         }
     }
 
+    /// The native view's per-edit work: a full layout parse (runs off the
+    /// main thread above 64 KB) and the diff that bounds the restyle (main thread).
+    func testLayoutParsePerformance1MB() throws {
+        try XCTSkipUnless(perfEnabled, "set TVMV_PERF=1 to run performance gates")
+        let doc = Self.fixture(megabytes: 1)
+        measure { _ = MarkdownLayoutParser.parse(doc) }
+    }
+
+    func testLayoutDiffPerformance1MB() throws {
+        try XCTSkipUnless(perfEnabled, "set TVMV_PERF=1 to run performance gates")
+        let doc = Self.fixture(megabytes: 1) as NSString
+        let edit = NSRange(location: doc.length / 2, length: 0)
+        let old = MarkdownLayoutParser.parse(doc as String)
+        let new = MarkdownLayoutParser.parse(doc.replacingCharacters(in: edit, with: "x"))
+        var changed = NSRange()
+        measure { changed = new.changedRange(from: old, edit: edit, delta: 1) }
+        XCTAssertLessThan(changed.length, 1_000, "the restyle stays local to the edit")
+    }
+
     func testThumbnailBoundedReadOnLargeFile() throws {
         // Always-on: the thumbnail path must stay O(bounded) however large the
         // file is. 20 MB in, bounded lines out, quickly.
