@@ -75,4 +75,21 @@ final class EditRulesTests: XCTestCase {
 
         XCTAssertNil(EditRules.toggleWrap(NSRange(location: 3, length: 0), marker: "*", in: text))
     }
+
+    func testDeletesNeverSplitACharacterBesideHiddenMarkup() {
+        // Final review, critical: the retargeted delete removed one UTF-16
+        // unit — half an emoji — leaving a lone surrogate that ⌘S then saved.
+        let emoji = "😀*a*😀\n" as NSString
+        var hiddenSet = IndexSet()
+        for marker in MarkdownLayoutParser.parse(emoji as String).markers {
+            hiddenSet.insert(integersIn: marker.range.location..<NSMaxRange(marker.range))
+        }
+        let hidden: (Int) -> Bool = { hiddenSet.contains($0) }
+        // Backspace with the caret just after the opening (hidden) "*".
+        XCTAssertEqual(EditRules.retargetDelete(NSRange(location: 2, length: 1), caret: 3, in: emoji, isHidden: hidden),
+                       .replace(NSRange(location: 0, length: 2)))
+        // Forward delete onto the closing (hidden) "*".
+        XCTAssertEqual(EditRules.retargetDelete(NSRange(location: 4, length: 1), caret: 4, in: emoji, isHidden: hidden),
+                       .replace(NSRange(location: 5, length: 2)))
+    }
 }

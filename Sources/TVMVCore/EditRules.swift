@@ -70,7 +70,9 @@ public enum EditRules {
         var target = backward ? run.location - 1 : NSMaxRange(run)
         while target >= 0, target < length, isHidden(target) { target += backward ? -1 : 1 }
         guard target >= 0, target < length else { return .ignore }
-        return .replace(NSRange(location: target, length: 1))
+        // The whole character: an emoji, flag or combining sequence spans
+        // several UTF-16 units, and deleting one would corrupt the text.
+        return .replace(text.rangeOfComposedCharacterSequence(at: target))
     }
 
     /// Wrap a non-empty selection in `marker` (or unwrap it if it already is
