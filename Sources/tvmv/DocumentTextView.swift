@@ -82,6 +82,7 @@ final class DocumentTextView: NSTextView {
         storage.replaceCharacters(in: NSRange(location: 0, length: storage.length), with: text)
         hooks.loading = false
         documentUndo.removeAllActions()
+        parseGeneration += 1   // a parse still in flight was for the old text
         layout = MarkdownLayoutParser.parse(text)
         unchangedPrefix = .max; unchangedSuffix = .max
         restyle(NSRange(location: 0, length: storage.length))
@@ -132,13 +133,24 @@ final class DocumentTextView: NSTextView {
 
     /// Install a parse result unless a newer edit has superseded it (latest wins).
     private func applyParsed(_ new: MarkdownLayout, from old: MarkdownLayout, edit: NSRange, delta: Int, generation: Int) {
-        guard generation == parseGeneration else { return }
+        // Only a layout of exactly the current text may be applied: edits
+        // during IME composition don't bump the generation, and applying a
+        // layout of other text would hide the wrong characters.
+        guard generation == parseGeneration, !hasMarkedText(),
+              new.length == textStorage?.length else { return }
         unchangedPrefix = .max; unchangedSuffix = .max
         let changed = new.changedRange(from: old, edit: edit, delta: delta)
         layout = new
         updateRevealedUnits()
         restyle(changed)
         onLayout?(new)
+    }
+
+    /// Composition can end without a text change (no textDidChange), so
+    /// re-parse here too.
+    override func unmarkText() {
+        super.unmarkText()
+        textChanged()
     }
 
     func restyle(_ range: NSRange) {

@@ -141,4 +141,63 @@ final class DocumentTextViewTests: XCTestCase {
         while view.layout.markers.count == before, Date() < deadline { pump() }
         XCTAssertEqual(view.layout.markers.count, before + 2)
     }
+
+    // MARK: Final review regressions
+
+    /// Characters currently hidden on screen vs. what a fresh parse of the
+    /// current text says to hide. Equal means no stale layout is applied.
+    private func hiddenMatchesAFreshParse() -> Bool {
+        let storage = view.textStorage!
+        var onScreen = IndexSet()
+        storage.enumerateAttribute(.tvmvHidden, in: NSRange(location: 0, length: storage.length)) { value, range, _ in
+            if value != nil { onScreen.insert(integersIn: range.location..<NSMaxRange(range)) }
+        }
+        var expected = IndexSet()
+        for marker in MarkdownLayoutParser.parse(storage.string).markers {
+            expected.insert(integersIn: marker.range.location..<NSMaxRange(marker.range))
+        }
+        return onScreen == expected
+    }
+
+    private func bigDocument() -> String {
+        var big = ""
+        while big.utf16.count < 300_000 { big += doc + "\n" }
+        return big
+    }
+
+    func testBackspaceBesideHiddenMarkupKeepsAnEmojiWhole() {
+        view.isEditable = true
+        view.load("😀*a* end\n")
+        view.setSelectedRange(NSRange(location: 3, length: 0))   // after the hidden opening "*"
+        view.deleteBackward(nil)
+        pump()
+        XCTAssertEqual(view.string, "*a* end\n")
+    }
+
+    func testALoadDuringAnAsyncParseIsNotOverwrittenByIt() {
+        view.isEditable = true
+        view.load(bigDocument())
+        view.insertText("**x** ", replacementRange: NSRange(location: 9, length: 0))   // parse in flight
+        var other = ""
+        while other.utf16.count < 300_000 { other += "An *other* text and a `code` span.\n\n" }
+        view.load(other)
+        pump(3)
+        XCTAssertEqual(view.layout, MarkdownLayoutParser.parse(view.string))
+        XCTAssertTrue(hiddenMatchesAFreshParse())
+    }
+
+    func testCompositionDuringAnAsyncParseKeepsHiddenRangesAligned() {
+        view.isEditable = true
+        view.load(bigDocument())
+        window.makeFirstResponder(view)
+        view.insertText("x", replacementRange: NSRange(location: 9, length: 0))   // parse in flight
+        view.setMarkedText("かな", selectedRange: NSRange(location: 2, length: 0),
+                           replacementRange: NSRange(location: 10, length: 0))
+        pump(3)
+        XCTAssertTrue(view.hasMarkedText())
+        XCTAssertTrue(hiddenMatchesAFreshParse(), "a layout for the pre-composition text was applied")
+        view.unmarkText()
+        pump(3)
+        XCTAssertTrue(hiddenMatchesAFreshParse())
+    }
 }
