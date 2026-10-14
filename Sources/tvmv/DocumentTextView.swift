@@ -32,6 +32,8 @@ final class DocumentTextView: NSTextView {
     var onLayout: ((MarkdownLayout) -> Void)?
     /// A link was activated (read-only click, or ⌘-click while editing).
     var onFollowLink: ((String) -> Void)?
+    /// Called once, the first time the view gets a non-zero width.
+    var onSized: (() -> Void)?
 
     /// Private undo stack: the window's document undo manager belongs to a
     /// DocumentGroup(viewing:) document that can't be saved, and registering
@@ -198,6 +200,10 @@ final class DocumentTextView: NSTextView {
     override func setFrameSize(_ newSize: NSSize) {
         super.setFrameSize(newSize)
         layoutColumn()
+        if newSize.width > 0, let sized = onSized {
+            onSized = nil
+            sized()
+        }
     }
 
     // MARK: Reveal

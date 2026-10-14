@@ -96,4 +96,25 @@ final class NativeDocumentViewTests: XCTestCase {
         XCTAssertEqual(target("/etc/hosts"), .blocked)
         XCTAssertEqual(NativeDocumentController.linkTarget("other.md", documentURL: nil), .blocked)
     }
+
+    func testRestoringBeforeTheViewIsSizedLandsOnTheSavedPlace() {
+        // Final review: makeNSView restores the reading position before
+        // SwiftUI has given the scroll view its size, when the column is
+        // only 200 pt wide; the offset's y there is wrong after reflow.
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let (scroll, view) = NativeDocumentView.makeScrollView(theme: theme)
+        let controller = NativeDocumentController()
+        controller.attach(view)
+        var text = ""
+        for i in 1...80 { text += "Paragraph \(i) with enough words that it wraps when the column is narrow.\n\n" }
+        view.load(text)
+        let target = (text as NSString).range(of: "Paragraph 40").location
+
+        controller.restoreWhenSized(.offset(target))       // not sized yet
+        window.contentView!.addSubview(scroll)
+        scroll.frame = window.contentView!.bounds           // now SwiftUI sizes it
+        view.layoutManager!.ensureLayout(for: view.textContainer!)
+        XCTAssertEqual(controller.topVisibleOffset(), target, accuracy: 2)
+    }
 }

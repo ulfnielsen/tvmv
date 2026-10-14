@@ -38,6 +38,10 @@ final class NativeDocumentController {
         guard length > 0 else { return }
         let glyphs = lm.glyphRange(forCharacterRange: NSRange(location: min(max(0, offset), length - 1), length: 1),
                                    actualCharacterRange: nil)
+        // Lay out up to the target and grow the view to match first, or the
+        // scroll is clamped to a height from before the latest reflow.
+        lm.ensureLayout(forGlyphRange: NSRange(location: 0, length: NSMaxRange(glyphs)))
+        view.sizeToFit()
         let rect = lm.boundingRect(forGlyphRange: glyphs, in: tc)
         view.scroll(NSPoint(x: 0, y: max(0, rect.minY + view.textContainerOrigin.y)))
     }
@@ -55,6 +59,17 @@ final class NativeDocumentController {
         case .fraction(let fraction): scrollTo(fraction: fraction)
         case nil: break
         }
+    }
+
+    /// Restore once the view has its real width: where an offset sits
+    /// depends on line wrapping, and SwiftUI sizes the view after creating it.
+    func restoreWhenSized(_ position: ReadingPositionStore.Position?, then done: (() -> Void)? = nil) {
+        guard let view = textView else { return }
+        let apply = { [weak self] in
+            self?.restore(position)
+            done?()
+        }
+        if view.frame.width > 0 { apply() } else { view.onSized = apply }
     }
 
     /// Scroll progress, 0...1.
@@ -176,10 +191,8 @@ struct NativeDocumentView: NSViewRepresentable {
         }
 
         context.coordinator.observeScrolling(scroll.contentView, model: model, controller: controller)
-        DispatchQueue.main.async {
-            controller.restore(model.nativeReadingPosition)
-            context.coordinator.restored = true
-        }
+        let coordinator = context.coordinator
+        controller.restoreWhenSized(model.nativeReadingPosition) { coordinator.restored = true }
         return scroll
     }
 
