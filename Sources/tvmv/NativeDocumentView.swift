@@ -77,18 +77,42 @@ final class NativeDocumentController {
     func bold() { textView?.toggleBold(nil) }
     func italic() { textView?.toggleItalic(nil) }
 
-    /// Follow a link from the document: `#slug` scrolls to that heading; a
-    /// URL with a scheme opens externally; anything else is a path relative
-    /// to the document's folder.
-    func follow(_ link: String, documentURL: URL?) {
+    enum LinkTarget: Equatable {
+        /// `#slug`: a heading in this document.
+        case anchor(String)
+        /// http, https or mailto: handed to the browser or mail app.
+        case external(URL)
+        /// A relative link to another Markdown file next to this one.
+        case document(URL)
+        /// Anything else — other schemes, apps, scripts, absolute paths.
+        case blocked
+    }
+
+    static let markdownExtensions: Set<String> = ["md", "markdown", "mdown", "mkd", "mkdn"]
+
+    /// What clicking `link` may do. A document is untrusted input: like the
+    /// web reader, only web and mail links leave the app, and relative links
+    /// open only Markdown files — never apps, scripts or other schemes.
+    static func linkTarget(_ link: String, documentURL: URL?) -> LinkTarget {
         if link.hasPrefix("#") {
             let anchor = String(link.dropFirst())
-            scrollTo(anchor: anchor.removingPercentEncoding ?? anchor)
-        } else if let url = URL(string: link), url.scheme != nil {
-            NSWorkspace.shared.open(url)
-        } else if let folder = documentURL?.deletingLastPathComponent() {
-            let path = String(link.split(separator: "#", maxSplits: 1).first ?? "")
-            NSWorkspace.shared.open(folder.appendingPathComponent(path.removingPercentEncoding ?? path))
+            return .anchor(anchor.removingPercentEncoding ?? anchor)
+        }
+        if let url = URL(string: link), let scheme = url.scheme?.lowercased() {
+            return ["http", "https", "mailto"].contains(scheme) ? .external(url) : .blocked
+        }
+        guard let folder = documentURL?.deletingLastPathComponent(), !link.hasPrefix("/") else { return .blocked }
+        let path = String(link.split(separator: "#", maxSplits: 1).first ?? "")
+        let target = folder.appendingPathComponent(path.removingPercentEncoding ?? path).standardizedFileURL
+        return markdownExtensions.contains(target.pathExtension.lowercased()) ? .document(target) : .blocked
+    }
+
+    /// Follow a link from the document (see `linkTarget` for what is allowed).
+    func follow(_ link: String, documentURL: URL?) {
+        switch Self.linkTarget(link, documentURL: documentURL) {
+        case .anchor(let anchor): scrollTo(anchor: anchor)
+        case .external(let url), .document(let url): NSWorkspace.shared.open(url)
+        case .blocked: NSSound.beep()
         }
     }
 

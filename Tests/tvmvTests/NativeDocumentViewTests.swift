@@ -53,4 +53,31 @@ final class NativeDocumentViewTests: XCTestCase {
         let heading = (text as NSString).range(of: "## Far Away").location
         XCTAssertLessThanOrEqual(abs(controller.topVisibleOffset() - heading), 3)
     }
+
+    func testLinkPolicyOpensOnlyWebMailAndMarkdownTargets() {
+        // Regression (security review): the native view must not open
+        // arbitrary schemes or files from a document's links. The web reader
+        // handed only http/https/mailto to the system; keep that, and allow
+        // relative links only to Markdown documents.
+        let doc = URL(fileURLWithPath: "/docs/guide/readme.md")
+        typealias Target = NativeDocumentController.LinkTarget
+        func target(_ link: String) -> Target { NativeDocumentController.linkTarget(link, documentURL: doc) }
+
+        XCTAssertEqual(target("#setup"), .anchor("setup"))
+        XCTAssertEqual(target("#caf%C3%A9"), .anchor("café"))
+        XCTAssertEqual(target("https://example.com/x"), .external(URL(string: "https://example.com/x")!))
+        XCTAssertEqual(target("HTTP://example.com"), .external(URL(string: "HTTP://example.com")!))
+        XCTAssertEqual(target("mailto:a@b.c"), .external(URL(string: "mailto:a@b.c")!))
+        XCTAssertEqual(target("other.md"), .document(URL(fileURLWithPath: "/docs/guide/other.md")))
+        XCTAssertEqual(target("../notes%20x.markdown#top"), .document(URL(fileURLWithPath: "/docs/notes x.markdown")))
+
+        XCTAssertEqual(target("file:///Applications/Calculator.app"), .blocked)
+        XCTAssertEqual(target("x-apple.systempreferences:com.apple.preference.security"), .blocked)
+        XCTAssertEqual(target("javascript:alert(1)"), .blocked)
+        XCTAssertEqual(target("ssh://host"), .blocked)
+        XCTAssertEqual(target("run.command"), .blocked)
+        XCTAssertEqual(target("../Evil.app"), .blocked)
+        XCTAssertEqual(target("/etc/hosts"), .blocked)
+        XCTAssertEqual(NativeDocumentController.linkTarget("other.md", documentURL: nil), .blocked)
+    }
 }
