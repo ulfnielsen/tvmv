@@ -92,7 +92,8 @@ final class NativeDocumentController {
 
     /// What clicking `link` may do. A document is untrusted input: like the
     /// web reader, only web and mail links leave the app, and relative links
-    /// open only Markdown files — never apps, scripts or other schemes.
+    /// open only existing regular Markdown files (symlinks resolved first) —
+    /// never apps, folders, scripts or other schemes.
     static func linkTarget(_ link: String, documentURL: URL?) -> LinkTarget {
         if link.hasPrefix("#") {
             let anchor = String(link.dropFirst())
@@ -103,8 +104,11 @@ final class NativeDocumentController {
         }
         guard let folder = documentURL?.deletingLastPathComponent(), !link.hasPrefix("/") else { return .blocked }
         let path = String(link.split(separator: "#", maxSplits: 1).first ?? "")
-        let target = folder.appendingPathComponent(path.removingPercentEncoding ?? path).standardizedFileURL
-        return markdownExtensions.contains(target.pathExtension.lowercased()) ? .document(target) : .blocked
+        // Judge what is really there: a "notes.md" can be a symlink to an app
+        // or a folder, and NSWorkspace would open whatever it points at.
+        let target = folder.appendingPathComponent(path.removingPercentEncoding ?? path).resolvingSymlinksInPath()
+        let isFile = (try? target.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+        return isFile && markdownExtensions.contains(target.pathExtension.lowercased()) ? .document(target) : .blocked
     }
 
     /// Follow a link from the document (see `linkTarget` for what is allowed).

@@ -54,24 +54,40 @@ final class NativeDocumentViewTests: XCTestCase {
         XCTAssertLessThanOrEqual(abs(controller.topVisibleOffset() - heading), 3)
     }
 
-    func testLinkPolicyOpensOnlyWebMailAndMarkdownTargets() {
+    func testLinkPolicyOpensOnlyWebMailAndMarkdownTargets() throws {
         // Regression (security review): the native view must not open
         // arbitrary schemes or files from a document's links. The web reader
         // handed only http/https/mailto to the system; keep that, and allow
-        // relative links only to Markdown documents.
-        let doc = URL(fileURLWithPath: "/docs/guide/readme.md")
+        // relative links only to Markdown documents that really are files.
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("tvmv-links-\(UUID().uuidString)")
+        let guide = root.appendingPathComponent("guide")
+        try fm.createDirectory(at: guide, withIntermediateDirectories: true)
+        addTeardownBlock { try? fm.removeItem(at: root) }
+        try "x".write(to: guide.appendingPathComponent("other.md"), atomically: true, encoding: .utf8)
+        try "x".write(to: root.appendingPathComponent("notes x.markdown"), atomically: true, encoding: .utf8)
+        // A "Markdown" name that is really an app, and one that is a folder.
+        try fm.createSymbolicLink(at: guide.appendingPathComponent("trap.md"),
+                                  withDestinationURL: URL(fileURLWithPath: "/System/Applications/Calculator.app"))
+        try fm.createDirectory(at: guide.appendingPathComponent("folder.md"), withIntermediateDirectories: true)
+
+        let doc = guide.appendingPathComponent("readme.md")
         typealias Target = NativeDocumentController.LinkTarget
         func target(_ link: String) -> Target { NativeDocumentController.linkTarget(link, documentURL: doc) }
+        func resolved(_ url: URL) -> URL { url.resolvingSymlinksInPath() }
 
         XCTAssertEqual(target("#setup"), .anchor("setup"))
         XCTAssertEqual(target("#caf%C3%A9"), .anchor("café"))
         XCTAssertEqual(target("https://example.com/x"), .external(URL(string: "https://example.com/x")!))
         XCTAssertEqual(target("HTTP://example.com"), .external(URL(string: "HTTP://example.com")!))
         XCTAssertEqual(target("mailto:a@b.c"), .external(URL(string: "mailto:a@b.c")!))
-        XCTAssertEqual(target("other.md"), .document(URL(fileURLWithPath: "/docs/guide/other.md")))
-        XCTAssertEqual(target("../notes%20x.markdown#top"), .document(URL(fileURLWithPath: "/docs/notes x.markdown")))
+        XCTAssertEqual(target("other.md"), .document(resolved(guide.appendingPathComponent("other.md"))))
+        XCTAssertEqual(target("../notes%20x.markdown#top"), .document(resolved(root.appendingPathComponent("notes x.markdown"))))
 
-        XCTAssertEqual(target("file:///Applications/Calculator.app"), .blocked)
+        XCTAssertEqual(target("trap.md"), .blocked, "a symlink to an app")
+        XCTAssertEqual(target("folder.md"), .blocked, "a directory")
+        XCTAssertEqual(target("missing.md"), .blocked)
+        XCTAssertEqual(target("file:///System/Applications/Calculator.app"), .blocked)
         XCTAssertEqual(target("x-apple.systempreferences:com.apple.preference.security"), .blocked)
         XCTAssertEqual(target("javascript:alert(1)"), .blocked)
         XCTAssertEqual(target("ssh://host"), .blocked)
