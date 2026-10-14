@@ -34,7 +34,12 @@ stays in the repo.
    equivalent.
 4. **Parsing uses cmark-gfm,** the same pinned library that renders print and
    QuickLook, so the editor and the printed output cannot disagree about what
-   the Markdown means. Only the blocks around an edit are re-parsed.
+   the Markdown means.
+   - Every edit triggers a full re-parse: synchronous up to 64 KB, off the
+     main thread above that, with the latest result winning.
+   - Only the range where the old and new layouts differ is restyled.
+   - A block-level incremental re-parse was prototyped and rejected (see
+     Evidence).
 5. **Tables are an editable grid.** Each cell is a small native text view.
 6. **Math, Mermaid, raw HTML blocks and front matter are embedded blocks.**
    They are rendered to images by an offscreen copy of the existing web layer.
@@ -66,6 +71,22 @@ stays in the repo.
     edits back to the source.
   - A CodeMirror live preview was viable, but its spelling support in WebKit
     is weak.
+- **Prototype of the core (`MarkdownLayout`, diff, `EditRules`, the view):**
+  - **Block-level incremental re-parse diverged from a full parse** in 13–79
+    of every 1,500 random edits. Causes: blank lines merging blocks,
+    reference definitions, and hard-break segments.
+  - **Full re-parse plus a layout diff** had zero unsound diffs over 26,000
+    random edits.
+  - **A full parse costs about 100 ms per MB:** 28 ms is cmark itself and
+    the rest is the layout walk. Hence the async path for large documents.
+    The diff costs about 0.2 ms per MB.
+  - **Marker validation:**
+    - cmark positions also go wrong for adjacent delimiters, after astral
+      characters, and for setext headings that contain hard breaks.
+    - Every hidden range is therefore validated (the characters must be the
+      expected delimiters, and each character is hidden at most once).
+    - Over 26,000 random edits there were zero invariant violations: nothing
+      hidden that isn't markup.
 - **The pinned cmark-gfm:**
   - HTML output carries source positions only per block.
   - The AST has inline positions, but they are wrong after a backslash hard
@@ -151,8 +172,10 @@ These are pure functions in `EditRules`, tested without UI:
     scroll fraction. They are read once as a fraction, then rewritten as an
     offset.
   - The percentage indicator stays.
-- **Find:** the native find bar (`NSTextFinder`). It matches visible text,
-  ignoring hidden markup.
+- **Find:** the native find bar (`NSTextFinder`).
+  - It searches the source text, so a search for `*` can match hidden markup.
+  - Searching visible text only would need a custom `NSTextFinderClient`.
+    That is deferred.
 - **Settings:**
   - Body and mono font, size, measure, full width, and light/dark/auto map to
     native attributes and apply live.
@@ -187,12 +210,11 @@ These are pure functions in `EditRules`, tested without UI:
 All of these live in `TVMVCore` (pure, unit-tested) unless noted:
 
 - **`MarkdownLayout`**
-  - Input: text plus an edited range.
-  - Output, per affected block: style runs, hidden ranges, reveal units,
-    collapsed lines, attachment regions (tables, embedded blocks, images),
-    and outline entries.
-  - Backed by cmark-gfm. Inline positions are recomputed from block text
-    where cmark's are wrong.
+  - A full parse produces style runs, markers (hidden ranges with their
+    reveal unit), code blocks, headings and top-level blocks.
+  - `changedRange(from:edit:delta:)` bounds the restyle.
+  - Backed by cmark-gfm. Positions cmark gets wrong are repaired or
+    validated.
 - **`EditRules`**: caret snap, delete retarget, prefix removal, list
   continuation, and the wrap shortcuts.
 - **`ThreeWayMerge`**: merge, conflict ranges, and offset mapping.
@@ -211,10 +233,12 @@ All of these live in `TVMVCore` (pure, unit-tested) unless noted:
 
 Checked by XCTest performance tests on 1 MB and 5 MB fixtures:
 
-- A keystroke (re-parse affected blocks, restyle, glyph invalidation of that
-  range) takes under 16 ms at 1 MB.
+- **Main-thread work per keystroke** (the edit, plus restyling the changed
+  range once the parse lands) stays under 16 ms at 1 MB. Above 64 KB the
+  parse itself runs off the main thread.
 - Open to first paint takes under 300 ms at 1 MB, with embedded blocks lazy.
-- No full-document work on a keystroke, a caret move, or a reveal toggle.
+- No full-document work on the main thread for a keystroke, a caret move, or
+  a reveal toggle in documents over 64 KB.
 
 ## Testing
 
