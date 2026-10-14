@@ -10,18 +10,29 @@ struct ViewerWindow: View {
     @EnvironmentObject private var settings: AppSettings
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var model: ViewerModel
+    /// Imperative handle on the native view: outline jumps, bookmarks, find, markup commands.
+    @State private var native = NativeDocumentController()
 
     @State private var columns: NavigationSplitViewVisibility = .automatic
     @State private var selection: OutlineItem.ID?
-    @State private var showFind = false
-    @State private var findText = ""
-    @FocusState private var findFocused: Bool
 
     init(document: MarkdownDocument, fileURL: URL?) {
         self.fileURL = fileURL
-        _model = StateObject(wrappedValue: ViewerModel(
+        _model = StateObject(wrappedValue: Self.makeModel(document, fileURL))
+    }
+
+    private static func makeModel(_ document: MarkdownDocument, _ fileURL: URL?) -> ViewerModel {
+        let model = ViewerModel(
             text: document.text, fileURL: fileURL,
-            encoding: document.encodingUsed, lineEnding: document.lineEndingUsed))
+            encoding: document.encodingUsed, lineEnding: document.lineEndingUsed)
+        model.rendersPreview = false   // the native view renders the text itself
+        return model
+    }
+
+    /// Settings' light/dark, or the system appearance when set to auto.
+    private var theme: NativeTheme {
+        let dark = settings.theme == .auto ? colorScheme == .dark : settings.theme == .dark
+        return NativeTheme(settings: settings, dark: dark)
     }
 
     var body: some View {
@@ -37,28 +48,13 @@ struct ViewerWindow: View {
                 Color(red: $0.red, green: $0.green, blue: $0.blue)
             } ?? .clear)
         } detail: {
-            HSplitView {
-                if model.isEditing {
-                    editorPane
-                        .frame(minWidth: 280,
-                               idealWidth: settings.editorPaneWidth > 0
-                                   ? CGFloat(settings.editorPaneWidth) : nil)
-                        .background(GeometryReader { geo in
-                            Color.clear.onChange(of: geo.size.width) { _, w in
-                                settings.editorPaneWidth = Double(w)
-                            }
-                        })
+            NativeDocumentView(model: model, controller: native, theme: theme, isEditable: model.isEditing)
+                .overlay(alignment: .top) {
+                    if model.externalChangePending { externalChangeBanner }
                 }
-                webView
-                    .frame(minWidth: 320)
-                    .overlay(alignment: .top) {
-                        if model.externalChangePending { externalChangeBanner }
-                    }
-                    .overlay(alignment: .topTrailing) { if showFind { findBar } }
-                    .overlay(alignment: .bottom) {
-                        if model.errorMessage != nil { errorBanner }
-                    }
-            }
+                .overlay(alignment: .bottom) {
+                    if model.errorMessage != nil { errorBanner }
+                }
         }
         .background { WindowChrome(color: model.chromeColor) }
         .background { WindowCloseGuard(
@@ -77,11 +73,11 @@ struct ViewerWindow: View {
                 Text("\(Int((model.readingProgress * 100).rounded()))%")
                     .monospacedDigit()
                     .help("Reading progress")
-                Button { Task { await model.saveBookmark() } } label: {
+                Button { model.nativeSaveBookmark(offset: native.topVisibleOffset()) } label: {
                     Image(systemName: "bookmark")
                 }
                 .help("Bookmark current place")
-                Button { Task { await model.goToBookmark() } } label: {
+                Button { native.restore(model.nativeBookmark) } label: {
                     Image(systemName: "bookmark.fill")
                 }
                 .disabled(!model.hasBookmark)
@@ -90,25 +86,10 @@ struct ViewerWindow: View {
         }
         .onChange(of: selection) { _, new in
             if let new, let item = model.outline.first(where: { $0.id == new }) {
-                model.scrollTo(item)
+                native.scrollTo(anchor: item.anchor)
             }
         }
-        // Live-apply typography/theme. Each payload goes only to its own
-        // destination — a shared setting (theme, base size) changes both
-        // payloads, and must send exactly one message to each side.
-        .onChange(of: settings.styleJSON) { Task { await model.applyPreviewStyle() } }
-        .onChange(of: settings.editorStyleJSON) { Task { await model.applyEditorStyle() } }
-        // Re-apply when the custom-CSS file is changed in Settings.
-        .onChange(of: settings.customCSSPath) { model.cssPathChanged() }
-        // Re-resolve auto theme when the system appearance flips.
-        .onChange(of: colorScheme) {
-            if settings.theme == .auto {
-                Task {
-                    await model.applyPreviewStyle()
-                    await model.applyEditorStyle()
-                }
-            }
-        }
+        .onChange(of: theme.paper, initial: true) { model.chromeColor = theme.chromeColor }
         .onAppear {
             columns = settings.showOutline ? .all : .detailOnly
             model.startWatching()
@@ -125,54 +106,25 @@ struct ViewerWindow: View {
         // Publish this window's command actions to the menu only while it is the
         // focused scene — so Find/Print/Reload/Toggle-Outline hit just this window.
         .focusedSceneValue(\.viewerCommands, ViewerCommands(
-            find: {
-                showFind = true
-                // Defer focus until the bar is in the hierarchy this runloop turn.
-                DispatchQueue.main.async { findFocused = true }
+            find: { native.showFind() },
+            printDocument: {
+                PrintRenderer.print(text: model.text,
+                                    title: fileURL?.deletingPathExtension().lastPathComponent,
+                                    documentDirectory: fileURL?.deletingLastPathComponent(),
+                                    sheetWindow: native.window)
             },
-            printDocument: { model.printDoc() },
             reload: { Task { await model.reload() } },
             toggleOutline: { columns = (columns == .detailOnly) ? .all : .detailOnly },
             toggleEditing: { model.toggleEditing() },
             save: { Task { await model.flushAndSave() } },
+            revealMarkup: { native.toggleRevealMarkup() },
+            showMarkdown: { native.toggleShowMarkdown() },
+            bold: { native.bold() },
+            italic: { native.italic() },
             canSave: (model.isDirty || model.isEditing) && fileURL != nil,
-            canEdit: fileURL != nil
+            canEdit: fileURL != nil,
+            isEditing: model.isEditing
         ))
-    }
-
-    private var webView: some View {
-        MarkdownWebView(
-            appWebDir: WebResources.baseURL,
-            docDir: fileURL?.deletingLastPathComponent(),
-            callbacks: MarkdownWebViewCallbacks(
-                onOutline: { items in model.outline = items },
-                onRenderComplete: { model.renderCompleted() },
-                // While editing, half-typed mermaid/math makes nearly every
-                // debounced re-render reject transiently — suppress the banner
-                // there (mermaid draws its own in-place error graphic anyway).
-                onError: { msg in if !model.isEditing { model.errorMessage = msg } },
-                onReady: { model.pageReady() },
-                onSourceClick: { click in model.previewClicked(click) },
-                onReadingProgress: { model.readingProgressChanged($0) }
-            ),
-            onMakeController: { controller in model.attach(controller: controller) }
-        )
-    }
-
-    private var editorPane: some View {
-        CodeMirrorEditorPane(
-            appWebDir: WebResources.baseURL,
-            callbacks: EditorBridgeCallbacks(
-                onReady: { model.editorReady(bridge: $0) },
-                onTextPatch: { patches, length in
-                    model.editorTextPatched(patches, expectedLength: length)
-                },
-                onCursorMoved: { line, offset in model.editorCursorMoved(line: line, offset: offset) },
-                onScrolled: { line in model.editorScrolled(topLine: line) },
-                onError: { msg in model.errorMessage = msg }
-            ),
-            onMakeBridge: { model.attach(editor: $0) }
-        )
     }
 
     private var errorBanner: some View {
@@ -210,49 +162,6 @@ struct ViewerWindow: View {
         .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
         .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
         .padding(8)
-    }
-
-    private var findBar: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .foregroundStyle(.secondary)
-            TextField("Find", text: $findText)
-                .textFieldStyle(.plain)
-                .frame(width: 200)
-                .focused($findFocused)
-                .onSubmit { model.findNext(forward: true) }
-                .onChange(of: findText) { model.find(findText) }
-            Text(matchLabel)
-                .font(.caption)
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-            Divider().frame(height: 16)
-            Button { model.findNext(forward: false) } label: { Image(systemName: "chevron.up") }
-                .buttonStyle(.borderless)
-                .disabled(model.findCount == 0)
-            Button { model.findNext(forward: true) } label: { Image(systemName: "chevron.down") }
-                .buttonStyle(.borderless)
-                .disabled(model.findCount == 0)
-            Button { closeFind() } label: { Image(systemName: "xmark") }
-                .buttonStyle(.borderless)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 8))
-        .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.quaternary))
-        .padding(8)
-        .onExitCommand { closeFind() }
-    }
-
-    private var matchLabel: String {
-        if findText.isEmpty { return "" }
-        return model.findCount == 0 ? "Not found" : "\(model.findIndex)/\(model.findCount)"
-    }
-
-    private func closeFind() {
-        showFind = false
-        findText = ""
-        model.clearFind()
     }
 }
 

@@ -304,7 +304,9 @@ public final class MarkdownWebController {
 #if os(macOS)
     // MARK: Print (surfaces Save-as-PDF)
 
-    public func printDocument(jobTitle: String? = nil) {
+    /// - Parameter sheetWindow: the window to attach the print panel to;
+    ///   defaults to the web view's own window.
+    public func printDocument(jobTitle: String? = nil, sheetWindow: NSWindow? = nil) {
         guard let webView else { return }
         let printInfo = NSPrintInfo.shared
         let operation = webView.printOperation(with: printInfo)
@@ -318,7 +320,7 @@ public final class MarkdownWebController {
         }
         operation.showsPrintPanel = true
         operation.showsProgressPanel = true
-        if let window = webView.window {
+        if let window = sheetWindow ?? webView.window {
             operation.runModal(
                 for: window,
                 delegate: nil,

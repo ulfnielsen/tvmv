@@ -2,7 +2,7 @@ import TVMVCore
 import SwiftUI
 
 /// Per-window menu actions. The focused viewer window publishes these via
-/// `focusedSceneValue`, so menu commands (Find, Print, Reload, Toggle Outline)
+/// `focusedSceneValue`, so menu commands (Find, Print, Reload, Toggle Outline, markup)
 /// act only on the frontmost window — not on every open window.
 struct ViewerCommands {
     var find: () -> Void
@@ -11,10 +11,18 @@ struct ViewerCommands {
     var toggleOutline: () -> Void
     var toggleEditing: () -> Void
     var save: () -> Void
+    /// ⌘': show the markup of the span under the selection (again: hide it).
+    var revealMarkup: () -> Void
+    /// ⌥⌘M: show all markup.
+    var showMarkdown: () -> Void
+    var bold: () -> Void
+    var italic: () -> Void
     /// Enables ⌘S: there are unsaved edits and a file to write to.
     var canSave: Bool
     /// Enables ⌘E: the document has a file URL to save back to.
     var canEdit: Bool
+    /// Enables ⌘B/⌘I, which write markup into the text.
+    var isEditing: Bool
 }
 
 struct ViewerCommandsKey: FocusedValueKey {
@@ -62,6 +70,21 @@ struct ViewerMenuCommands: Commands {
             Divider()
             Button("Reload") { commands?.reload() }
                 .keyboardShortcut("r", modifiers: .command)
+                .disabled(commands == nil)
+        }
+        CommandGroup(replacing: .textFormatting) {
+            Button("Bold") { commands?.bold() }
+                .keyboardShortcut("b", modifiers: .command)
+                .disabled(commands?.isEditing != true)
+            Button("Italic") { commands?.italic() }
+                .keyboardShortcut("i", modifiers: .command)
+                .disabled(commands?.isEditing != true)
+            Divider()
+            Button("Reveal Markup Here") { commands?.revealMarkup() }
+                .keyboardShortcut("'", modifiers: .command)
+                .disabled(commands == nil)
+            Button("Show Markdown") { commands?.showMarkdown() }
+                .keyboardShortcut("m", modifiers: [.command, .option])
                 .disabled(commands == nil)
         }
         CommandGroup(replacing: .printItem) {
