@@ -165,7 +165,12 @@ end
 set -l tag "v$ver"
 set -l title "TVMV $ver"
 if test $beta = true
-    set -l n (math (count (git tag -l "v$ver-beta.*")) + 1)
+    # Highest existing beta number + 1 (not a count: old betas may be deleted).
+    set -l n 1
+    for t in (git tag -l "v$ver-beta.*")
+        set -l k (string replace "v$ver-beta." "" $t)
+        string match -qr '^[0-9]+$' -- $k; and test $k -ge $n; and set n (math $k + 1)
+    end
     set tag "v$ver-beta.$n"
     set title "TVMV $ver beta $n"
 end
