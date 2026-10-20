@@ -3,7 +3,9 @@ import cmark_gfm_extensions
 
 /// Parse GitHub-Flavored Markdown and render it to an HTML string.
 ///
-/// Enables the GFM core extensions: table, strikethrough, autolink, tasklist.
+/// Enables the GFM core extensions: table, strikethrough, autolink, tasklist,
+/// and footnotes. Review markup (`ReviewMarkup`) renders as `<mark>`, `<ins>`
+/// and `<del>` with a `data-rv` id, and its `rv-` threads as footnotes.
 /// - Parameter sourcePos: When true, block elements carry `data-sourcepos="line:col-line:col"`
 ///   attributes for editor/preview sync. Default false keeps output byte-identical for QuickLook.
 public func renderHTML(_ markdown: String, sourcePos: Bool = false) -> String {
@@ -15,7 +17,15 @@ public func renderHTML(_ markdown: String, sourcePos: Bool = false) -> String {
     // javascript:/data: links stripped). Use CMARK_OPT_UNSAFE to allow raw HTML.
     // CMARK_OPT_SOURCEPOS adds data-sourcepos="line:col-line:col" to block
     // elements — the anchor the app's editor/preview sync maps through.
-    let options = sourcePos ? CMARK_OPT_SOURCEPOS : CMARK_OPT_DEFAULT
+    // CMARK_OPT_FOOTNOTES renders `[^id]` refs and definitions as GFM footnotes,
+    // which is how review threads appear in print and other readers.
+    let options = (sourcePos ? CMARK_OPT_SOURCEPOS : CMARK_OPT_DEFAULT) | CMARK_OPT_FOOTNOTES
+
+    // Review anchors become sentinels here and tags after rendering (cmark
+    // strips raw HTML, so the tags cannot go in first). nil: no review markup,
+    // and the source renders exactly as written.
+    let review = ReviewMarkup.sentinelEncoded(markdown)
+    let source = review ?? markdown
 
     guard let parser = cmark_parser_new(options) else { return "" }
     defer { cmark_parser_free(parser) }
@@ -34,7 +44,7 @@ public func renderHTML(_ markdown: String, sourcePos: Bool = false) -> String {
     // first one, rendering part of the file with no indication that the rest was
     // dropped. The Rust shell passes an explicit length for the same reason, and
     // `GoldenRenderTests.testEmbeddedNULDoesNotTruncate` holds the two in step.
-    let utf8 = Array(markdown.utf8)
+    let utf8 = Array(source.utf8)
     utf8.withUnsafeBufferPointer { buffer in
         guard let base = buffer.baseAddress else { return }   // empty document
         base.withMemoryRebound(to: CChar.self, capacity: buffer.count) { bytes in
@@ -53,5 +63,6 @@ public func renderHTML(_ markdown: String, sourcePos: Bool = false) -> String {
     }
     defer { free(htmlCString) }
 
-    return String(cString: htmlCString)
+    let html = String(cString: htmlCString)
+    return review == nil ? html : ReviewMarkup.sentinelDecoded(html)
 }
