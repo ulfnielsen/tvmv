@@ -35,13 +35,22 @@ extension MarkdownLayout {
         headings.removeAll { heading in threads.contains { meets($0, heading.range) } }
         softBreaks.removeAll { b in threads.contains { NSLocationInRange(b, $0) } }
 
+        var previous: ReviewMarkup.Span.Role?
         for span in spans {
+            defer { previous = span.role }
             let range = ns(span.range)
             guard range.length > 0 else { continue }
             if span.isSpellingExempt { spellExempt.append(range) }
             switch span.role {
             case .definition:
                 markers.append(.init(range: range, unit: range, collapsesLine: true))
+            case .delimiter where previous == .substitutionOld && range.length == 2:
+                // "~>": the '>' stays, clear and unstyled, as the gap between
+                // the struck old text and the underlined new.
+                guard let unit = anchors.first(where: { $0.encloses(range) }) else { continue }
+                markers.append(.init(range: NSRange(location: range.location, length: 1), unit: unit))
+                styles.append(.init(range: NSRange(location: range.location + 1, length: 1),
+                                    style: .review(role: .delimiter, id: span.id)))
             case .delimiter, .ref:
                 guard let unit = anchors.first(where: { $0.encloses(range) }) else { continue }
                 markers.append(.init(range: range, unit: unit))

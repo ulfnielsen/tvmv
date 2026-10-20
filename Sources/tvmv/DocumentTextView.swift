@@ -48,6 +48,14 @@ final class DocumentTextView: NSTextView {
     /// One grid per table in `layout.tables`, in order.
     private(set) var tableGrids: [TableGridView] = []
     private var tableHeights: [Int: CGFloat] = [:]
+    /// Review margin: cards beside their anchors when the margin is wide
+    /// enough, otherwise markers that open a card in a popover.
+    var reviewCards: [ReviewCardView] = []
+    var reviewMarkers: [NSButton] = []
+    var reviewPopover: NSPopover?
+    var reviewModels: [ReviewCards.Model] = []
+    var reviewMarginIsWide: Bool?
+    var layingOutReview = false
     private var layingOutGrids = false
     /// True from a text change until it has been handled: caret moves an
     /// edit causes don't end a reveal.
@@ -238,6 +246,7 @@ final class DocumentTextView: NSTextView {
         // soft break doesn't, so re-lay the whole paragraph from its start.
         relayParagraphs(touching: range)
         layoutGrids()
+        layoutReviewMargin()
     }
 
     /// Invalidate layout from the start of every top-level paragraph that
@@ -284,7 +293,7 @@ final class DocumentTextView: NSTextView {
         layoutColumn()
         if textContainer?.size.width != column { restyleImages { _ in true } }   // they scale with the column
         // Tables follow the column: its width, and its centring beyond the measure.
-        if newSize.width != oldWidth { layoutGrids() }
+        if newSize.width != oldWidth { layoutGrids(); layoutReviewMargin() }
         if newSize.width > 0, let sized = onSized {
             onSized = nil
             sized()
@@ -1085,6 +1094,7 @@ final class DocumentTextView: NSTextView {
             guard let view else { return }
             view.typingAttributes = view.theme.base
             view.selectionChanged()
+            view.updateReviewFocus()
         }
 
         func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,

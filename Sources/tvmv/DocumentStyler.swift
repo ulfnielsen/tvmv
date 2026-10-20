@@ -65,9 +65,6 @@ enum DocumentStyler {
                     storage.addAttributes([.foregroundColor: theme.reviewDelete, .strikethroughStyle: line], range: r)
                 case .substitutionOld:
                     storage.addAttributes([.foregroundColor: theme.reviewDelete, .strikethroughStyle: line], range: r)
-                    // A thin gap before the new text (the "~>" between them hides).
-                    let last = NSRange(location: NSMaxRange(run.range) - 1, length: 1)
-                    if let k = clip(last) { storage.addAttribute(.kern, value: theme.body.pointSize * 0.3, range: k) }
                 case .pointMarker:
                     // A clear "[" holding the room the view draws the marker in;
                     // revealed, it is just text again.
@@ -76,7 +73,14 @@ enum DocumentStyler {
                         storage.addAttributes([.foregroundColor: NSColor.clear,
                                                .kern: theme.body.pointSize * 0.25], range: r)
                     }
-                case .delimiter, .ref, .definition:
+                case .delimiter:
+                    // The '>' of "~>": the gap between old and new, unless revealed.
+                    let unit = layout.markers.first { NSMaxRange($0.range) == run.range.location }?.unit ?? run.range
+                    if !isRevealed(unit) {
+                        storage.addAttributes([.foregroundColor: NSColor.clear,
+                                               .font: NSFont.systemFont(ofSize: theme.body.pointSize * 0.5)], range: r)
+                    }
+                case .ref, .definition:
                     break
                 }
             }

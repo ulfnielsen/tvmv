@@ -43,7 +43,8 @@ final class ReviewLayoutTests: XCTestCase {
         XCTAssertEqual(styled(text, .substitutionOld), ["was"])
         XCTAssertEqual(styled(text, .substitutionNew), ["is"])
         XCTAssertEqual(Array(hidden(text).prefix(9)),
-                       ["{++", "++}", "[^rv-a1b2]", "{--", "--}", "[^rv-c3d4]", "{~~", "~>", "~~}"])
+                       ["{++", "++}", "[^rv-a1b2]", "{--", "--}", "[^rv-c3d4]", "{~~", "~", "~~}"])
+        XCTAssertEqual(styled(text, .delimiter), [">"], "the '>' stays as the gap between old and new")
     }
 
     func testAPointCommentKeepsOneCharacterForItsMarker() {

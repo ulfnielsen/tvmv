@@ -54,9 +54,12 @@ final class ReviewViewTests: XCTestCase {
         XCTAssertNotNil(attribute(.strikethroughStyle, of: "was"))
         XCTAssertNil(attribute(.underlineStyle, of: "was"))
         XCTAssertNotNil(attribute(.underlineStyle, of: "is~~"))
-        XCTAssertGreaterThan(view.textStorage!.attribute(.kern, at: ns.range(of: "was").location + 2,
-                                                        effectiveRange: nil) as? CGFloat ?? 0, 0,
-                             "a gap between the old and the new text")
+        // The gap between old and new is the clear '>' of "~>", neither struck nor underlined.
+        let gap = ns.range(of: "~>").location + 1
+        XCTAssertFalse(glyphHidden(gap))
+        XCTAssertEqual(view.textStorage!.attribute(.foregroundColor, at: gap, effectiveRange: nil) as? NSColor, .clear)
+        XCTAssertNil(view.textStorage!.attribute(.strikethroughStyle, at: gap, effectiveRange: nil))
+        XCTAssertNil(view.textStorage!.attribute(.underlineStyle, at: gap, effectiveRange: nil))
         XCTAssertEqual(attribute(.tvmvReview, of: "cache") as? String, "rv-a1b2")
     }
 

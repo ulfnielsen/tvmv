@@ -48,3 +48,4 @@
 - Task 1: complete — ReviewLayoutTests 8/8 (RED: no .review style), property test with review tokens (coverage checked), perf gates pass; suite 81 app / 188 core.
 - Task 2: complete — ReviewViewTests 5/5 (RED: missing theme/attr; marker pixel test RED then GREEN; tolerance loosened for color-profile shift); suite 86 app / 188 core.
 - Task 3: complete — ReviewViewTests 11/11 (RED: missing API); Ruling: undo test uses view.undo(nil), the menu path (documentUndo direct while read-only can't edit) — cost if wrong: none, menu path is what users hit.
+- Task 4: complete — ReviewCardTests 7/7 (RED: missing API; popover test needs window on screen — Ruling: orderFront in that test, cost if wrong: none); visual check found strike running into the old/new gap → '>' kept as clear carrier (tests RED→GREEN); suite 99 app / 188 core.
