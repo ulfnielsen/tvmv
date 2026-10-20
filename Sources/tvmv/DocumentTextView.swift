@@ -56,6 +56,9 @@ final class DocumentTextView: NSTextView {
     var reviewModels: [ReviewCards.Model] = []
     var reviewMarginIsWide: Bool?
     var layingOutReview = false
+    /// The comment or suggestion being written (⌘⇧M, ⌘⇧E).
+    var reviewComposer: ReviewComposerView?
+    var reviewComposerPopover: NSPopover?
     private var layingOutGrids = false
     /// True from a text change until it has been handled: caret moves an
     /// edit causes don't end a reveal.

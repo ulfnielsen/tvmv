@@ -92,6 +92,18 @@ final class NativeDocumentController {
     func bold() { textView?.toggleBold(nil) }
     func italic() { textView?.toggleItalic(nil) }
 
+    func review(_ command: ReviewCommand) {
+        guard let view = textView else { return }
+        switch command {
+        case .comment: view.addReviewComment(nil)
+        case .suggest: view.suggestReviewEdit(nil)
+        case .nextThread: view.nextReviewThread(nil)
+        case .previousThread: view.previousReviewThread(nil)
+        case .acceptAll: view.acceptAllSuggestions(nil)
+        case .rejectAll: view.rejectAllSuggestions(nil)
+        }
+    }
+
     enum LinkTarget: Equatable {
         /// `#slug`: a heading in this document.
         case anchor(String)

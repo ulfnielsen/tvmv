@@ -117,4 +117,19 @@ final class NativeDocumentViewTests: XCTestCase {
         view.layoutManager!.ensureLayout(for: view.textContainer!)
         XCTAssertEqual(controller.topVisibleOffset(), target, accuracy: 2)
     }
+
+    func testReviewMenuCommandsReachTheTextView() {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1400, height: 400),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let (scroll, view) = NativeDocumentView.makeScrollView(theme: theme)
+        scroll.frame = window.contentView!.bounds
+        window.contentView!.addSubview(scroll)
+        let controller = NativeDocumentController()
+        controller.attach(view)
+        view.load("A {++b++}[^rv-a1b2] c.\n\n[^rv-a1b2]: @ulf 2026-10-14 suggestion: x\n")
+        controller.review(.nextThread)
+        XCTAssertEqual(view.selectedRange().location, (view.string as NSString).range(of: "b++").location)
+        controller.review(.acceptAll)
+        XCTAssertEqual(view.string, "A b c.\n")
+    }
 }

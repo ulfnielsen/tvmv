@@ -112,4 +112,90 @@ final class ReviewCardTests: XCTestCase {
         view.setSelectedRange(NSRange(location: 0, length: 0))
         XCTAssertTrue(view.reviewCards.allSatisfy { !$0.isFocused })
     }
+
+    // MARK: Creating and navigating
+
+    /// Type into a field as a person would: into its live editor when it has one.
+    private func type(_ text: String, into field: NSTextField) {
+        if let editor = field.currentEditor() as? NSTextView { editor.string = text } else { field.stringValue = text }
+    }
+
+    func testCommentComposerAddsACommentOnTheSelection() {
+        makeView(width: 1500)
+        window.orderFront(nil)
+        view.load("The cache is cold.\n")
+        view.isEditable = false
+        view.setSelectedRange(ns.range(of: "cache"))
+        view.addReviewComment(nil)
+        let composer = view.reviewComposer!
+        XCTAssertEqual(view.reviewComposerPopover?.isShown, true)
+        XCTAssertNil(composer.replacementField, "a comment has no replacement")
+        type("Why?", into: composer.bodyField)
+        composer.submit()
+        XCTAssertTrue(view.string.hasPrefix("The {==cache==}[^rv-"))
+        XCTAssertTrue(view.string.contains(": Why?\n"))
+        XCTAssertNotEqual(view.reviewComposerPopover?.isShown, true)
+    }
+
+    func testSuggestionComposerStartsFromTheSelectedText() {
+        makeView(width: 1500)
+        window.orderFront(nil)
+        view.load("The cache is cold.\n")
+        view.setSelectedRange(ns.range(of: "cold"))
+        view.suggestReviewEdit(nil)
+        let composer = view.reviewComposer!
+        XCTAssertEqual(composer.replacementField?.stringValue, "cold")
+        // Leaving the field (Tab to the note) doesn't submit.
+        window.makeFirstResponder(composer.bodyField)
+        window.makeFirstResponder(nil)
+        XCTAssertEqual(view.string, "The cache is cold.\n")
+        type("warm", into: composer.replacementField!)
+        composer.submit()
+        XCTAssertTrue(view.string.hasPrefix("The cache is {~~cold~>warm~~}[^rv-"))
+    }
+
+    func testAComposerThatCannotPlaceItsCommentSaysSo() {
+        makeView(width: 1500)
+        window.orderFront(nil)
+        view.load("One.\n\nTwo.\n")
+        view.setSelectedRange(NSRange(location: 0, length: ns.length))
+        view.addReviewComment(nil)
+        type("x", into: view.reviewComposer!.bodyField)
+        view.reviewComposer!.submit()
+        XCTAssertEqual(view.string, "One.\n\nTwo.\n")
+        XCTAssertFalse(view.reviewComposer!.messageLabel.stringValue.isEmpty)
+    }
+
+    func testNextAndPreviousThreadMoveTheCaret() {
+        makeView(width: 1500)
+        view.load(Self.doc)
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        view.nextReviewThread(nil)
+        XCTAssertEqual(view.selectedRange().location, ns.range(of: "cache").location)
+        view.nextReviewThread(nil)
+        XCTAssertEqual(view.selectedRange().location, ns.range(of: "cold").location)
+        view.previousReviewThread(nil)
+        XCTAssertEqual(view.selectedRange().location, ns.range(of: "cache").location)
+        XCTAssertEqual(view.reviewCards.filter(\.isFocused).map(\.id), ["rv-a1b2"])
+    }
+
+    func testAcceptAllSettlesSuggestionsOnly() {
+        makeView(width: 1500)
+        view.load(Self.doc)
+        view.acceptAllSuggestions(nil)
+        XCTAssertTrue(view.string.contains("is warm today."))
+        XCTAssertTrue(view.string.contains("rv-a1b2"), "comments stay")
+    }
+
+    func testLeavingAReplyFieldDoesNotSendIt() {
+        makeView(width: 1500)
+        view.load(Self.doc)
+        let field = view.reviewCards[0].replyField
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(field)
+        XCTAssertNotNil(field.currentEditor(), "editing, as when typed into")
+        type("half a tho", into: field)
+        window.makeFirstResponder(view)
+        XCTAssertFalse(view.string.contains("half a tho"))
+    }
 }

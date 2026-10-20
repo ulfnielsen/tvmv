@@ -18,6 +18,8 @@ struct ViewerCommands {
     var showMarkdown: () -> Void
     var bold: () -> Void
     var italic: () -> Void
+    /// The Review menu: comment, suggest, move between threads, settle all.
+    var review: (ReviewCommand) -> Void
     /// Enables ⌘S: there are unsaved edits and a file to write to.
     var canSave: Bool
     /// Enables ⌘E: the document has a file URL to save back to.
@@ -25,6 +27,8 @@ struct ViewerCommands {
     /// Enables ⌘B/⌘I, which write markup into the text.
     var isEditing: Bool
 }
+
+enum ReviewCommand { case comment, suggest, nextThread, previousThread, acceptAll, rejectAll }
 
 struct ViewerCommandsKey: FocusedValueKey {
     typealias Value = ViewerCommands
@@ -110,6 +114,27 @@ struct ViewerMenuCommands: Commands {
             Button("Show Markdown") { commands?.showMarkdown() }
                 .keyboardShortcut("m", modifiers: [.command, .option])
                 .disabled(commands == nil)
+        }
+        CommandMenu("Review") {
+            // Commenting works while reading; it needs a file to save to.
+            Button("Comment…") { commands?.review(.comment) }
+                .keyboardShortcut("m", modifiers: [.command, .shift])
+                .disabled(commands?.canEdit != true)
+            Button("Suggest Edit…") { commands?.review(.suggest) }
+                .keyboardShortcut("e", modifiers: [.command, .shift])
+                .disabled(commands?.canEdit != true)
+            Divider()
+            Button("Next Thread") { commands?.review(.nextThread) }
+                .keyboardShortcut(.downArrow, modifiers: [.command, .option])
+                .disabled(commands == nil)
+            Button("Previous Thread") { commands?.review(.previousThread) }
+                .keyboardShortcut(.upArrow, modifiers: [.command, .option])
+                .disabled(commands == nil)
+            Divider()
+            Button("Accept All Suggestions") { commands?.review(.acceptAll) }
+                .disabled(commands?.canEdit != true)
+            Button("Reject All Suggestions") { commands?.review(.rejectAll) }
+                .disabled(commands?.canEdit != true)
         }
         CommandGroup(replacing: .printItem) {
             Button("Print…") { commands?.printDocument() }

@@ -227,3 +227,70 @@ extension DocumentTextView {
         for card in reviewCards { card.isFocused = card.id == id }
     }
 }
+
+// MARK: Commands
+
+extension DocumentTextView {
+    @objc func addReviewComment(_ sender: Any?) { openComposer(suggestion: false) }
+    @objc func suggestReviewEdit(_ sender: Any?) { openComposer(suggestion: true) }
+    @objc func nextReviewThread(_ sender: Any?) { moveToThread(forward: true) }
+    @objc func previousReviewThread(_ sender: Any?) { moveToThread(forward: false) }
+    @objc func acceptAllSuggestions(_ sender: Any?) { if !settleAll(accepting: true) { NSSound.beep() } }
+    @objc func rejectAllSuggestions(_ sender: Any?) { if !settleAll(accepting: false) { NSSound.beep() } }
+
+    private var author: String { ReviewAuthor.current(for: documentURL?.deletingLastPathComponent()) }
+
+    private func openComposer(suggestion: Bool) {
+        guard !isCell else { return }
+        let selection = selectedRange()
+        let composer = ReviewComposerView(
+            suggestion: suggestion ? (string as NSString).substring(with: selection) : nil)
+        composer.onSubmit = { [weak self] body, replacement in
+            guard let self else { return false }
+            self.setSelectedRange(selection)
+            let id = replacement.map {
+                self.addSuggestion(replacement: $0, body: body, author: self.author)
+            } ?? self.addComment(body: body, author: self.author)
+            if id != nil { self.reviewComposerPopover?.close() }
+            return id != nil
+        }
+        composer.onCancel = { [weak self] in self?.reviewComposerPopover?.close() }
+        let controller = NSViewController()
+        controller.view = composer
+        let popover = NSPopover()
+        popover.animates = false
+        popover.contentViewController = controller
+        popover.contentSize = composer.frame.size
+        popover.behavior = .transient
+        reviewComposerPopover?.close()
+        reviewComposer = composer
+        reviewComposerPopover = popover
+        popover.show(relativeTo: selectionRect(selection), of: self, preferredEdge: .maxY)
+        window?.makeFirstResponder(composer.replacementField ?? composer.bodyField)
+    }
+
+    /// Where the selection is drawn, in view coordinates (its first line).
+    private func selectionRect(_ selection: NSRange) -> NSRect {
+        guard let lm = layoutManager, let tc = textContainer else { return bounds }
+        let glyphs = lm.glyphRange(forCharacterRange: NSRange(location: selection.location, length: max(1, selection.length)),
+                                   actualCharacterRange: nil)
+        var line = NSRange()
+        lm.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: &line)
+        let rect = lm.boundingRect(forGlyphRange: NSIntersectionRange(glyphs, line).length > 0
+                                   ? NSIntersectionRange(glyphs, line) : glyphs, in: tc)
+        return rect.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+    }
+
+    /// Put the caret at the next (previous) thread's anchor, wrapping around.
+    private func moveToThread(forward: Bool) {
+        let anchors = (layout.review.map(ReviewCards.models) ?? [])
+            .filter { $0.kind != .orphanThread }.map(\.anchor)
+        guard !anchors.isEmpty else { NSSound.beep(); return }
+        let caret = selectedRange().location
+        let target = forward
+            ? anchors.first { $0 > caret } ?? anchors[0]
+            : anchors.last { $0 < caret } ?? anchors[anchors.count - 1]
+        setSelectedRange(NSRange(location: target, length: 0))
+        scrollRangeToVisible(NSRange(location: target, length: 0))
+    }
+}

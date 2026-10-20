@@ -201,3 +201,86 @@ final class ClosureButton: NSButton {
 
     @objc private func fire(_ sender: Any?) { handler() }
 }
+
+/// The popover for a new comment or suggestion: a replacement field for a
+/// suggestion (starting from the selected text), a note, and Add.
+@MainActor
+final class ReviewComposerView: NSView {
+    let bodyField = NSTextField()
+    let replacementField: NSTextField?
+    let messageLabel = NSTextField(labelWithString: "")
+    /// Returns false when the comment can't be placed (the label then says why).
+    var onSubmit: ((_ body: String, _ replacement: String?) -> Bool)?
+    var onCancel: (() -> Void)?
+
+    init(suggestion: String?) {
+        replacementField = suggestion.map { NSTextField(string: $0) }
+        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 10))
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 8
+        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
+        let title = NSTextField(labelWithString: suggestion == nil ? "Comment" : "Suggest Edit")
+        title.font = .systemFont(ofSize: 13, weight: .semibold)
+        stack.addArrangedSubview(title)
+        if let replacementField {
+            replacementField.placeholderString = "Replace with (empty deletes)"
+            stack.addArrangedSubview(replacementField)
+            replacementField.widthAnchor.constraint(equalToConstant: 292).isActive = true
+        }
+        bodyField.placeholderString = suggestion == nil ? "Comment" : "Note (optional)"
+        bodyField.target = self
+        bodyField.action = #selector(enter(_:))
+        replacementField?.target = self
+        replacementField?.action = #selector(enter(_:))
+        // Return submits; leaving a field (Tab to the next) must not.
+        for field in [bodyField, replacementField].compactMap({ $0 }) {
+            (field.cell as? NSTextFieldCell)?.sendsActionOnEndEditing = false
+        }
+        stack.addArrangedSubview(bodyField)
+        bodyField.widthAnchor.constraint(equalToConstant: 292).isActive = true
+        messageLabel.textColor = .systemRed
+        messageLabel.font = .systemFont(ofSize: 11)
+        messageLabel.isHidden = true
+        stack.addArrangedSubview(messageLabel)
+        let buttons = NSStackView()
+        buttons.orientation = .horizontal
+        let cancel = ClosureButton(title: "Cancel") { [weak self] in self?.onCancel?() }
+        cancel.keyEquivalent = "\u{1b}"
+        let add = ClosureButton(title: "Add") { [weak self] in self?.submit() }
+        add.keyEquivalent = "\r"
+        buttons.addArrangedSubview(cancel)
+        buttons.addArrangedSubview(add)
+        stack.addArrangedSubview(buttons)
+        addSubview(stack)
+        let size = stack.fittingSize
+        stack.frame = NSRect(origin: .zero, size: size)
+        setFrameSize(size)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+    @objc private func enter(_ sender: Any?) { submit() }
+
+    private var submitted = false
+
+    /// A field's text as typed (its live editor's, while it is being edited).
+    private static func text(of field: NSTextField) -> String {
+        (field.currentEditor() as? NSTextView)?.string ?? field.stringValue
+    }
+
+    /// Add the comment, once.
+    func submit() {
+        guard !submitted else { return }
+        let body = Self.text(of: bodyField).trimmingCharacters(in: .whitespacesAndNewlines)
+        let replacement = replacementField.map(Self.text(of:))
+        if replacementField == nil, body.isEmpty { return }
+        if onSubmit?(body, replacement) == true {
+            submitted = true
+        } else {
+            messageLabel.stringValue = "Select text within one paragraph, outside code and other comments."
+            messageLabel.isHidden = false
+        }
+    }
+}

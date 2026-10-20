@@ -127,6 +127,7 @@ struct ViewerWindow: View {
             showMarkdown: { native.toggleShowMarkdown() },
             bold: { native.bold() },
             italic: { native.italic() },
+            review: { native.review($0) },
             canSave: (model.isDirty || model.isEditing) && fileURL != nil,
             canEdit: fileURL != nil,
             isEditing: model.isEditing
