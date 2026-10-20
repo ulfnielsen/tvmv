@@ -349,4 +349,54 @@ final class ReviewCardTests: XCTestCase {
         view.addReviewComment(nil)
         XCTAssertEqual(view.reviewComposer!.frame.minY, lineTop(of: "Last"), accuracy: 1)
     }
+
+    func testCardsAtTheEndStayInsideTheDocument() {
+        makeView(width: 1500)
+        // Comments on the last line: their cards hang below the text.
+        var text = String(repeating: "Body paragraph.\n\n", count: 30) + "End {==a==}[^rv-a1b2] {==b==}[^rv-c3d4].\n\n"
+        text += "[^rv-a1b2]: @ulf 2026-10-14: One.\n[^rv-c3d4]: @ulf 2026-10-14: Two, with a longer note that wraps over lines.\n"
+        view.load(text)
+        let scroll = view.enclosingScrollView!
+        // Scrolled so the compact last card just shows at the bottom of the window.
+        let compact = view.reviewCards[1].frame
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: compact.maxY - scroll.contentSize.height))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        view.setSelectedRange(NSRange(location: ns.range(of: "b==").location, length: 0))
+        let focused = view.reviewCards[1]
+        XCTAssertTrue(focused.isFocused)
+        XCTAssertGreaterThan(focused.frame.height, compact.height, "it grew with its actions")
+        XCTAssertGreaterThanOrEqual(view.frame.height, focused.frame.maxY, "the document holds it")
+        XCTAssertTrue(scroll.documentVisibleRect.insetBy(dx: 0, dy: -1).contains(focused.frame),
+                      "the focused card scrolled into view: \(focused.frame) in \(scroll.documentVisibleRect)")
+    }
+
+    func testAFocusedCardNearTheWindowBottomScrollsIntoView() {
+        makeView(width: 1500)
+        var text = String(repeating: "Body paragraph.\n\n", count: 60) + "Here {==a==}[^rv-a1b2] is one.\n\n"
+        text += String(repeating: "Tail paragraph.\n\n", count: 30)
+        text += "[^rv-a1b2]: @ulf 2026-10-14: A note long enough to wrap onto a second line in the card.\n"
+        view.load(text)
+        let scroll = view.enclosingScrollView!
+        // The anchor's line just inside the bottom of the window.
+        let line = lineTop(of: "a==")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: line + 30 - scroll.contentSize.height))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        view.setSelectedRange(NSRange(location: ns.range(of: "a==").location, length: 0))
+        let card = view.reviewCards[0]
+        XCTAssertTrue(card.isFocused)
+        XCTAssertTrue(scroll.documentVisibleRect.insetBy(dx: 0, dy: -1).contains(card.frame),
+                      "\(card.frame) in \(scroll.documentVisibleRect)")
+    }
+
+    func testAComposerThatGrowsKeepsTheColumnLaidOut() {
+        makeView(width: 1500)
+        window.orderFront(nil)
+        view.load("One.\n\nTwo.\n")
+        view.setSelectedRange(NSRange(location: 0, length: ns.length))
+        view.addReviewComment(nil)
+        let composer = view.reviewComposer!
+        type("x", into: composer.bodyField)
+        composer.submit()   // refused: the message makes it taller
+        XCTAssertGreaterThanOrEqual(view.frame.height, composer.frame.maxY + view.textContainerInset.height - 1)
+    }
 }

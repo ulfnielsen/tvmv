@@ -280,6 +280,14 @@ extension DocumentTextView {
         focusedReviewID = id
         for card in reviewCards { card.isFocused = card.id == id }
         layoutReviewMargin()
+        revealFocusedCard()
+    }
+
+    /// A focused card grows by its actions; near the bottom of the window
+    /// that would be out of sight, so scroll just enough to show it.
+    private func revealFocusedCard() {
+        guard let card = reviewCards.first(where: \.isFocused) else { return }
+        scrollToVisible(card.frame)
     }
 
     private func perform(_ action: ReviewCardView.Action, on id: String) {
@@ -303,7 +311,10 @@ extension DocumentTextView {
         focusedReviewID = id
         let before = reviewCards.map(\.isFocused)
         for card in reviewCards { card.isFocused = card.id == id }
-        if reviewCards.map(\.isFocused) != before { layoutReviewMargin() }
+        if reviewCards.map(\.isFocused) != before {
+            layoutReviewMargin()
+            revealFocusedCard()
+        }
     }
 }
 
@@ -350,6 +361,7 @@ extension DocumentTextView {
             return nil
         }
         composer.onCancel = { [weak self] in self?.closeComposer() }
+        composer.onResize = { [weak self] in self?.layoutReviewMargin() }
         reviewComposer = composer
         addSubview(composer)
         layoutReviewMargin()

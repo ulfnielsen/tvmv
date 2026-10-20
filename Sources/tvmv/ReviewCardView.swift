@@ -246,6 +246,8 @@ final class ReviewComposerView: NSView {
     /// Returns nil once added, or why it couldn't be (shown in the label).
     var onSubmit: ((_ body: String, _ replacement: String?) -> String?)?
     var onCancel: (() -> Void)?
+    /// Its height changed (a message appeared): the column lays out again.
+    var onResize: (() -> Void)?
 
     private let stack = NSStackView()
     private var fieldWidths: [NSLayoutConstraint] = []
@@ -316,7 +318,9 @@ final class ReviewComposerView: NSView {
         messageLabel.preferredMaxLayoutWidth = inner
         let height = stack.fittingSize.height
         stack.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        let resized = frame.height != height
         setFrameSize(NSSize(width: width, height: height))
+        if resized { onResize?() }
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
