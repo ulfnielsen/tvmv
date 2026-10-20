@@ -146,4 +146,31 @@ final class ListQuoteTests: XCTestCase {
         view.load("- [x] done\n- [ ] open\n")
         XCTAssertEqual(x(ns.range(of: "done").location), x(ns.range(of: "open").location), accuracy: 0.5)
     }
+
+    /// Count pixels differing from the paper in `rect` when only `rect` is
+    /// redrawn — what scrolling does, a thin strip at a time.
+    private func inkInStrip(_ rect: NSRect) -> Int {
+        let rep = view.bitmapImageRepForCachingDisplay(in: rect)!
+        view.cacheDisplay(in: rect, to: rep)
+        let paper = view.theme.paper.usingColorSpace(.deviceRGB)!
+        var ink = 0
+        for x in 0..<rep.pixelsWide { for y in 0..<rep.pixelsHigh {
+            guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+            if abs(c.redComponent - paper.redComponent) + abs(c.greenComponent - paper.greenComponent)
+                + abs(c.blueComponent - paper.blueComponent) > 0.3 { ink += 1 }
+        } }
+        return ink
+    }
+
+    func testABulletIsDrawnWhenOnlyItsLineIsRedrawn() {
+        // Reported: bullets vanished while scrolling. Scrolling redraws a strip;
+        // an item whose "*" sits on the line before must still get its bullet.
+        view.load("Intro.\n\n- *one* a\n- *two* b\n- plain c\n")
+        view.layoutManager!.ensureLayout(for: view.textContainer!)
+        for item in view.layout.listItems {
+            let anchor = view.bulletAnchor(for: item)!
+            let strip = NSRect(x: 0, y: anchor.y - em, width: anchor.x, height: em * 1.2)
+            XCTAssertGreaterThan(inkInStrip(strip), 0, "bullet at \(anchor) drawn in a strip redraw")
+        }
+    }
 }

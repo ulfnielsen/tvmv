@@ -287,4 +287,44 @@ final class DocumentImageTests: XCTestCase {
         XCTAssertFalse(view.pasteImage(from: pasteboard(png: 10, 10)), "an unsaved document has no folder")
         XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("images").path))
     }
+
+    func testAnImageIsDrawnWhenOnlyAStripOfItIsRedrawn() throws {
+        // Reported: images vanished while scrolling, which redraws strips.
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 200, pixelsHigh: 300, bitsPerSample: 8,
+                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                   bytesPerRow: 0, bitsPerPixel: 0)!
+        for x in 0..<200 { for y in 0..<300 { rep.setColor(NSColor(deviceRed: 1, green: 0, blue: 0, alpha: 1), atX: x, y: y) } }
+        try rep.representation(using: .png, properties: [:])!.write(to: folder.appendingPathComponent("red.png"))
+        for text in ["Intro.\n\n![red](red.png)\n\nAfter.\n", "![red](red.png)\n", "# *Title*\n\n![red](red.png)\n",
+                     "- *a*\n\n![red](red.png)\n", "Text **bold**\n\n![red](red.png)\n\n![red](red.png)\n",
+                     "```\ncode\n```\n\n![red](red.png)\n", "| a |\n|---|\n| b |\n\n![red](red.png)\n"] {
+        view.load(text)
+        pump { view.imageState(for: "red.png") == .loaded }
+        view.layoutManager!.ensureLayout(for: view.textContainer!)
+        // Find the picture in a full redraw, then redraw strips inside it.
+        let column = view.textContainerOrigin.x + view.textContainer!.lineFragmentPadding + 50
+        let rows = redRows(in: view.bounds, column: column)
+        XCTAssertFalse(rows.isEmpty, "image drawn in a full redraw of «\(text)»")
+        guard let first = rows.first else { continue }
+        // The first picture only: stop at the first gap.
+        let last = zip(rows, rows.dropFirst()).first { $1 - $0 > 1 }?.0 ?? rows.last!
+        for y in stride(from: first + 4, to: last - 4, by: 50) {
+            let strip = NSRect(x: 0, y: y, width: view.bounds.width, height: 8)
+            let red = redRows(in: strip, column: column).count
+            XCTAssertGreaterThan(red, 0, "image drawn in a strip at \(y) in «\(text)»")
+        }
+        }
+    }
+
+    /// The view-y of each row whose pixel at `column` is red, when only `rect` is redrawn.
+    private func redRows(in rect: NSRect, column: CGFloat) -> [CGFloat] {
+        let bitmap = view.bitmapImageRepForCachingDisplay(in: rect)!
+        view.cacheDisplay(in: rect, to: bitmap)
+        let scale = CGFloat(bitmap.pixelsHigh) / rect.height
+        return (0..<bitmap.pixelsHigh).compactMap { y in
+            guard let c = bitmap.colorAt(x: Int((column - rect.minX) * scale), y: y)?.usingColorSpace(.deviceRGB),
+                  c.redComponent > 0.8, c.greenComponent < 0.3 else { return nil }
+            return rect.minY + CGFloat(y) / scale
+        }
+    }
 }

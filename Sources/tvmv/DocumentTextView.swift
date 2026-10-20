@@ -995,10 +995,13 @@ final class DocumentTextView: NSTextView {
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
-        guard let lm = layoutManager, let tc = textContainer else { return }
-        let visible = lm.characterRange(
+        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage else { return }
+        // Whole source lines: hidden glyphs at a line's start (a list marker,
+        // an image's source) sit on the fragment before, so a strip redrawn
+        // while scrolling may hold only the line's visible rest or newline.
+        let visible = (storage.string as NSString).lineRange(for: lm.characterRange(
             forGlyphRange: lm.glyphRange(forBoundingRect: rect.offsetBy(dx: -textContainerOrigin.x, dy: -textContainerOrigin.y), in: tc),
-            actualGlyphRange: nil)
+            actualGlyphRange: nil))
         theme.paperDeep.setFill()
         for block in layout.codeBlocks where NSIntersectionRange(block.range, visible).length > 0 && block.body.length > 0 {
             let glyphs = lm.glyphRange(forCharacterRange: block.body, actualCharacterRange: nil)
