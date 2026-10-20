@@ -24,6 +24,12 @@
 #   xcrun notarytool store-credentials tvmv-notary \
 #       --key <AuthKey_XXXXXXXXXX.p8> --key-id <KEYID> --issuer <ISSUER-UUID>
 #
+# Or skip the keychain (non-interactive shells, remote sessions, CI) by
+# pointing at the App Store Connect API key directly:
+#
+#   TVMV_NOTARY_KEY=<path to AuthKey_XXXXXXXXXX.p8> TVMV_NOTARY_KEY_ID=<KEYID> \
+#   TVMV_NOTARY_ISSUER=<ISSUER-UUID> fish build/release.fish ...
+#
 # Notarization requires network access and normally takes 1-5 minutes per
 # submission; there are two per release (the app, then the disk image).
 
@@ -80,12 +86,19 @@ end
 # so it catches a revoked or mistyped key BEFORE we run tests and a full build.
 set -l notary_profile tvmv-notary
 set -q TVMV_NOTARY_PROFILE; and set notary_profile $TVMV_NOTARY_PROFILE
-echo "==> checking notary credentials (profile: $notary_profile)"
-if not xcrun notarytool history --keychain-profile $notary_profile >/dev/null 2>&1
-    echo "error: notarytool profile '$notary_profile' is missing or invalid." >&2
-    echo "  create it with:" >&2
+set -l notary_auth --keychain-profile $notary_profile
+set -l notary_source "profile: $notary_profile"
+if set -q TVMV_NOTARY_KEY; and set -q TVMV_NOTARY_KEY_ID; and set -q TVMV_NOTARY_ISSUER
+    set notary_auth --key $TVMV_NOTARY_KEY --key-id $TVMV_NOTARY_KEY_ID --issuer $TVMV_NOTARY_ISSUER
+    set notary_source "API key $TVMV_NOTARY_KEY_ID"
+end
+echo "==> checking notary credentials ($notary_source)"
+if not xcrun notarytool history $notary_auth >/dev/null 2>&1
+    echo "error: notary credentials ($notary_source) are missing or invalid." >&2
+    echo "  create a keychain profile with:" >&2
     echo "    xcrun notarytool store-credentials $notary_profile \\" >&2
     echo "        --key <AuthKey_XXXXXXXXXX.p8> --key-id <KEYID> --issuer <ISSUER-UUID>" >&2
+    echo "  or set TVMV_NOTARY_KEY, TVMV_NOTARY_KEY_ID and TVMV_NOTARY_ISSUER." >&2
     exit 1
 end
 echo "    credentials OK"
@@ -106,11 +119,11 @@ end
 # hangs the release with no diagnosis. Two hours is generous: submissions are
 # usually minutes, but 90 minutes has been observed with no incident reported
 # on Apple's status page, so a short timeout would abort perfectly good runs.
-function tvmv_notarize --inherit-variable notary_profile
+function tvmv_notarize --inherit-variable notary_auth
     set -l target $argv[1]
     set -l out (mktemp)
     echo "==> notarizing "(path basename $target)" — usually minutes, occasionally over an hour"
-    xcrun notarytool submit $target --keychain-profile $notary_profile \
+    xcrun notarytool submit $target $notary_auth \
         --wait --timeout 2h 2>&1 | tee $out
     if grep -q 'status: Accepted' $out
         echo "    notarization accepted"
@@ -120,13 +133,13 @@ function tvmv_notarize --inherit-variable notary_profile
     if grep -qi 'timed out\|timeout' $out
         echo "error: notarization timed out after 2h for "(path basename $target)"." >&2
         echo "  The submission may still complete — check with:" >&2
-        echo "    xcrun notarytool history --keychain-profile $notary_profile" >&2
+        echo "    xcrun notarytool history $notary_auth" >&2
     end
     echo "error: notarization failed for "(path basename $target) >&2
     set -l sid (grep -oE '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}' $out | head -n1)
     if test -n "$sid"
         echo "==> notary log for submission $sid:" >&2
-        xcrun notarytool log $sid --keychain-profile $notary_profile >&2
+        xcrun notarytool log $sid $notary_auth >&2
     end
     rm -f $out
     return 1
