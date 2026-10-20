@@ -1,5 +1,6 @@
 import XCTest
 import AppKit
+import ImageIO
 import TVMVCore
 @testable import tvmv
 
@@ -151,5 +152,47 @@ final class DocumentImageTests: XCTestCase {
         XCTAssertEqual(whole?.count, size)
         let capped = await DocumentTextView.download(url, limit: size - 1)
         XCTAssertNil(capped)
+    }
+
+    /// A two-frame TIFF: a small first frame and a large second one.
+    private func writeTwoFrameTIFF(_ path: String) throws {
+        func frame(_ side: Int) -> CGImage {
+            let ctx = CGContext(data: nil, width: side, height: side, bitsPerComponent: 8, bytesPerRow: 0,
+                                space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+            return ctx.makeImage()!
+        }
+        let url = folder.appendingPathComponent(path) as CFURL
+        let dest = CGImageDestinationCreateWithURL(url, "public.tiff" as CFString, 2, nil)!
+        CGImageDestinationAddImage(dest, frame(10), nil)
+        CGImageDestinationAddImage(dest, frame(300), nil)
+        XCTAssertTrue(CGImageDestinationFinalize(dest))
+    }
+
+    private func loadAndWait(_ markdown: String, _ address: String) -> DocumentTextView.ImageState? {
+        view.load(markdown)
+        pump { [.loaded, .failed].contains(view.imageState(for: address)) }
+        return view.imageState(for: address)
+    }
+
+    func testEveryFrameCountsTowardThePixelLimit() throws {
+        // Security review: only the first frame was checked.
+        try writeTwoFrameTIFF("frames.tiff")
+        view.maxImagePixels = 10_000      // frame 1: 100 px, frame 2: 90,000 px
+        XCTAssertEqual(loadAndWait("![f](frames.tiff)\n", "frames.tiff"), .failed)
+    }
+
+    func testVectorImagesAreHeldToTheSameLimit() throws {
+        // Security review: an image ImageIO couldn't measure fell through to
+        // NSImage unchecked. A small SVG (e.g. a README badge) still loads.
+        let svg = { (side: Int) in
+            "<svg xmlns='http://www.w3.org/2000/svg' width='\(side)' height='\(side)'><rect width='10' height='10'/></svg>"
+        }
+        try svg(20).write(to: folder.appendingPathComponent("badge.svg"), atomically: true, encoding: .utf8)
+        try svg(5000).write(to: folder.appendingPathComponent("huge.svg"), atomically: true, encoding: .utf8)
+        try "not an image at all".write(to: folder.appendingPathComponent("junk.png"), atomically: true, encoding: .utf8)
+        view.maxImagePixels = 10_000
+        XCTAssertEqual(loadAndWait("![b](badge.svg)\n", "badge.svg"), .loaded)
+        XCTAssertEqual(loadAndWait("![h](huge.svg)\n", "huge.svg"), .failed)
+        XCTAssertEqual(loadAndWait("![j](junk.png)\n", "junk.png"), .failed)
     }
 }

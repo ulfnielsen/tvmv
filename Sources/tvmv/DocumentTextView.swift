@@ -376,16 +376,33 @@ final class DocumentTextView: NSTextView {
         return data
     }
 
-    /// Decode, refusing images whose pixel count would be a memory bomb.
+    /// Decode within `maxImagePixels`, failing closed:
+    /// - a raster image must report dimensions for every frame, and all its
+    ///   frames together must fit the limit (NSImage loads them all);
+    /// - an image ImageIO can't measure loads only if it is purely vector
+    ///   (SVG, PDF) and its declared size fits the same limit;
+    /// - anything else is refused.
     private func decode(_ data: Data) -> NSImage? {
-        if let source = CGImageSourceCreateWithData(data as CFData, nil),
-           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
-           let width = properties[kCGImagePropertyPixelWidth] as? Int,
-           let height = properties[kCGImagePropertyPixelHeight] as? Int,
-           width.multipliedReportingOverflow(by: height).overflow || width * height > maxImagePixels {
-            return nil
+        if let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0,
+           CGImageSourceGetType(source) != nil {
+            var total = 0
+            for index in 0..<CGImageSourceGetCount(source) {
+                guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
+                      let width = properties[kCGImagePropertyPixelWidth] as? Int,
+                      let height = properties[kCGImagePropertyPixelHeight] as? Int
+                else { return nil }
+                let (pixels, overflow) = width.multipliedReportingOverflow(by: height)
+                guard !overflow else { return nil }
+                total += pixels
+                if total > maxImagePixels { return nil }
+            }
+            return NSImage(data: data)
         }
-        return NSImage(data: data)
+        guard let picture = NSImage(data: data), !picture.representations.isEmpty,
+              picture.representations.allSatisfy({ !($0 is NSBitmapImageRep) }),
+              picture.size.width * picture.size.height <= CGFloat(maxImagePixels)
+        else { return nil }
+        return picture
     }
 
     /// The size a loaded block image is drawn at: its own size, scaled down
