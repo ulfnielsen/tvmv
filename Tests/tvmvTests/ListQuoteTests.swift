@@ -1,0 +1,106 @@
+import XCTest
+import AppKit
+import TVMVCore
+@testable import tvmv
+
+@MainActor
+final class ListQuoteTests: XCTestCase {
+    private var window: NSWindow!
+    private var view: DocumentTextView!
+
+    override func setUp() async throws {
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 700),
+                          styleMask: [.titled], backing: .buffered, defer: false)
+        let scroll = NSScrollView(frame: window.contentView!.bounds)
+        view = DocumentTextView.make()
+        view.frame = NSRect(origin: .zero, size: scroll.contentSize)
+        view.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: .greatestFiniteMagnitude)
+        scroll.documentView = view
+        window.contentView!.addSubview(scroll)
+    }
+
+    private func pump() { RunLoop.main.run(until: Date().addingTimeInterval(0.05)) }
+    private var ns: NSString { view.string as NSString }
+    private var em: CGFloat { view.theme.body.pointSize }
+
+    private func glyphHidden(_ index: Int) -> Bool {
+        let lm = view.layoutManager!
+        lm.ensureLayout(for: view.textContainer!)
+        return lm.propertyForGlyph(at: lm.glyphIndexForCharacter(at: index)).contains(.null)
+    }
+
+    private func paragraphStyle(at index: Int) -> NSParagraphStyle? {
+        view.textStorage!.attribute(.paragraphStyle, at: index, effectiveRange: nil) as? NSParagraphStyle
+    }
+
+    func testBulletMarkersHideAndItemsHangByLevel() {
+        view.load("- one\n  - nested\n- two\n")
+        XCTAssertTrue(glyphHidden(0), "the '-' hides")
+        XCTAssertTrue(glyphHidden(1))
+        XCTAssertFalse(glyphHidden(2), "the text shows")
+        let top = paragraphStyle(at: 2), nested = paragraphStyle(at: ns.range(of: "nested").location)
+        XCTAssertEqual(top?.firstLineHeadIndent ?? 0, DocumentStyler.listIndent(level: 0, em: em), accuracy: 0.5)
+        XCTAssertEqual(top?.headIndent ?? 0, DocumentStyler.listIndent(level: 0, em: em), accuracy: 0.5)
+        XCTAssertEqual(nested?.firstLineHeadIndent ?? 0, DocumentStyler.listIndent(level: 1, em: em), accuracy: 0.5)
+        XCTAssertTrue(glyphHidden(ns.range(of: "  - nested").location), "nested indentation hides too")
+    }
+
+    func testQuotePrefixesHideAndIndent() {
+        view.load("> quoted\n>> deeper\n\nplain\n")
+        XCTAssertTrue(glyphHidden(0))
+        XCTAssertFalse(glyphHidden(2))
+        XCTAssertEqual(paragraphStyle(at: 2)?.firstLineHeadIndent ?? 0, DocumentStyler.quoteIndent(level: 1, em: em), accuracy: 0.5)
+        let deeper = ns.range(of: "deeper").location
+        XCTAssertEqual(paragraphStyle(at: deeper)?.firstLineHeadIndent ?? 0, DocumentStyler.quoteIndent(level: 2, em: em), accuracy: 0.5)
+    }
+
+    func testCheckboxesToggleEvenWhileReadingAndUndo() {
+        view.load("- [ ] todo\n- [x] done\n")
+        XCTAssertFalse(view.isEditable)
+        view.toggleTask(0)
+        pump()
+        XCTAssertEqual(view.string, "- [x] todo\n- [x] done\n")
+        XCTAssertFalse(view.isEditable, "still reading")
+        view.toggleTask(1)
+        pump()
+        XCTAssertEqual(view.string, "- [x] todo\n- [ ] done\n")
+        XCTAssertTrue(view.tryToPerform(Selector(("undo:")), with: nil))   // Edit ▸ Undo, still reading
+        pump()
+        XCTAssertEqual(view.string, "- [x] todo\n- [x] done\n")
+    }
+
+    func testClickingAChecklistBoxFindsItsItem() {
+        view.load("Intro.\n\n- [ ] todo\n")
+        let lm = view.layoutManager!
+        lm.ensureLayout(for: view.textContainer!)
+        let text = ns.range(of: "todo").location
+        let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: text), effectiveRange: nil)
+        let box = view.taskBoxRect(for: view.layout.listItems[0])!
+        XCTAssertEqual(view.taskItem(at: NSPoint(x: box.midX, y: box.midY)), 0)
+        XCTAssertNil(view.taskItem(at: NSPoint(x: box.maxX + 40, y: fragment.midY + view.textContainerOrigin.y)))
+    }
+
+    func testReturnContinuesListsAndQuotes() {
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        for (text, expected) in [("- a\n", "- a\n- \n"), ("3) x\n", "3) x\n4) \n"), ("- [x] t\n", "- [x] t\n- [ ] \n"),
+                                 ("  - n\n", "  - n\n  - \n"), ("> q\n", "> q\n> \n")] {
+            view.load(text)
+            view.setSelectedRange(NSRange(location: (text as NSString).length - 1, length: 0))
+            view.insertNewline(nil)
+            pump()
+            XCTAssertEqual(view.string, expected, "Return in «\(text)»")
+            XCTAssertEqual(view.selectedRange().location, (expected as NSString).length - 1, "caret after the new marker")
+        }
+    }
+
+    func testReturnOnAnEmptyItemEndsTheList() {
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load("- a\n- \n")
+        view.setSelectedRange(NSRange(location: 6, length: 0))
+        view.insertNewline(nil)
+        pump()
+        XCTAssertEqual(view.string, "- a\n\n")
+    }
+}

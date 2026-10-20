@@ -358,6 +358,10 @@ final class DocumentTextView: NSTextView {
     // MARK: Events
 
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 1, let task = taskItem(at: convert(event.locationInWindow, from: nil)) {
+            toggleTask(task)
+            return
+        }
         if event.clickCount == 1, !isEditable || event.modifierFlags.contains(.command),
            let url = link(at: convert(event.locationInWindow, from: nil)) {
             onFollowLink?(url)
@@ -374,6 +378,129 @@ final class DocumentTextView: NSTextView {
         let index = lm.characterIndex(for: p, in: tc, fractionOfDistanceBetweenInsertionPoints: &fraction)
         guard index < storage.length else { return nil }
         return storage.attribute(.tvmvLink, at: index, effectiveRange: nil) as? String
+    }
+
+    // MARK: Lists and quotes
+
+    /// Where a list item's text starts on screen (its line fragment and the
+    /// x of the text), or nil if not laid out.
+    private func listItemGeometry(_ item: MarkdownLayout.ListItem) -> (fragment: NSRect, baseline: CGFloat, textX: CGFloat)? {
+        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage,
+              NSMaxRange(item.marker) <= storage.length else { return nil }
+        let content = min(NSMaxRange(item.marker), max(0, storage.length - 1))
+        let glyph = lm.glyphIndexForCharacter(at: content)
+        let fragment = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let style = storage.attribute(.paragraphStyle, at: content, effectiveRange: nil) as? NSParagraphStyle
+        let textX = textContainerOrigin.x + tc.lineFragmentPadding + (style?.firstLineHeadIndent ?? 0)
+        let baseline = fragment.minY + textContainerOrigin.y + lm.location(forGlyphAt: glyph).y
+        return (fragment, baseline, textX)
+    }
+
+    /// The clickable checkbox of a task item, in view coordinates.
+    func taskBoxRect(for item: MarkdownLayout.ListItem) -> NSRect? {
+        guard item.task != nil, let g = listItemGeometry(item) else { return nil }
+        let side = theme.body.pointSize * 0.8
+        return NSRect(x: g.textX - side - theme.body.pointSize * 0.45, y: g.baseline - side * 0.95, width: side, height: side)
+    }
+
+    /// The task item whose checkbox is at `point` (with a little slack), if any.
+    func taskItem(at point: NSPoint) -> Int? {
+        layout.listItems.indices.first { i in
+            !(showAllMarkup || revealedUnits.contains(layout.listItems[i].marker))
+                && taskBoxRect(for: layout.listItems[i])?.insetBy(dx: -4, dy: -4).contains(point) == true
+        }
+    }
+
+    /// Check or uncheck a task item — allowed while reading too.
+    func toggleTask(_ index: Int) {
+        guard index < layout.listItems.count, let task = layout.listItems[index].task,
+              let box = layout.listItems[index].checkbox else { return }
+        let wasEditable = isEditable
+        isEditable = true
+        replace(box, with: task ? "[ ]" : "[x]")
+        isEditable = wasEditable
+    }
+
+    /// Return on a list item's first line or a quoted line: continue it with
+    /// the same prefix (the next number; an unchecked box), or end it when
+    /// the line is empty. False if the caret is on neither.
+    private func continueListOrQuote() -> Bool {
+        guard isEditable, let storage = textStorage, selectedRange().length == 0 else { return false }
+        let text = storage.string as NSString
+        let caret = selectedRange().location
+        let line = text.lineRange(for: NSRange(location: caret, length: 0))
+        var lineEnd = NSMaxRange(line)
+        if lineEnd > line.location, text.character(at: lineEnd - 1) == 10 { lineEnd -= 1 }
+        let quote = layout.quoteLines.first { NSLocationInRange($0.prefix.location, line) }
+        let item = layout.listItems.first { NSLocationInRange($0.marker.location, line) }
+        guard item != nil || quote != nil else { return false }
+        let prefixEnd = item.map { NSMaxRange($0.marker) } ?? NSMaxRange(quote!.prefix)
+        guard caret >= prefixEnd else { return false }
+        let content = text.substring(with: NSRange(location: prefixEnd, length: max(0, lineEnd - prefixEnd)))
+        if content.trimmingCharacters(in: .whitespaces).isEmpty {
+            let start = quote?.prefix.location ?? item!.marker.location
+            if replace(NSRange(location: start, length: prefixEnd - start), with: "") {
+                setSelectedRange(NSRange(location: start, length: 0))
+            }
+            return true
+        }
+        var next = quote.map { text.substring(with: $0.prefix) } ?? ""
+        if let item {
+            next += text.substring(with: NSRange(location: item.marker.location, length: item.bullet.location - item.marker.location))
+            var bullet = text.substring(with: item.bullet)
+            if item.ordered, let delimiter = bullet.last, let n = Int(bullet.dropLast()) { bullet = "\(n + 1)\(delimiter)" }
+            next += bullet + " " + (item.task != nil ? "[ ] " : "")
+        }
+        if replace(NSRange(location: caret, length: 0), with: "\n" + next) {
+            setSelectedRange(NSRange(location: caret + 1 + (next as NSString).length, length: 0))
+        }
+        return true
+    }
+
+    /// Bullets, numbers, checkboxes and quote rules, in the indent the styler left.
+    private func drawListsAndQuotes(visible: NSRange) {
+        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage else { return }
+        let em = theme.body.pointSize
+        for quote in layout.quoteLines where NSLocationInRange(quote.prefix.location, visible)
+            && NSMaxRange(quote.prefix) <= storage.length && !(showAllMarkup || revealedUnits.contains(quote.prefix)) {
+            let at = min(NSMaxRange(quote.prefix), max(0, storage.length - 1))
+            let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: at), effectiveRange: nil)
+            theme.muted.withAlphaComponent(0.45).setFill()
+            for k in 0..<quote.level {
+                NSRect(x: textContainerOrigin.x + tc.lineFragmentPadding + CGFloat(k) * 1.2 * em + 0.2 * em,
+                       y: fragment.minY + textContainerOrigin.y, width: 3, height: fragment.height).fill()
+            }
+        }
+        for item in layout.listItems where NSLocationInRange(item.marker.location, visible)
+            && !(showAllMarkup || revealedUnits.contains(item.marker)) {
+            guard let g = listItemGeometry(item) else { continue }
+            if let task = item.task, let box = taskBoxRect(for: item) {
+                let path = NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3)
+                if task {
+                    theme.accent.setFill(); path.fill()
+                    let check = NSBezierPath()
+                    check.move(to: NSPoint(x: box.minX + box.width * 0.22, y: box.midY))
+                    check.line(to: NSPoint(x: box.minX + box.width * 0.42, y: box.maxY - box.height * 0.25))
+                    check.line(to: NSPoint(x: box.maxX - box.width * 0.2, y: box.minY + box.height * 0.25))
+                    check.lineWidth = 1.6
+                    theme.paper.setStroke(); check.stroke()
+                } else {
+                    path.lineWidth = 1.2
+                    theme.muted.setStroke(); path.stroke()
+                }
+                continue
+            }
+            let label: String
+            if item.ordered {
+                label = (storage.string as NSString).substring(with: item.bullet)
+            } else {
+                label = ["•", "◦", "▪"][min(item.level, 2)]
+            }
+            let attributes: [NSAttributedString.Key: Any] = [.font: theme.body, .foregroundColor: theme.muted]
+            let size = (label as NSString).size(withAttributes: attributes)
+            (label as NSString).draw(at: NSPoint(x: g.textX - size.width - 0.45 * em, y: g.baseline - theme.body.ascender),
+                                     withAttributes: attributes)
+        }
     }
 
     // MARK: Tables
@@ -639,11 +766,22 @@ final class DocumentTextView: NSTextView {
 
     /// undo:/redo: travelling up the responder chain would reach the window,
     /// which uses its own undo manager. Answer them here, from this view's stack.
+    /// Undo and redo work while reading too (a checkbox toggles while
+    /// reading); the text view would otherwise refuse the change.
     @objc func undo(_ sender: Any?) {
-        if let document = cellHost?.document { document.undo(sender) } else { documentUndo.undo() }
+        if let document = cellHost?.document { document.undo(sender); return }
+        whileEditable { documentUndo.undo() }
     }
     @objc func redo(_ sender: Any?) {
-        if let document = cellHost?.document { document.redo(sender) } else { documentUndo.redo() }
+        if let document = cellHost?.document { document.redo(sender); return }
+        whileEditable { documentUndo.redo() }
+    }
+
+    private func whileEditable(_ body: () -> Void) {
+        let was = isEditable
+        isEditable = true
+        body()
+        isEditable = was
     }
 
     override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
@@ -667,6 +805,7 @@ final class DocumentTextView: NSTextView {
     /// Elsewhere (code, lists, quotes, tables) it stays a plain newline.
     override func insertNewline(_ sender: Any?) {
         if let host = cellHost { host.move(from: self, .down); return }
+        if continueListOrQuote() { return }
         guard isEditable, ["paragraph", "heading"].contains(blockKindAtCaret() ?? "") else {
             super.insertNewline(sender)
             return
@@ -781,6 +920,7 @@ final class DocumentTextView: NSTextView {
             }
         }
         drawImages(visible: visible)
+        drawListsAndQuotes(visible: visible)
     }
 
     // MARK: Delegates

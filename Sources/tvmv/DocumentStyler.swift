@@ -3,6 +3,11 @@ import TVMVCore
 
 /// Applies a `MarkdownLayout` to a text storage, limited to one range.
 enum DocumentStyler {
+    /// Where a list item's text starts at nesting `level`; its bullet sits in the em before.
+    static func listIndent(level: Int, em: CGFloat) -> CGFloat { CGFloat(level + 1) * 1.6 * em }
+    /// Where quoted text starts at quote depth `level`; one rule per level sits to its left.
+    static func quoteIndent(level: Int, em: CGFloat) -> CGFloat { CGFloat(level) * 1.2 * em }
+
     /// - Parameter isRevealed: whether a reveal unit's markup is currently shown.
     /// - Parameter imageHeight: the height a block image is drawn at, once
     ///   loaded (nil while loading or after a failure: a normal text line).
@@ -119,6 +124,33 @@ enum DocumentStyler {
                 storage.addAttributes([.font: NSFont.systemFont(ofSize: 0.1),
                                        .paragraphStyle: NativeTheme.collapsedParagraph], range: r)
             }
+        }
+        // Quotes and lists: the prefix and marker hide; the line indents (the
+        // view draws the rule, bullet, number or checkbox in the space).
+        let em = theme.body.pointSize
+        func indent(line: NSRange, by amount: CGFloat) {
+            guard let r = clip(line) else { return }
+            let current = (storage.attribute(.paragraphStyle, at: r.location, effectiveRange: nil) as? NSParagraphStyle)
+                ?? theme.paragraphStyle
+            let p = current.mutableCopy() as! NSMutableParagraphStyle
+            p.firstLineHeadIndent = amount
+            p.headIndent = amount
+            storage.addAttribute(.paragraphStyle, value: p, range: r)
+        }
+        let quoteLevelByLine = Dictionary(layout.quoteLines.map {
+            (tableText.lineRange(for: NSRange(location: $0.prefix.location, length: 0)).location, $0.level)
+        }, uniquingKeysWith: max)
+        for quote in layout.quoteLines {
+            let line = tableText.lineRange(for: NSRange(location: quote.prefix.location, length: 0))
+            if !isRevealed(quote.prefix), let r = clip(quote.prefix) { storage.addAttribute(.tvmvHidden, value: true, range: r) }
+            if let r = clip(line) { storage.addAttribute(.foregroundColor, value: theme.inkSoft, range: r) }
+            indent(line: line, by: quoteIndent(level: quote.level, em: em))
+        }
+        for item in layout.listItems {
+            let line = tableText.lineRange(for: NSRange(location: item.marker.location, length: 0))
+            if !isRevealed(item.marker), let r = clip(item.marker) { storage.addAttribute(.tvmvHidden, value: true, range: r) }
+            let quoted = quoteIndent(level: quoteLevelByLine[line.location] ?? 0, em: em)
+            indent(line: line, by: quoted + listIndent(level: item.level, em: em))
         }
         for exempt in layout.spellExempt {
             if let r = clip(exempt) { storage.addAttribute(.tvmvNoSpell, value: true, range: r) }

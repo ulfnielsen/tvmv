@@ -174,4 +174,18 @@ final class MarkdownLayoutParserTests: XCTestCase {
         XCTAssertEqual(lines.map { ns.substring(with: $0.prefix) }, ["> ", "> ", ">> "])
         XCTAssertEqual(lines.map(\.level), [1, 1, 2])
     }
+
+    func testDeeplyNestedQuotesAndListsParseQuickly() {
+        // Security review: each quote walked its whole parent chain, so a
+        // line of N ">" cost O(N²) — and the walk recursed N deep.
+        for text in [String(repeating: ">", count: 20_000) + " x\n",
+                     String(repeating: "- ", count: 20_000) + "x\n",
+                     String(repeating: "*a ", count: 20_000) + "x" + String(repeating: " a*", count: 20_000) + "\n",
+                     String(repeating: "[", count: 20_000) + "x" + String(repeating: "](u)", count: 20_000) + "\n"] {
+            let start = Date()
+            let layout = MarkdownLayoutParser.parse(text)
+            XCTAssertLessThan(Date().timeIntervalSince(start), 2.0)
+            XCTAssertEqual(layout.length, (text as NSString).length)
+        }
+    }
 }

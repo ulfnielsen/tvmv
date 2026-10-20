@@ -39,15 +39,6 @@ enum CMark {
         return out
     }
 
-    static func isInsideQuote(_ node: CMarkNode) -> Bool {
-        var parent = cmark_node_parent(node)
-        while let p = parent {
-            if type(p) == "block_quote" { return true }
-            parent = cmark_node_parent(p)
-        }
-        return false
-    }
-
     static func literal(_ node: CMarkNode) -> String {
         cmark_node_get_literal(node).map { String(cString: $0) } ?? ""
     }
@@ -86,6 +77,10 @@ public enum MarkdownLayoutParser {
 /// blocks, so they only make reference links resolve), and a sentinel just
 /// before it. Offsets convert back to document offsets via `adjust`.
 struct LayoutBuilder {
+    /// Deeper nesting than this is left unstyled (shown as typed): the walks
+    /// below recurse, and a document can nest thousands deep (">>>>…").
+    static let maxDepth = 64
+
     let ns: NSString
     let map: SourceMap
     /// Document offset = source offset + adjust.
@@ -127,7 +122,7 @@ struct LayoutBuilder {
                 let limit = i + 1 < blocks.count ? (localRange(blocks[i + 1])?.location ?? ns.length) : ns.length
                 r.length = min(r.length, max(0, limit - r.location))
                 if recordBlocks {
-                    recordContainers(block, level: 0)
+                    recordContainers(block, level: 0, depth: 0, inQuote: false)
                     layout.blocks.append(.init(range: docRange(r), kind: CMark.type(block)))
                     if CMark.type(block) == "table" { recordTable(r) }
                     if CMark.type(block) == "paragraph" {
@@ -135,7 +130,7 @@ struct LayoutBuilder {
                         recordBlockImage(block)
                     }
                 }
-                visitBlock(block, limit: limit)
+                visitBlock(block, limit: limit, depth: 0)
             }
         }
         layout.styles.removeAll { $0.range.length == 0 }
@@ -169,16 +164,19 @@ struct LayoutBuilder {
     }
 
     /// Lists (with their nesting level) and quotes, anywhere in the block tree.
-    mutating func recordContainers(_ node: CMarkNode, level: Int) {
+    mutating func recordContainers(_ node: CMarkNode, level: Int, depth: Int, inQuote: Bool) {
+        guard depth < Self.maxDepth else { return }
         switch CMark.type(node) {
         case "list":
             let ordered = cmark_node_get_list_type(node) == CMARK_ORDERED_LIST
             for item in CMark.children(node) {
                 recordListItem(item, level: level, ordered: ordered)
-                for child in CMark.children(item) { recordContainers(child, level: level + 1) }
+                for child in CMark.children(item) {
+                    recordContainers(child, level: level + 1, depth: depth + 2, inQuote: inQuote)
+                }
             }
         case "block_quote":
-            if let r = localRange(node), !CMark.isInsideQuote(node) {
+            if let r = localRange(node), !inQuote {   // the outermost quote records every line
                 var start = r.location
                 while start < NSMaxRange(r) {
                     let line = lineRange(at: start)
@@ -190,9 +188,9 @@ struct LayoutBuilder {
                     start = NSMaxRange(line)
                 }
             }
-            for child in CMark.children(node) { recordContainers(child, level: level) }
+            for child in CMark.children(node) { recordContainers(child, level: level, depth: depth + 1, inQuote: true) }
         default:
-            for child in CMark.children(node) { recordContainers(child, level: level) }
+            for child in CMark.children(node) { recordContainers(child, level: level, depth: depth + 1, inQuote: inQuote) }
         }
     }
 
@@ -336,8 +334,8 @@ struct LayoutBuilder {
     /// `limit` is where the next sibling block starts. cmark's end position
     /// is wrong for blocks containing a hard line break, so every block range
     /// is clamped to it.
-    mutating func visitBlock(_ node: CMarkNode, limit: Int) {
-        guard var r = localRange(node) else { return }
+    mutating func visitBlock(_ node: CMarkNode, limit: Int, depth: Int) {
+        guard depth < Self.maxDepth, var r = localRange(node) else { return }
         r.length = min(r.length, max(0, limit - r.location))
         switch CMark.type(node) {
         case "heading":
@@ -353,7 +351,7 @@ struct LayoutBuilder {
             let children = CMark.children(node)
             for (i, child) in children.enumerated() {
                 let next = i + 1 < children.count ? (localRange(children[i + 1])?.location ?? limit) : limit
-                visitBlock(child, limit: min(next, limit))
+                visitBlock(child, limit: min(next, limit), depth: depth + 1)
             }
         }
     }
@@ -397,11 +395,12 @@ struct LayoutBuilder {
 
     static let closingHashes = try! NSRegularExpression(pattern: #"[ \t]+#+[ \t]*$"#)
 
-    static func plainText(_ node: CMarkNode) -> String {
+    static func plainText(_ node: CMarkNode, depth: Int = 0) -> String {
+        guard depth < maxDepth else { return "" }
         switch CMark.type(node) {
         case "text", "code": return CMark.literal(node)
         case "softbreak", "linebreak": return " "
-        default: return CMark.children(node).map(plainText).joined()
+        default: return CMark.children(node).map { plainText($0, depth: depth + 1) }.joined()
         }
     }
 
@@ -463,8 +462,9 @@ struct LayoutBuilder {
         }
     }
 
-    static func containsHardBreak(_ node: CMarkNode) -> Bool {
-        CMark.children(node).contains { CMark.type($0) == "linebreak" || containsHardBreak($0) }
+    static func containsHardBreak(_ node: CMarkNode, depth: Int = 0) -> Bool {
+        guard depth < maxDepth else { return false }
+        return CMark.children(node).contains { CMark.type($0) == "linebreak" || containsHardBreak($0, depth: depth + 1) }
     }
 
     /// Parse one hard-break segment as its own document. The "." sentinel
@@ -488,10 +488,11 @@ struct LayoutBuilder {
 
     /// Visit one inline node; returns its end offset in the parsed text (or nil).
     @discardableResult
-    mutating func visitInline(_ node: CMarkNode) -> Int? {
+    mutating func visitInline(_ node: CMarkNode, depth: Int = 0) -> Int? {
+        guard depth < Self.maxDepth else { return nil }
         let kind = CMark.type(node)
         guard let r = localRange(node) else {
-            for child in CMark.children(node) { visitInline(child) }
+            for child in CMark.children(node) { visitInline(child, depth: depth + 1) }
             return nil
         }
         switch kind {
@@ -527,11 +528,11 @@ struct LayoutBuilder {
             } else {
                 layout.styles.append(.init(range: docRange(r), style: style))   // styled, nothing hidden
             }
-            for child in CMark.children(node) { visitInline(child) }
+            for child in CMark.children(node) { visitInline(child, depth: depth + 1) }
         case "code":
             visitCodeSpan(r)
         case "link":
-            visitLink(node, r)
+            visitLink(node, r, depth: depth)
         case "image":
             layout.styles.append(.init(range: docRange(r), style: .image))
             layout.spellExempt.append(docRange(r))
@@ -539,7 +540,7 @@ struct LayoutBuilder {
             layout.styles.append(.init(range: docRange(r), style: .html))
             layout.spellExempt.append(docRange(r))
         default:
-            for child in CMark.children(node) { visitInline(child) }
+            for child in CMark.children(node) { visitInline(child, depth: depth + 1) }
         }
         return NSMaxRange(r)
     }
@@ -588,7 +589,7 @@ struct LayoutBuilder {
         addMarker(NSRange(location: NSMaxRange(content), length: close - NSMaxRange(content)), unit: unit)
     }
 
-    mutating func visitLink(_ node: CMarkNode, _ raw: NSRange) {
+    mutating func visitLink(_ node: CMarkNode, _ raw: NSRange, depth: Int = 0) {
         let url = cmark_node_get_url(node).map { String(cString: $0) } ?? ""
         var r = raw
         let first = r.length > 0 ? ns.character(at: r.location) : 0
@@ -605,7 +606,7 @@ struct LayoutBuilder {
         case 91:   // "[" — inline or reference link
             var labelEnd = r.location + 1
             for child in CMark.children(node) {
-                if let end = visitInline(child) { labelEnd = max(labelEnd, end) }
+                if let end = visitInline(child, depth: depth + 1) { labelEnd = max(labelEnd, end) }
             }
             var close = labelEnd
             while close < NSMaxRange(r), ns.character(at: close) != 93 { close += 1 }   // "]"
