@@ -12,6 +12,9 @@ public struct MarkdownLayout: Equatable, Sendable {
         case codeBlock(language: String?)
         case html
         case image
+        /// Review markup: a commented range, one side of a suggestion, or the
+        /// character that carries a point comment's marker.
+        case review(role: ReviewMarkup.Span.Role, id: String)
     }
 
     public struct StyleRun: Equatable, Sendable {
@@ -68,6 +71,9 @@ public struct MarkdownLayout: Equatable, Sendable {
     public var listItems: [ListItem] = []
     /// Quoted lines: the "> " prefix hides and a rule is drawn.
     public var quoteLines: [QuoteLine] = []
+    /// The document's review markup, when it has any: anchors, threads and
+    /// problems for the margin cards. Its spans are folded into the arrays above.
+    public var review: ReviewMarkup.Review?
 
     public struct ListItem: Equatable, Sendable {
         /// Indentation, bullet, space and any "[ ] ": everything before the

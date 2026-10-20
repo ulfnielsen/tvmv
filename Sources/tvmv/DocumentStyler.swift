@@ -53,6 +53,8 @@ enum DocumentStyler {
                                        .underlineStyle: NSUnderlineStyle.single.rawValue], range: r)
             case .html, .image:
                 storage.addAttributes([.font: theme.mono, .foregroundColor: theme.muted], range: r)
+            case .review:
+                break
             }
         }
         // Blank lines (outside code) are the gap between blocks.

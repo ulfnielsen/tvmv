@@ -21,6 +21,10 @@ final class MarkdownLayoutPropertyTests: XCTestCase {
         "*", "**", "_", "`", "``", "```\n", "~~", "# ", "## ", "\n", "\n\n", "x", "word ", "[a](b)",
         "[r]", "[r]: http://z\n", "- ", "> ", "| a |", "\\\n", "  \n", "==\n", "<http://q>", "é", "😀",
         " ", "1. ", "<div>\n", " ##", "www.q.com ",
+        // Review markup: anchors, refs, threads, and their pieces alone.
+        "{==", "==}", "{~~", "~>", "~~}", "{++", "--}", "[^rv-a1b2]", "{==x==}[^rv-a1b2]",
+        "{~~a~>b~~}[^rv-c3d4]", "\n\n[^rv-a1b2]: @ulf 2026-10-14: *note*\n", "    @claude 2026-10-14: ok\n",
+        "\n\n[^rv-c3d4]: @ulf 2026-10-14 suggestion: x\n",
     ]
 
     func testRandomEditsKeepInvariantsAndDiffsSound() throws {
@@ -58,6 +62,13 @@ final class MarkdownLayoutPropertyTests: XCTestCase {
                                   file: StaticString = #filePath, line: UInt = #line) {
         let ns = text as NSString
         var claimed = IndexSet()
+        let review = layout.review.map { ReviewMarkup.spans($0) } ?? []
+        func isReviewSyntax(_ r: NSRange) -> Bool {
+            review.contains { span in
+                (span.isHidden || span.role == .pointMarker || span.role == .definition)
+                    && span.range.lowerBound <= r.location && NSMaxRange(r) <= span.range.upperBound
+            }
+        }
         for marker in layout.markers {
             XCTAssertTrue(NSMaxRange(marker.range) <= ns.length, "out of bounds: \(context)", file: file, line: line)
             XCTAssertTrue(marker.unit.encloses(marker.range), "marker outside its unit: \(context)", file: file, line: line)
@@ -67,7 +78,7 @@ final class MarkdownLayoutPropertyTests: XCTestCase {
                     || hiddenText.allSatisfy { "=-\n \t".contains($0) }
                 : hiddenText.allSatisfy { "*_`~#[]<> \t".contains($0) }
                     || hiddenText.hasPrefix("](") || hiddenText.hasPrefix("][")
-            XCTAssertTrue(isMarkup, "hides non-markup «\(hiddenText)»: \(context)", file: file, line: line)
+            XCTAssertTrue(isMarkup || isReviewSyntax(marker.range), "hides non-markup «\(hiddenText)»: \(context)", file: file, line: line)
             let span = marker.range.location..<NSMaxRange(marker.range)
             XCTAssertFalse(claimed.intersects(integersIn: span), "overlapping markers: \(context)", file: file, line: line)
             claimed.insert(integersIn: span)

@@ -55,6 +55,7 @@ public enum MarkdownLayoutParser {
         layout.length = ns.length
         let code = layout.codeBlocks.map(\.range)
         layout.definitions = all.filter { d in !code.contains { NSIntersectionRange($0, d.range).length > 0 } }
+        layout.fold(ReviewMarkup.parse(text))
         return layout
     }
 
