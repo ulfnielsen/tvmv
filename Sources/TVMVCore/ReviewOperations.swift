@@ -270,10 +270,20 @@ extension ReviewMarkup.Review {
         return false
     }
 
+    /// Whether the line holding offset `p` is blank. Markup written there
+    /// would fill the blank line and merge the blocks around it.
+    private func isOnBlankLine(_ p: Int) -> Bool {
+        var start = p, end = p
+        while start > 0, units[start - 1] != ReviewUnit.newline { start -= 1 }
+        while end < units.count, units[end] != ReviewUnit.newline { end += 1 }
+        return units[start..<end].allSatisfy(ReviewUnit.isBlank)
+    }
+
     /// Whether new delimiters can wrap `range`: one block, outside code spans,
     /// thread definitions and every existing anchor.
     private func isPlaceable(_ range: Range<Int>) -> Bool {
         if Self.hasBlankLine(Array(units[range])) { return false }
+        if isOnBlankLine(range.lowerBound) || isOnBlankLine(range.upperBound) { return false }
         if anchors.contains(where: { Self.touches(range, $0.range) }) { return false }
         if threads.contains(where: {
             Self.touches(range, $0.range) || range.lowerBound == $0.range.lowerBound
