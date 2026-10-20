@@ -121,6 +121,13 @@ public enum ReviewMarkup {
         public let anchors: [Anchor]
         public let threads: [Thread]
         public let problems: [Problem]
+        /// Fenced code and `$$` math blocks, from the opening line through the
+        /// closing one: markup inside is literal text.
+        public let literalBlocks: [Range<Int>]
+        /// Inline code spans outside anchors, backticks included.
+        public let literalSpans: [Range<Int>]
+        /// `text` as UTF-16, the unit every range counts in.
+        let units: [UInt16]
 
         /// Every `rv-` id in use, by an anchor or a definition.
         public var ids: Set<String> {
@@ -140,10 +147,13 @@ public enum ReviewMarkup {
     // MARK: Parse
 
     public static func parse(_ text: String) -> Review {
-        var parser = Parser(units: Array(text.utf16))
+        let units = Array(text.utf16)
+        var parser = Parser(units: units)
         parser.run()
         return Review(text: text, anchors: parser.anchors, threads: parser.threads,
-                      problems: parser.problems + crossCheck(parser.anchors, parser.threads))
+                      problems: parser.problems + crossCheck(parser.anchors, parser.threads),
+                      literalBlocks: parser.literalBlocks, literalSpans: parser.literalSpans,
+                      units: units)
     }
 
     /// Problems that need the whole document: orphans, dangling refs, mixed kinds.
@@ -170,7 +180,7 @@ public enum ReviewMarkup {
 
 /// UTF-16 code units the scanner looks for. Every delimiter is ASCII, so a
 /// match can never split a surrogate pair.
-private enum Unit {
+enum ReviewUnit {
     static let newline = UInt16(UInt8(ascii: "\n"))
     static let space = UInt16(UInt8(ascii: " "))
     static let tab = UInt16(UInt8(ascii: "\t"))
@@ -202,13 +212,15 @@ private struct Parser {
     var anchors: [ReviewMarkup.Anchor] = []
     var threads: [ReviewMarkup.Thread] = []
     var problems: [ReviewMarkup.Problem] = []
+    var literalBlocks: [Range<Int>] = []
+    var literalSpans: [Range<Int>] = []
     /// Lines as UTF-16 ranges, each excluding its "\n".
     private var lines: [Range<Int>] = []
 
     init(units: [UInt16]) {
         u = units
         var start = 0
-        for (index, unit) in units.enumerated() where unit == Unit.newline {
+        for (index, unit) in units.enumerated() where unit == ReviewUnit.newline {
             lines.append(start..<index)
             start = index + 1
         }
@@ -239,19 +251,21 @@ private struct Parser {
                 flush(&self)
                 index += 1
                 while index < lines.count, !isFenceCloser(lines[index], fence) { index += 1 }
+                literalBlocks.append(line.lowerBound..<lines[min(index, lines.count - 1)].upperBound)
                 index += 1
             } else if let afterOpen = mathOpener(line) {
                 flush(&self)
-                if !contains(Unit.dollar, Unit.dollar, in: afterOpen..<line.upperBound) {
+                if !contains(ReviewUnit.dollar, ReviewUnit.dollar, in: afterOpen..<line.upperBound) {
                     index += 1
                     while index < lines.count,
-                          !contains(Unit.dollar, Unit.dollar, in: lines[index]) { index += 1 }
+                          !contains(ReviewUnit.dollar, ReviewUnit.dollar, in: lines[index]) { index += 1 }
                 }
+                literalBlocks.append(line.lowerBound..<lines[min(index, lines.count - 1)].upperBound)
                 index += 1
             } else if let (id, afterColon) = definitionLabel(line) {
                 flush(&self)
                 index = parseThread(id: id, firstLine: index, afterColon: afterColon)
-            } else if line.allSatisfy({ Unit.isBlank(u[$0]) }) {
+            } else if line.allSatisfy({ ReviewUnit.isBlank(u[$0]) }) {
                 flush(&self)
                 index += 1
             } else {
@@ -266,19 +280,19 @@ private struct Parser {
     /// precede a fence or `$$` inside a quote or list item.
     private func skipContainerPrefix(_ line: Range<Int>) -> Int {
         var p = line.lowerBound
-        while p < line.upperBound, Unit.isBlank(u[p]) || u[p] == Unit.greater { p += 1 }
-        if p + 1 < line.upperBound, [Unit.hyphen, Unit.star, Unit.plus].contains(u[p]),
-           Unit.isBlank(u[p + 1]) {
+        while p < line.upperBound, ReviewUnit.isBlank(u[p]) || u[p] == ReviewUnit.greater { p += 1 }
+        if p + 1 < line.upperBound, [ReviewUnit.hyphen, ReviewUnit.star, ReviewUnit.plus].contains(u[p]),
+           ReviewUnit.isBlank(u[p + 1]) {
             p += 2
         } else {
             var q = p
-            while q < line.upperBound, Unit.isDigit(u[q]) { q += 1 }
-            if q > p, q + 1 < line.upperBound, u[q] == Unit.dot || u[q] == Unit.paren,
-               Unit.isBlank(u[q + 1]) {
+            while q < line.upperBound, ReviewUnit.isDigit(u[q]) { q += 1 }
+            if q > p, q + 1 < line.upperBound, u[q] == ReviewUnit.dot || u[q] == ReviewUnit.paren,
+               ReviewUnit.isBlank(u[q + 1]) {
                 p = q + 2
             }
         }
-        while p < line.upperBound, Unit.isBlank(u[p]) { p += 1 }
+        while p < line.upperBound, ReviewUnit.isBlank(u[p]) { p += 1 }
         return p
     }
 
@@ -290,28 +304,28 @@ private struct Parser {
 
     private func fenceOpener(_ line: Range<Int>) -> (unit: UInt16, count: Int)? {
         let p = skipContainerPrefix(line)
-        guard p < line.upperBound, u[p] == Unit.backtick || u[p] == Unit.tilde else { return nil }
+        guard p < line.upperBound, u[p] == ReviewUnit.backtick || u[p] == ReviewUnit.tilde else { return nil }
         let count = run(of: u[p], from: p, limit: line.upperBound)
         guard count >= 3 else { return nil }
         // A backtick fence's info string cannot contain a backtick.
-        if u[p] == Unit.backtick,
-           u[(p + count)..<line.upperBound].contains(Unit.backtick) { return nil }
+        if u[p] == ReviewUnit.backtick,
+           u[(p + count)..<line.upperBound].contains(ReviewUnit.backtick) { return nil }
         return (u[p], count)
     }
 
     private func isFenceCloser(_ line: Range<Int>, _ fence: (unit: UInt16, count: Int)) -> Bool {
         var p = line.lowerBound
-        while p < line.upperBound, Unit.isBlank(u[p]) || u[p] == Unit.greater { p += 1 }
+        while p < line.upperBound, ReviewUnit.isBlank(u[p]) || u[p] == ReviewUnit.greater { p += 1 }
         let count = run(of: fence.unit, from: p, limit: line.upperBound)
         guard count >= fence.count else { return false }
-        return u[(p + count)..<line.upperBound].allSatisfy(Unit.isBlank)
+        return u[(p + count)..<line.upperBound].allSatisfy(ReviewUnit.isBlank)
     }
 
     /// The offset after an opening `$$`, if the line starts a math block.
     private func mathOpener(_ line: Range<Int>) -> Int? {
         var p = line.lowerBound
-        while p < line.upperBound, Unit.isBlank(u[p]) || u[p] == Unit.greater { p += 1 }
-        guard p + 1 < line.upperBound, u[p] == Unit.dollar, u[p + 1] == Unit.dollar else { return nil }
+        while p < line.upperBound, ReviewUnit.isBlank(u[p]) || u[p] == ReviewUnit.greater { p += 1 }
+        guard p + 1 < line.upperBound, u[p] == ReviewUnit.dollar, u[p + 1] == ReviewUnit.dollar else { return nil }
         return p + 2
     }
 
@@ -325,9 +339,9 @@ private struct Parser {
     /// `[^rv-xxxx]:` at the start of a line (up to three spaces of indent).
     private func definitionLabel(_ line: Range<Int>) -> (String, Int)? {
         var p = line.lowerBound
-        while p < line.upperBound, p - line.lowerBound < 3, u[p] == Unit.space { p += 1 }
+        while p < line.upperBound, p - line.lowerBound < 3, u[p] == ReviewUnit.space { p += 1 }
         guard let (id, end) = ref(at: p, limit: line.upperBound),
-              end < line.upperBound, u[end] == Unit.colon else { return nil }
+              end < line.upperBound, u[end] == ReviewUnit.colon else { return nil }
         return (id, end + 1)
     }
 
@@ -351,16 +365,16 @@ private struct Parser {
 
         let first = lines[firstLine]
         var p = afterColon
-        while p < first.upperBound, Unit.isBlank(u[p]) { p += 1 }
+        while p < first.upperBound, ReviewUnit.isBlank(u[p]) { p += 1 }
         add(p..<first.upperBound, entryRange: p..<first.upperBound, self)
 
         var index = firstLine + 1
         while index < lines.count {
             let line = lines[index]
             var content = line.lowerBound
-            while content < line.upperBound, Unit.isBlank(u[content]) { content += 1 }
+            while content < line.upperBound, ReviewUnit.isBlank(u[content]) { content += 1 }
             guard content < line.upperBound else { break }             // blank line ends it
-            let indented = u[line.lowerBound] == Unit.tab
+            let indented = u[line.lowerBound] == ReviewUnit.tab
                 || content - line.lowerBound >= 4
             if entry(content..<line.upperBound, range: line) != nil {
                 add(content..<line.upperBound, entryRange: line, self)
@@ -389,8 +403,8 @@ private struct Parser {
 
     private func trimmed(_ range: Range<Int>) -> Range<Int> {
         var lower = range.lowerBound, upper = range.upperBound
-        while lower < upper, Unit.isBlank(u[lower]) { lower += 1 }
-        while upper > lower, Unit.isBlank(u[upper - 1]) { upper -= 1 }
+        while lower < upper, ReviewUnit.isBlank(u[lower]) { lower += 1 }
+        while upper > lower, ReviewUnit.isBlank(u[upper - 1]) { upper -= 1 }
         return lower..<upper
     }
 
@@ -398,11 +412,11 @@ private struct Parser {
     private func entry(_ content: Range<Int>, range: Range<Int>) -> ReviewMarkup.Entry? {
         var p = content.lowerBound
         let end = content.upperBound
-        guard p < end, u[p] == Unit.at else { return nil }
+        guard p < end, u[p] == ReviewUnit.at else { return nil }
         p += 1
         let authorStart = p
-        while p < end, !Unit.isBlank(u[p]) { p += 1 }
-        guard p > authorStart, p < end, u[p] == Unit.space else { return nil }
+        while p < end, !ReviewUnit.isBlank(u[p]) { p += 1 }
+        guard p > authorStart, p < end, u[p] == ReviewUnit.space else { return nil }
         let author = authorStart..<p
         p += 1
 
@@ -410,7 +424,7 @@ private struct Parser {
         let dateStart = p
         for expectDigit in [true, true, true, true, false, true, true, false, true, true] {
             guard p < end else { return nil }
-            if expectDigit ? !Unit.isDigit(u[p]) : u[p] != Unit.hyphen { return nil }
+            if expectDigit ? !ReviewUnit.isDigit(u[p]) : u[p] != ReviewUnit.hyphen { return nil }
             p += 1
         }
         let date = dateStart..<p
@@ -421,7 +435,7 @@ private struct Parser {
             kind = .suggestion
             p += marker.count
         }
-        guard p < end, u[p] == Unit.colon else { return nil }
+        guard p < end, u[p] == ReviewUnit.colon else { return nil }
         p += 1
         return ReviewMarkup.Entry(author: string(author), date: string(date), kind: kind,
                                   body: string(trimmed(p..<end)), range: range)
@@ -434,43 +448,43 @@ private struct Parser {
         let prefix: [UInt16] = Array("[^rv-".utf16)
         guard p + prefix.count < limit, Array(u[p..<(p + prefix.count)]) == prefix else { return nil }
         var q = p + prefix.count
-        while q < limit, Unit.isIDChar(u[q]) { q += 1 }
-        guard q > p + prefix.count, q < limit, u[q] == Unit.closeBracket else { return nil }
+        while q < limit, ReviewUnit.isIDChar(u[q]) { q += 1 }
+        guard q > p + prefix.count, q < limit, u[q] == ReviewUnit.closeBracket else { return nil }
         return (string((p + 2)..<q), q + 1)
     }
 
     private func kind(opener a: UInt16, _ b: UInt16) -> ReviewMarkup.AnchorKind? {
         guard a == b else { return nil }
         switch a {
-        case Unit.equals: return .highlight
-        case Unit.plus: return .insertion
-        case Unit.hyphen: return .deletion
-        case Unit.tilde: return .substitution
+        case ReviewUnit.equals: return .highlight
+        case ReviewUnit.plus: return .insertion
+        case ReviewUnit.hyphen: return .deletion
+        case ReviewUnit.tilde: return .substitution
         default: return nil
         }
     }
 
     private func delimiterUnit(_ kind: ReviewMarkup.AnchorKind) -> UInt16 {
         switch kind {
-        case .highlight: return Unit.equals
-        case .insertion: return Unit.plus
-        case .deletion: return Unit.hyphen
-        case .substitution, .point: return Unit.tilde
+        case .highlight: return ReviewUnit.equals
+        case .insertion: return ReviewUnit.plus
+        case .deletion: return ReviewUnit.hyphen
+        case .substitution, .point: return ReviewUnit.tilde
         }
     }
 
     private func isCloser(at p: Int, limit: Int) -> Bool {
-        p + 2 < limit && u[p + 2] == Unit.closeBrace && kind(opener: u[p], u[p + 1]) != nil
+        p + 2 < limit && u[p + 2] == ReviewUnit.closeBrace && kind(opener: u[p], u[p + 1]) != nil
     }
 
     /// If a code span opens at `p`, the offset after it closes.
     private func codeSpanEnd(at p: Int, limit: Int) -> Int? {
-        guard u[p] == Unit.backtick else { return nil }
-        let count = run(of: Unit.backtick, from: p, limit: limit)
+        guard u[p] == ReviewUnit.backtick else { return nil }
+        let count = run(of: ReviewUnit.backtick, from: p, limit: limit)
         var q = p + count
         while q < limit {
-            if u[q] == Unit.backtick {
-                let closing = run(of: Unit.backtick, from: q, limit: limit)
+            if u[q] == ReviewUnit.backtick {
+                let closing = run(of: ReviewUnit.backtick, from: q, limit: limit)
                 if closing == count { return q + closing }
                 q += closing
             } else {
@@ -487,7 +501,7 @@ private struct Parser {
         var q = start
         while q < limit {
             if let after = codeSpanEnd(at: q, limit: limit) { q = after; continue }
-            if q + 2 < limit, u[q] == unit, u[q + 1] == unit, u[q + 2] == Unit.closeBrace { return q }
+            if q + 2 < limit, u[q] == unit, u[q + 1] == unit, u[q + 2] == ReviewUnit.closeBrace { return q }
             q += 1
         }
         return nil
@@ -497,12 +511,16 @@ private struct Parser {
         let limit = block.upperBound
         var p = block.lowerBound
         while p < limit {
-            if u[p] == Unit.backtick {
-                p = codeSpanEnd(at: p, limit: limit)
-                    ?? p + run(of: Unit.backtick, from: p, limit: limit)
+            if u[p] == ReviewUnit.backtick {
+                if let end = codeSpanEnd(at: p, limit: limit) {
+                    literalSpans.append(p..<end)
+                    p = end
+                } else {
+                    p += run(of: ReviewUnit.backtick, from: p, limit: limit)
+                }
                 continue
             }
-            if u[p] == Unit.openBrace, p + 2 < limit, let kind = kind(opener: u[p + 1], u[p + 2]) {
+            if u[p] == ReviewUnit.openBrace, p + 2 < limit, let kind = kind(opener: u[p + 1], u[p + 2]) {
                 p = scanAnchor(kind, at: p, limit: limit)
                 continue
             }
@@ -531,7 +549,7 @@ private struct Parser {
         var old: Range<Int>?, new: Range<Int>?
         if kind == .substitution {
             guard let arrow = (innerStart..<close).first(where: {
-                $0 + 1 < close && u[$0] == Unit.tilde && u[$0 + 1] == Unit.greater
+                $0 + 1 < close && u[$0] == ReviewUnit.tilde && u[$0 + 1] == ReviewUnit.greater
             }) else {
                 problems.append(.unbalanced(range: p..<innerStart))
                 return innerStart
