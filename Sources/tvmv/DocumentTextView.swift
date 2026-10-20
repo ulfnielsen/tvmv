@@ -1,4 +1,5 @@
 import AppKit
+import ImageIO
 import TVMVCore
 
 /// The native reader/editor: one TextKit 1 text view in which Markdown
@@ -47,6 +48,9 @@ final class DocumentTextView: NSTextView {
     private var images: [String: (state: ImageState, image: NSImage?)] = [:]
 
     func imageState(for address: String) -> ImageState? { images[address]?.state }
+    /// A document is untrusted: cap what one image may cost.
+    var maxImageBytes = 50_000_000
+    var maxImagePixels = 100_000_000
 
     /// Private undo stack: the window's document undo manager belongs to a
     /// DocumentGroup(viewing:) document that can't be saved, and registering
@@ -328,16 +332,60 @@ final class DocumentTextView: NSTextView {
 
     // MARK: Images
 
-    /// Where an image address points: http, https, file and data URLs as
-    /// written; other paths relative to the document's folder.
+    /// Where an image address points. Like the web reader, local images come
+    /// only from inside the document's folder (no "../", absolute paths or
+    /// file URLs); http, https and data URLs load as written.
     static func imageURL(_ address: String, documentURL: URL?) -> URL? {
         if let url = URL(string: address), let scheme = url.scheme?.lowercased() {
-            return ["http", "https", "file", "data"].contains(scheme) ? url : nil
+            return ["http", "https", "data"].contains(scheme) ? url : nil
         }
         let path = address.removingPercentEncoding ?? address
-        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
-        guard let folder = documentURL?.deletingLastPathComponent() else { return nil }
-        return folder.appendingPathComponent(path).standardizedFileURL
+        guard !path.hasPrefix("/"), let folder = documentURL?.deletingLastPathComponent().standardizedFileURL
+        else { return nil }
+        let candidate = folder.appendingPathComponent(path).standardizedFileURL
+        return isInside(candidate, folder) ? candidate : nil
+    }
+
+    nonisolated static func isInside(_ candidate: URL, _ folder: URL) -> Bool {
+        let base = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"
+        return candidate.path.hasPrefix(base)
+    }
+
+    /// Read a local image: a regular file, still inside the folder once
+    /// symlinks are resolved, and no larger than `limit`.
+    nonisolated static func readLocal(_ url: URL, folder: URL, limit: Int) -> Data? {
+        let real = url.resolvingSymlinksInPath()
+        guard isInside(real, folder.resolvingSymlinksInPath()),
+              let values = try? real.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
+              values.isRegularFile == true, let size = values.fileSize, size <= limit
+        else { return nil }
+        return try? Data(contentsOf: real)
+    }
+
+    /// Download at most `limit` bytes; nil if there is more.
+    nonisolated static func download(_ url: URL, limit: Int) async -> Data? {
+        guard let (bytes, response) = try? await URLSession.shared.bytes(from: url),
+              response.expectedContentLength <= Int64(limit) else { return nil }
+        var data = Data()
+        do {
+            for try await byte in bytes {
+                data.append(byte)
+                if data.count > limit { return nil }
+            }
+        } catch { return nil }
+        return data
+    }
+
+    /// Decode, refusing images whose pixel count would be a memory bomb.
+    private func decode(_ data: Data) -> NSImage? {
+        if let source = CGImageSourceCreateWithData(data as CFData, nil),
+           let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+           let width = properties[kCGImagePropertyPixelWidth] as? Int,
+           let height = properties[kCGImagePropertyPixelHeight] as? Int,
+           width.multipliedReportingOverflow(by: height).overflow || width * height > maxImagePixels {
+            return nil
+        }
+        return NSImage(data: data)
     }
 
     /// The size a loaded block image is drawn at: its own size, scaled down
@@ -358,12 +406,19 @@ final class DocumentTextView: NSTextView {
                 imageLoaded(address, data: nil)
                 continue
             }
+            let limit = maxImageBytes
+            let folder = documentURL?.deletingLastPathComponent().standardizedFileURL
             Task {
                 let data: Data?
-                if ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
-                    data = try? await URLSession.shared.data(from: url).0
-                } else {
-                    data = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
+                switch url.scheme?.lowercased() {
+                case "http", "https":
+                    data = await Self.download(url, limit: limit)
+                case "data":
+                    data = (try? Data(contentsOf: url)).flatMap { $0.count <= limit ? $0 : nil }
+                default:
+                    data = await Task.detached(priority: .utility) {
+                        folder.flatMap { Self.readLocal(url, folder: $0, limit: limit) }
+                    }.value
                 }
                 self.imageLoaded(address, data: data)
             }
@@ -371,7 +426,7 @@ final class DocumentTextView: NSTextView {
     }
 
     private func imageLoaded(_ address: String, data: Data?) {
-        let picture = data.flatMap(NSImage.init(data:))
+        let picture = data.flatMap(decode)
         images[address] = (picture == nil ? .failed : .loaded, picture)
         restyleImages { $0.url == address }
     }

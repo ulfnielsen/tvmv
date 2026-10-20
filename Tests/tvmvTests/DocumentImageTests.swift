@@ -93,16 +93,63 @@ final class DocumentImageTests: XCTestCase {
     }
 
     func testImageAddressesResolveLikeTheWebReader() {
+        // Security review: the web reader served local images only from
+        // inside the document's folder (AssetSchemeHandler.confine).
         let doc = URL(fileURLWithPath: "/docs/guide/readme.md")
         func resolve(_ s: String, _ d: URL? = doc) -> URL? { DocumentTextView.imageURL(s, documentURL: d) }
         XCTAssertEqual(resolve("img/a b.png"), URL(fileURLWithPath: "/docs/guide/img/a b.png"))
         XCTAssertEqual(resolve("img/a%20b.png"), URL(fileURLWithPath: "/docs/guide/img/a b.png"))
-        XCTAssertEqual(resolve("../shot.png"), URL(fileURLWithPath: "/docs/shot.png"))
+        XCTAssertEqual(resolve("img/../a.png"), URL(fileURLWithPath: "/docs/guide/a.png"))
         XCTAssertEqual(resolve("https://e.x/p.png"), URL(string: "https://e.x/p.png"))
         XCTAssertEqual(resolve("http://e.x/p.png"), URL(string: "http://e.x/p.png"))
-        XCTAssertEqual(resolve("file:///tmp/p.png"), URL(string: "file:///tmp/p.png"))
         XCTAssertNotNil(resolve("data:image/png;base64,iVBORw0KGgo="))
+        XCTAssertNil(resolve("../shot.png"), "outside the document's folder")
+        XCTAssertNil(resolve("/etc/hosts"), "absolute paths")
+        XCTAssertNil(resolve("file:///tmp/p.png"), "file URLs")
         XCTAssertNil(resolve("javascript:alert(1)"))
         XCTAssertNil(resolve("img/a.png", nil), "a relative path needs a document folder")
+    }
+
+    func testASymlinkOutOfTheFolderIsNotFollowed() throws {
+        let outside = FileManager.default.temporaryDirectory.appendingPathComponent("tvmv-outside-\(UUID().uuidString).png")
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 10, pixelsHigh: 10, bitsPerSample: 8,
+                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                   bytesPerRow: 0, bitsPerPixel: 0)!
+        try rep.representation(using: .png, properties: [:])!.write(to: outside)
+        addTeardownBlock { try? FileManager.default.removeItem(at: outside) }
+        try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent("link.png"), withDestinationURL: outside)
+        view.load("![x](link.png)\n")
+        pump { view.imageState(for: "link.png") == .failed || view.imageState(for: "link.png") == .loaded }
+        XCTAssertEqual(view.imageState(for: "link.png"), .failed)
+    }
+
+    func testDevicesAndOversizedFilesAreNotRead() throws {
+        try FileManager.default.createSymbolicLink(at: folder.appendingPathComponent("zero.png"),
+                                                   withDestinationURL: URL(fileURLWithPath: "/dev/zero"))
+        try writePNG("big.png", width: 200, height: 100)
+        view.maxImageBytes = 100          // smaller than big.png
+        view.load("![z](zero.png)\n\n![b](big.png)\n")
+        pump { view.imageState(for: "big.png") == .failed && view.imageState(for: "zero.png") == .failed }
+        XCTAssertEqual(view.imageState(for: "zero.png"), .failed)
+        XCTAssertEqual(view.imageState(for: "big.png"), .failed)
+    }
+
+    func testImagesOverThePixelLimitAreNotDecoded() throws {
+        try writePNG("wide.png", width: 200, height: 100)
+        view.maxImagePixels = 10_000      // 200×100 = 20,000
+        view.load("![w](wide.png)\n")
+        pump { view.imageState(for: "wide.png") == .failed || view.imageState(for: "wide.png") == .loaded }
+        XCTAssertEqual(view.imageState(for: "wide.png"), .failed)
+    }
+
+    func testDownloadsStopAtTheSizeLimit() async throws {
+        // URLSession streams file URLs too; the cap is the same code remote images use.
+        try writePNG("big.png", width: 200, height: 100)
+        let url = folder.appendingPathComponent("big.png")
+        let size = try Data(contentsOf: url).count
+        let whole = await DocumentTextView.download(url, limit: size)
+        XCTAssertEqual(whole?.count, size)
+        let capped = await DocumentTextView.download(url, limit: size - 1)
+        XCTAssertNil(capped)
     }
 }
