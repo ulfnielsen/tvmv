@@ -132,6 +132,10 @@ final class DocumentTextView: NSTextView {
         let prefix = min(unchangedPrefix, old.length), suffix = min(unchangedSuffix, old.length - prefix)
         let edit = NSRange(location: prefix, length: old.length - suffix - prefix)
         let delta = storage.length - old.length
+        // Until the parse lands (later, in large documents), keep the edited
+        // paragraph laid out from its start. Offsets before the edit are valid
+        // in the old layout.
+        relayParagraphs(touching: NSRange(location: edit.location, length: max(0, edit.length + delta)))
         parseGeneration += 1
         let generation = parseGeneration
         if storage.length <= Self.syncParseLimit {
@@ -181,6 +185,23 @@ final class DocumentTextView: NSTextView {
         DocumentStyler.apply(layout, to: storage, in: range, theme: theme) { unit in
             all || units.contains(unit)
         }
+        // TextKit re-lays out an edit from the line after the previous
+        // newline, assuming a newline ends a line. In a reflowed paragraph a
+        // soft break doesn't, so re-lay the whole paragraph from its start.
+        relayParagraphs(touching: range)
+    }
+
+    /// Invalidate layout from the start of every top-level paragraph that
+    /// `range` touches (see restyle).
+    private func relayParagraphs(touching range: NSRange) {
+        guard let storage = textStorage else { return }
+        let paragraphs = layout.blocks.filter {
+            $0.kind == "paragraph"
+                && (NSIntersectionRange($0.range, range).length > 0 || NSLocationInRange(range.location, $0.range))
+        }
+        let extent = paragraphs.reduce(range) { NSUnionRange($0, $1.range) }
+        layoutManager?.invalidateLayout(forCharacterRange: NSIntersectionRange(extent, NSRange(location: 0, length: storage.length)),
+                                        actualCharacterRange: nil)
         typingAttributes = theme.base
         needsDisplay = true
     }
@@ -291,6 +312,21 @@ final class DocumentTextView: NSTextView {
         let index = lm.characterIndex(for: p, in: tc, fractionOfDistanceBetweenInsertionPoints: &fraction)
         guard index < storage.length else { return nil }
         return storage.attribute(.tvmvLink, at: index, effectiveRange: nil) as? String
+    }
+
+    // MARK: Undo
+
+    /// undo:/redo: travelling up the responder chain would reach the window,
+    /// which uses its own undo manager. Answer them here, from this view's stack.
+    @objc func undo(_ sender: Any?) { documentUndo.undo() }
+    @objc func redo(_ sender: Any?) { documentUndo.redo() }
+
+    override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        switch item.action {
+        case Selector(("undo:")): return documentUndo.canUndo
+        case Selector(("redo:")): return documentUndo.canRedo
+        default: return super.validateUserInterfaceItem(item)
+        }
     }
 
     // MARK: Return

@@ -366,4 +366,52 @@ final class DocumentTextViewTests: XCTestCase {
         pump()
         XCTAssertEqual(view.string, "```\nlet a = 1\n\n```\n")
     }
+
+    func testEditMenuActionsReachTheTextViewThroughTheResponderChain() {
+        // The app's Edit menu sends undo:/redo:/paste: to the first responder;
+        // they must land on this view's own (private) undo stack and text.
+        _ = NSApplication.shared
+        window.makeKeyAndOrderFront(nil)
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load("abc\n")
+        view.setSelectedRange(NSRange(location: 3, length: 0))
+        view.insertText("X", replacementRange: view.selectedRange())
+        pump()
+        XCTAssertEqual(view.string, "abcX\n")
+        XCTAssertTrue(view.tryToPerform(Selector(("undo:")), with: nil))
+        pump()
+        XCTAssertEqual(view.string, "abc\n")
+        XCTAssertTrue(view.tryToPerform(Selector(("redo:")), with: nil))
+        pump()
+        XCTAssertEqual(view.string, "abcX\n")
+    }
+
+    func testTypingAtAParagraphsEndKeepsItsEarlierLinesReflowed() {
+        // Reported with a screenshot: typing a space after "ships." turned the
+        // soft break before "modes" into a visible line break.
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        let text = """
+        Signing is resolved by `build/signing.fish`: it uses a **Developer ID
+        Application** certificate when one is in the keychain, and falls back to an
+        ad-hoc signature otherwise (fine for local use, but such a build runs only on
+        the machine that produced it). Set `TVMV_IDENTITY` to force a specific identity,
+        or `TVMV_IDENTITY=-` to force ad-hoc. The hardened runtime is enabled in both
+        modes so local builds exercise exactly what ships.
+
+        ## Use
+
+        """
+        view.load(text)
+        let end = (text as NSString).range(of: "ships.")
+        view.setSelectedRange(NSRange(location: NSMaxRange(end), length: 0))
+        view.insertText(" ", replacementRange: view.selectedRange())
+        pump()
+        let edited = fragments().map(\.text)
+        // The same text laid out from scratch is the truth.
+        let current = view.string
+        view.load(current)
+        XCTAssertEqual(edited, fragments().map(\.text))
+    }
 }

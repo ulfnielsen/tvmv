@@ -1,5 +1,6 @@
 import TVMVCore
 import SwiftUI
+import AppKit
 
 /// Per-window menu actions. The focused viewer window publishes these via
 /// `focusedSceneValue`, so menu commands (Find, Print, Reload, Toggle Outline, markup)
@@ -72,6 +73,29 @@ struct ViewerMenuCommands: Commands {
                 .keyboardShortcut("r", modifiers: .command)
                 .disabled(commands == nil)
         }
+        // SwiftUI's own Undo/Redo and Cut/Copy/Paste stay disabled for a
+        // DocumentGroup(viewing:) document. Send the standard actions to the
+        // first responder instead: the native text view answers them.
+        CommandGroup(replacing: .undoRedo) {
+            Button("Undo") { Self.send("undo:") }
+                .keyboardShortcut("z", modifiers: .command)
+                .disabled(commands == nil)
+            Button("Redo") { Self.send("redo:") }
+                .keyboardShortcut("z", modifiers: [.command, .shift])
+                .disabled(commands == nil)
+        }
+        CommandGroup(replacing: .pasteboard) {
+            Button("Cut") { Self.send("cut:") }
+                .keyboardShortcut("x", modifiers: .command)
+                .disabled(commands?.isEditing != true)
+            Button("Copy") { Self.send("copy:") }
+                .keyboardShortcut("c", modifiers: .command)
+            Button("Paste") { Self.send("paste:") }
+                .keyboardShortcut("v", modifiers: .command)
+                .disabled(commands?.isEditing != true)
+            Button("Select All") { Self.send("selectAll:") }
+                .keyboardShortcut("a", modifiers: .command)
+        }
         CommandGroup(replacing: .textFormatting) {
             Button("Bold") { commands?.bold() }
                 .keyboardShortcut("b", modifiers: .command)
@@ -92,5 +116,10 @@ struct ViewerMenuCommands: Commands {
                 .keyboardShortcut("p", modifiers: .command)
                 .disabled(commands == nil)
         }
+    }
+
+    /// Send a standard action to the first responder of the key window.
+    private static func send(_ action: String) {
+        NSApp.sendAction(Selector((action)), to: nil, from: nil)
     }
 }
