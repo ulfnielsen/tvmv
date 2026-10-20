@@ -327,4 +327,38 @@ final class DocumentImageTests: XCTestCase {
             return rect.minY + CGFloat(y) / scale
         }
     }
+
+    func testAPictureLandsOnWholeDevicePixels() throws {
+        // Reported: SVGs sharp at some window widths, fuzzy at others. The
+        // lines above set where a picture starts; at a fractional point its
+        // edges smeared across two pixel rows.
+        var grid = ""
+        for i in stride(from: 0, through: 180, by: 20) {
+            grid += "<rect x=\"\(i)\" y=\"0\" width=\"2\" height=\"200\"/><rect x=\"0\" y=\"\(i)\" width=\"200\" height=\"2\"/>"
+        }
+        try "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"200\" height=\"200\" viewBox=\"0 0 200 200\">\(grid)</svg>"
+            .write(to: folder.appendingPathComponent("grid.svg"), atomically: true, encoding: .utf8)
+        for text in ["![g](grid.svg)\n", "Para one.\n\nPara two **b**.\n\n![g](grid.svg)\n", "# Title\n\nText.\n\n![g](grid.svg)\n"] {
+            view.load(text)
+            pump { view.imageState(for: "grid.svg") == .loaded }
+            let lm = view.layoutManager!
+            lm.ensureLayout(for: view.textContainer!)
+            let source = (view.string as NSString).range(of: "![g]")
+            let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: source.location), effectiveRange: nil)
+            // The picture, inset so its antialiased outer border stays out.
+            // On whole points, as the window draws it.
+            let area = NSIntegralRect(NSRect(x: view.textContainerOrigin.x + view.textContainer!.lineFragmentPadding + 4,
+                                             y: fragment.minY + view.textContainerOrigin.y + view.theme.body.pointSize / 2 + 4,
+                                             width: 190, height: 190))
+            let bitmap = view.bitmapImageRepForCachingDisplay(in: area)!
+            view.cacheDisplay(in: area, to: bitmap)
+            var grey = 0
+            for y in 0..<bitmap.pixelsHigh { for x in 0..<bitmap.pixelsWide {
+                guard let c = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { continue }
+                let v = (c.redComponent + c.greenComponent + c.blueComponent) / 3
+                if v > 0.1, v < 0.85 { grey += 1 }
+            } }
+            XCTAssertEqual(grey, 0, "grid edges crisp after «\(text)» (line at y \(fragment.minY))")
+        }
+    }
 }

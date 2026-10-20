@@ -767,8 +767,10 @@ final class DocumentTextView: NSTextView {
                                                effectiveRange: nil)
             let x = fragment.minX + tc.lineFragmentPadding + textContainerOrigin.x
             if let size = imageSize(for: image), let picture = images[image.url]?.image {
-                let rect = NSRect(x: x, y: fragment.minY + textContainerOrigin.y + theme.body.pointSize / 2,
-                                  width: size.width, height: size.height)
+                // On whole device pixels: the lines above can leave the
+                // fragment at a fractional point, smearing every edge.
+                let rect = pixelAligned(NSRect(x: x, y: fragment.minY + textContainerOrigin.y + theme.body.pointSize / 2,
+                                               width: size.width, height: size.height))
                 picture.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
                              respectFlipped: true, hints: nil)
             } else if images[image.url]?.state == .failed {
@@ -779,6 +781,13 @@ final class DocumentTextView: NSTextView {
                                                 withAttributes: [.font: font, .foregroundColor: theme.muted])
             }
         }
+    }
+
+    /// `rect` moved (not resized) so its origin sits on a device pixel.
+    private func pixelAligned(_ rect: NSRect) -> NSRect {
+        let backing = convertToBacking(rect.origin)
+        let origin = convertFromBacking(NSPoint(x: backing.x.rounded(), y: backing.y.rounded()))
+        return NSRect(origin: origin, size: rect.size)
     }
 
     // MARK: Copy
