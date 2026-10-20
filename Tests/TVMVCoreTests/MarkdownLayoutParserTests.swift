@@ -153,4 +153,25 @@ final class MarkdownLayoutParserTests: XCTestCase {
         XCTAssertEqual(empty.length, 0)
         XCTAssertEqual(ns.character(at: empty.location - 1), 32)   // after the space following "|"
     }
+
+    func testListItemsRecordMarkerLevelOrderAndTaskState() {
+        let text = "- one\n- two\n  - nested\n\n3) third\n4) fourth\n\n- [ ] todo\n- [x] done\n"
+        let ns = text as NSString
+        let items = MarkdownLayoutParser.parse(text).listItems
+        XCTAssertEqual(items.map { ns.substring(with: $0.marker) },
+                       ["- ", "- ", "  - ", "3) ", "4) ", "- [ ] ", "- [x] "])
+        XCTAssertEqual(items.map(\.level), [0, 0, 1, 0, 0, 0, 0])
+        XCTAssertEqual(items.map(\.ordered), [false, false, false, true, true, false, false])
+        XCTAssertEqual(items.map(\.task), [nil, nil, nil, nil, nil, false, true])
+        XCTAssertEqual(items.compactMap { $0.checkbox.map { ns.substring(with: $0) } }, ["[ ]", "[x]"])
+        XCTAssertEqual(items.map { ns.substring(with: $0.bullet) }, ["-", "-", "-", "3)", "4)", "-", "-"])
+    }
+
+    func testQuoteLinesRecordTheirPrefixAndLevel() {
+        let text = "> outer\n> still\n>> inner\n\nplain\n"
+        let ns = text as NSString
+        let lines = MarkdownLayoutParser.parse(text).quoteLines
+        XCTAssertEqual(lines.map { ns.substring(with: $0.prefix) }, ["> ", "> ", ">> "])
+        XCTAssertEqual(lines.map(\.level), [1, 1, 2])
+    }
 }

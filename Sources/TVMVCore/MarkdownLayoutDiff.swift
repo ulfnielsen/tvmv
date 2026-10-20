@@ -36,6 +36,13 @@ extension MarkdownLayout {
             o.range.shifted(by: d) == n.range && o.unit.shifted(by: d) == n.unit && o.collapsesLine == n.collapsesLine
         }
         widen(old.spellExempt, spellExempt, { $0 }) { o, n, d in o.shifted(by: d) == n }
+        widen(old.listItems, listItems, { $0.marker }) { o, n, d in
+            o.marker.shifted(by: d) == n.marker && o.bullet.shifted(by: d) == n.bullet && o.level == n.level
+                && o.ordered == n.ordered && o.task == n.task && o.checkbox?.shifted(by: d) == n.checkbox
+        }
+        widen(old.quoteLines, quoteLines, { $0.prefix }) { o, n, d in
+            o.prefix.shifted(by: d) == n.prefix && o.level == n.level
+        }
         widen(old.tables, tables, { $0.range }) { o, n, d in
             o.range.shifted(by: d) == n.range && o.alignments == n.alignments
                 && o.rows.map { $0.map { $0.shifted(by: d) } } == n.rows

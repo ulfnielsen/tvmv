@@ -39,6 +39,15 @@ enum CMark {
         return out
     }
 
+    static func isInsideQuote(_ node: CMarkNode) -> Bool {
+        var parent = cmark_node_parent(node)
+        while let p = parent {
+            if type(p) == "block_quote" { return true }
+            parent = cmark_node_parent(p)
+        }
+        return false
+    }
+
     static func literal(_ node: CMarkNode) -> String {
         cmark_node_get_literal(node).map { String(cString: $0) } ?? ""
     }
@@ -118,6 +127,7 @@ struct LayoutBuilder {
                 let limit = i + 1 < blocks.count ? (localRange(blocks[i + 1])?.location ?? ns.length) : ns.length
                 r.length = min(r.length, max(0, limit - r.location))
                 if recordBlocks {
+                    recordContainers(block, level: 0)
                     layout.blocks.append(.init(range: docRange(r), kind: CMark.type(block)))
                     if CMark.type(block) == "table" { recordTable(r) }
                     if CMark.type(block) == "paragraph" {
@@ -145,6 +155,74 @@ struct LayoutBuilder {
             }
             i += 1
         }
+    }
+
+    static let quotePrefix = try! NSRegularExpression(pattern: #"^[ \t]{0,3}(?:>[ \t]?)+"#)
+
+    /// The quote prefix at the start of the line containing `location` (empty if none).
+    func quotePrefix(at location: Int) -> NSRange {
+        let line = lineRange(at: location)
+        guard let m = Self.quotePrefix.firstMatch(in: ns as String, range: line) else {
+            return NSRange(location: line.location, length: 0)
+        }
+        return m.range
+    }
+
+    /// Lists (with their nesting level) and quotes, anywhere in the block tree.
+    mutating func recordContainers(_ node: CMarkNode, level: Int) {
+        switch CMark.type(node) {
+        case "list":
+            let ordered = cmark_node_get_list_type(node) == CMARK_ORDERED_LIST
+            for item in CMark.children(node) {
+                recordListItem(item, level: level, ordered: ordered)
+                for child in CMark.children(item) { recordContainers(child, level: level + 1) }
+            }
+        case "block_quote":
+            if let r = localRange(node), !CMark.isInsideQuote(node) {
+                var start = r.location
+                while start < NSMaxRange(r) {
+                    let line = lineRange(at: start)
+                    let prefix = quotePrefix(at: start)
+                    if prefix.length > 0, ns.substring(with: prefix).contains(">") {
+                        let level = ns.substring(with: prefix).filter { $0 == ">" }.count
+                        layout.quoteLines.append(.init(prefix: docRange(prefix), level: level))
+                    }
+                    start = NSMaxRange(line)
+                }
+            }
+            for child in CMark.children(node) { recordContainers(child, level: level) }
+        default:
+            for child in CMark.children(node) { recordContainers(child, level: level) }
+        }
+    }
+
+    mutating func recordListItem(_ item: CMarkNode, level: Int, ordered: Bool) {
+        guard let r = localRange(item) else { return }
+        let line = lineRange(at: r.location)
+        var lineEnd = NSMaxRange(line)
+        if lineEnd > line.location, ns.character(at: lineEnd - 1) == 10 { lineEnd -= 1 }
+        let start = NSMaxRange(quotePrefix(at: r.location))
+        // The text starts where the first child does, if that is on this line.
+        var contentStart = lineEnd
+        if let first = CMark.children(item).first, let fr = localRange(first), fr.location < lineEnd {
+            contentStart = fr.location
+        }
+        guard contentStart > start, r.location >= start else { return }
+        var bulletEnd = r.location
+        while bulletEnd < contentStart, ![32, 9].contains(ns.character(at: bulletEnd)) { bulletEnd += 1 }
+        let markerText = ns.substring(with: NSRange(location: start, length: contentStart - start)) as NSString
+        let isTask = CMark.type(item) == "tasklist"
+        var checkbox: NSRange?
+        if isTask {
+            let open = markerText.range(of: "[")
+            if open.location != NSNotFound { checkbox = NSRange(location: start + open.location, length: 3) }
+        }
+        layout.listItems.append(.init(
+            marker: docRange(NSRange(location: start, length: contentStart - start)),
+            bullet: docRange(NSRange(location: r.location, length: bulletEnd - r.location)),
+            level: level, ordered: ordered,
+            task: isTask ? cmark_gfm_extensions_get_tasklist_item_checked(item) : nil,
+            checkbox: checkbox.map(docRange)))
     }
 
     /// A table's rows and cells, split on unescaped pipes in each source line

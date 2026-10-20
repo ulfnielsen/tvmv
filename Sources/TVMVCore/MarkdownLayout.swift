@@ -64,6 +64,33 @@ public struct MarkdownLayout: Equatable, Sendable {
     /// Newlines inside top-level paragraphs that are soft line breaks: the
     /// paragraph reflows across them, so they lay out as spaces.
     public var softBreaks: [Int] = []
+    /// List items: the marker hides and a bullet, number or checkbox is drawn.
+    public var listItems: [ListItem] = []
+    /// Quoted lines: the "> " prefix hides and a rule is drawn.
+    public var quoteLines: [QuoteLine] = []
+
+    public struct ListItem: Equatable, Sendable {
+        /// Indentation, bullet, space and any "[ ] ": everything before the
+        /// item's text on its first line (after a quote prefix). Also its reveal unit.
+        public var marker: NSRange
+        /// "-", "*", "+", "3." or "3)".
+        public var bullet: NSRange
+        /// Nesting depth, 0 for a top-level list.
+        public var level: Int
+        public var ordered: Bool
+        /// nil for a plain item; checked state for a task item.
+        public var task: Bool?
+        /// The "[ ]" / "[x]" of a task item.
+        public var checkbox: NSRange?
+    }
+
+    public struct QuoteLine: Equatable, Sendable {
+        /// Leading spaces and every ">" (with its following space). Also its reveal unit.
+        public var prefix: NSRange
+        /// How many ">" — the nesting depth.
+        public var level: Int
+    }
+
     /// Top-level GFM tables: shown as an editable grid over their hidden source.
     public var tables: [Table] = []
 
@@ -103,7 +130,8 @@ public struct MarkdownLayout: Equatable, Sendable {
     /// Every reveal unit, in source order without duplicates.
     public var revealUnits: [NSRange] {
         var seen = Set<NSRange>()
-        return (markers.map(\.unit) + blockImages.map(\.range) + tables.map(\.range)).compactMap { seen.insert($0).inserted ? $0 : nil }
+        return (markers.map(\.unit) + blockImages.map(\.range) + tables.map(\.range)
+                + listItems.map(\.marker) + quoteLines.map(\.prefix)).compactMap { seen.insert($0).inserted ? $0 : nil }
     }
 }
 
