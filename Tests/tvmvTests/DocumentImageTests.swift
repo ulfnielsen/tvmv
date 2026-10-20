@@ -248,4 +248,43 @@ final class DocumentImageTests: XCTestCase {
         view.cancelOperation(nil)
         XCTAssertFalse(view.revealing)
     }
+
+    private func pasteboard(png width: Int, _ height: Int, text: String? = nil) -> NSPasteboard {
+        let board = NSPasteboard(name: NSPasteboard.Name("tvmv-test-\(UUID().uuidString)"))
+        board.clearContents()
+        let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: width, pixelsHigh: height, bitsPerSample: 8,
+                                   samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
+                                   bytesPerRow: 0, bitsPerPixel: 0)!
+        board.setData(rep.representation(using: .png, properties: [:]), forType: .png)
+        if let text { board.setString(text, forType: .string) }
+        addTeardownBlock { board.releaseGlobally() }
+        return board
+    }
+
+    func testPastingAnImageSavesItBesideTheDocumentAndLinksIt() throws {
+        view.isEditable = true
+        view.load("Before.\n")
+        view.setSelectedRange(NSRange(location: 7, length: 0))
+        XCTAssertTrue(view.pasteImage(from: pasteboard(png: 40, 20)))
+        let files = try FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent("images").path)
+        XCTAssertEqual(files.count, 1)
+        XCTAssertTrue(files[0].hasPrefix("doc-") && files[0].hasSuffix(".png"), files[0])
+        XCTAssertEqual(view.string, "Before.\n\n![](images/\(files[0]))\n")
+        pump { view.imageState(for: "images/\(files[0])") == .loaded }
+        XCTAssertEqual(view.imageState(for: "images/\(files[0])"), .loaded)
+
+        // A second paste right away gets its own file.
+        XCTAssertTrue(view.pasteImage(from: pasteboard(png: 10, 10)))
+        XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: folder.appendingPathComponent("images").path).count, 2)
+    }
+
+    func testTextOnTheClipboardWinsAndReadingNeverWrites() {
+        view.load("x\n")
+        XCTAssertFalse(view.pasteImage(from: pasteboard(png: 10, 10)), "not editing")
+        view.isEditable = true
+        XCTAssertFalse(view.pasteImage(from: pasteboard(png: 10, 10, text: "words")), "text present: a text paste")
+        view.documentURL = nil
+        XCTAssertFalse(view.pasteImage(from: pasteboard(png: 10, 10)), "an unsaved document has no folder")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: folder.appendingPathComponent("images").path))
+    }
 }

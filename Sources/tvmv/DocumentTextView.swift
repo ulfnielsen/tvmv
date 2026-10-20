@@ -816,6 +816,61 @@ final class DocumentTextView: NSTextView {
         super.cut(sender)
     }
 
+    // MARK: Pasting images
+
+    override func paste(_ sender: Any?) {
+        if !pasteImage(from: .general) { super.paste(sender) }
+    }
+
+    /// Paste an image (a screenshot, from Preview or a browser): save it as
+    /// a PNG in an "images" folder beside the document and link it on its own
+    /// line. Returns false — writing nothing — when there is text to paste
+    /// instead, no image, no document folder, or editing is off.
+    @discardableResult
+    func pasteImage(from board: NSPasteboard) -> Bool {
+        guard isEditable, !isCell, board.string(forType: .string) == nil,
+              let document = documentURL, let storage = textStorage else { return false }
+        let png: Data
+        if let data = board.data(forType: .png) {
+            png = data
+        } else if let tiff = board.data(forType: .tiff), let rep = NSBitmapImageRep(data: tiff),
+                  let data = rep.representation(using: .png, properties: [:]) {
+            png = data
+        } else {
+            return false
+        }
+        let folder = document.deletingLastPathComponent().appendingPathComponent("images")
+        let stamp = DateFormatter()
+        stamp.dateFormat = "yyyyMMdd-HHmmss"
+        let base = document.deletingPathExtension().lastPathComponent + "-" + stamp.string(from: Date())
+        var name = base + ".png"
+        var n = 2
+        while FileManager.default.fileExists(atPath: folder.appendingPathComponent(name).path) {
+            name = "\(base)-\(n).png"
+            n += 1
+        }
+        do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try png.write(to: folder.appendingPathComponent(name), options: .withoutOverwriting)
+        } catch {
+            NSSound.beep()
+            return false
+        }
+        // On its own paragraph, so it shows as the picture.
+        let text = storage.string as NSString
+        let at = selectedRange()
+        func char(_ i: Int) -> unichar? { i >= 0 && i < text.length ? text.character(at: i) : nil }
+        let before = at.location == 0 || (char(at.location - 1) == 10 && char(at.location - 2) == 10) ? ""
+            : char(at.location - 1) == 10 ? "\n" : "\n\n"
+        let after = NSMaxRange(at) >= text.length || (char(NSMaxRange(at)) == 10 && char(NSMaxRange(at) + 1).map { $0 == 10 } ?? true) ? ""
+            : char(NSMaxRange(at)) == 10 ? "\n" : "\n\n"
+        let link = "![](images/\(name))"
+        if replace(at, with: before + link + after) {
+            setSelectedRange(NSRange(location: at.location + ((before + link) as NSString).length, length: 0))
+        }
+        return true
+    }
+
     // MARK: Undo
 
     /// undo:/redo: travelling up the responder chain would reach the window,
