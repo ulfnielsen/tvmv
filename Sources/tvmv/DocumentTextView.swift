@@ -781,6 +781,41 @@ final class DocumentTextView: NSTextView {
         }
     }
 
+    // MARK: Copy
+
+    /// What a copy or cut of `selection` takes: the selection widened over
+    /// markup hidden at its edges (selecting a bold word copies "**word**",
+    /// a heading's text "# Title", a code block's lines its fences too), so
+    /// the clipboard gets Markdown, not the rendered text.
+    func copyRange(for selection: NSRange) -> NSRange {
+        guard !showAllMarkup, selection.length > 0, let storage = textStorage else { return selection }
+        let text = storage.string as NSString
+        var start = selection.location, end = NSMaxRange(selection)
+        while start > 0, isHidden(start - 1) { start -= 1 }
+        while end < text.length {
+            if isHidden(end) { end += 1; continue }
+            // A collapsed line right after (a closing fence): take it, newline and all.
+            if text.character(at: end) == 10, end + 1 < text.length, isHidden(end + 1) {
+                let run = EditRules.hiddenRun(at: end + 1, length: text.length, isHidden: isHidden)
+                if text.character(at: NSMaxRange(run) - 1) == 10 { end = NSMaxRange(run); continue }
+            }
+            break
+        }
+        return NSRange(location: start, length: end - start)
+    }
+
+    override func copy(_ sender: Any?) {
+        let selection = selectedRange()
+        setSelectedRange(copyRange(for: selection))
+        super.copy(sender)
+        setSelectedRange(selection)
+    }
+
+    override func cut(_ sender: Any?) {
+        setSelectedRange(copyRange(for: selectedRange()))
+        super.cut(sender)
+    }
+
     // MARK: Undo
 
     /// undo:/redo: travelling up the responder chain would reach the window,

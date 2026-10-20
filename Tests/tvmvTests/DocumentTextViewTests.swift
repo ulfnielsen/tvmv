@@ -431,4 +431,23 @@ final class DocumentTextViewTests: XCTestCase {
         pump()
         XCTAssertEqual(view.string, "a *bold** b\n")
     }
+
+    func testCopyTakesTheMarkupHiddenAtTheSelectionsEdges() {
+        // Reported: copying gave the rendered text, not the Markdown — the
+        // visible selection stops short of markup hidden around it.
+        view.load("# Title\n\nSome **bold** text and `code`.\n\n- item\n\n```\nlet x = 1\n```\n")
+        func copied(_ visible: String) -> String {
+            let r = ns.range(of: visible)
+            return ns.substring(with: view.copyRange(for: r))
+        }
+        XCTAssertEqual(copied("bold"), "**bold**")
+        XCTAssertEqual(copied("Title"), "# Title")
+        XCTAssertEqual(copied("code"), "`code`")
+        XCTAssertEqual(copied("item"), "- item")
+        XCTAssertEqual(copied("let x = 1"), "```\nlet x = 1\n```\n")
+        XCTAssertEqual(copied("ol"), "ol", "inside a word: as selected")
+        XCTAssertEqual(copied("text"), "text")
+        view.showAllMarkup = true
+        XCTAssertEqual(copied("bold"), "bold", "with the markup shown, the selection is what you see")
+    }
 }
