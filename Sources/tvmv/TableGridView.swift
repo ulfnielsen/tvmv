@@ -250,35 +250,93 @@ final class TableGridView: NSView {
 
     /// Table commands for a cell's context menu.
     func menuItems(for cell: DocumentTextView) -> [NSMenuItem] {
-        guard let (r, c) = position(of: cell), document?.isEditable == true else { return [] }
-        func item(_ title: String, _ action: @escaping () -> Void) -> NSMenuItem {
-            let menuItem = ClosureMenuItem(title: title, action: action)
-            return menuItem
+        guard position(of: cell) != nil, document?.isEditable == true else { return [] }
+        var items: [NSMenuItem] = [.separator()]
+        for command in TableCommand.allCases {
+            if command == .alignLeft { items.append(.separator()) }
+            let item = command.menuItem()
+            item.action = #selector(DocumentTextView.performTableCommand(_:))
+            item.target = cell
+            items.append(item)
         }
-        return [
-            .separator(),
-            item("Insert Row Above") { [weak self] in self?.insertRow(above: r) },
-            item("Insert Row Below") { [weak self] in self?.insertRow(below: r) },
-            item("Insert Column Left") { [weak self] in self?.insertColumn(after: c - 1) },
-            item("Insert Column Right") { [weak self] in self?.insertColumn(after: c) },
-            item("Delete Row") { [weak self] in self?.deleteRow(r) },
-            item("Delete Column") { [weak self] in self?.deleteColumn(c) },
-            .separator(),
-            item("Align Column Left") { [weak self] in self?.align(c, .left) },
-            item("Align Column Center") { [weak self] in self?.align(c, .center) },
-            item("Align Column Right") { [weak self] in self?.align(c, .right) },
-        ]
+        return items
+    }
+
+    /// Run `command` for `cell`'s row and column.
+    func perform(_ command: TableCommand, from cell: DocumentTextView) {
+        guard let (r, c) = position(of: cell), document?.isEditable == true else { NSSound.beep(); return }
+        switch command {
+        case .insertRowAbove: insertRow(above: r)
+        case .insertRowBelow: insertRow(below: r)
+        case .insertColumnLeft: insertColumn(after: c - 1)
+        case .insertColumnRight: insertColumn(after: c)
+        case .deleteRow: deleteRow(r)
+        case .deleteColumn: deleteColumn(c)
+        case .alignLeft: align(c, .left)
+        case .alignCenter: align(c, .center)
+        case .alignRight: align(c, .right)
+        }
     }
 }
 
-/// A menu item that runs a closure.
-final class ClosureMenuItem: NSMenuItem {
-    private let handler: () -> Void
-    init(title: String, action: @escaping () -> Void) {
-        handler = action
-        super.init(title: title, action: #selector(run), keyEquivalent: "")
-        target = self
+/// The table commands: in a cell's context menu and the Table menu, each
+/// with an icon and a shortcut.
+enum TableCommand: String, CaseIterable {
+    case insertRowAbove, insertRowBelow, insertColumnLeft, insertColumnRight, deleteRow, deleteColumn
+    case alignLeft, alignCenter, alignRight
+
+    var title: String {
+        switch self {
+        case .insertRowAbove: "Insert Row Above"
+        case .insertRowBelow: "Insert Row Below"
+        case .insertColumnLeft: "Insert Column Left"
+        case .insertColumnRight: "Insert Column Right"
+        case .deleteRow: "Delete Row"
+        case .deleteColumn: "Delete Column"
+        case .alignLeft: "Align Column Left"
+        case .alignCenter: "Align Column Center"
+        case .alignRight: "Align Column Right"
+        }
     }
-    required init(coder: NSCoder) { fatalError("not used") }
-    @objc private func run() { handler() }
+
+    /// SF Symbol name.
+    var symbol: String {
+        switch self {
+        case .insertRowAbove: "arrow.up.to.line"
+        case .insertRowBelow: "arrow.down.to.line"
+        case .insertColumnLeft: "arrow.left.to.line"
+        case .insertColumnRight: "arrow.right.to.line"
+        case .deleteRow: "minus.rectangle"
+        case .deleteColumn: "minus.square"
+        case .alignLeft: "text.alignleft"
+        case .alignCenter: "text.aligncenter"
+        case .alignRight: "text.alignright"
+        }
+    }
+
+    /// ⌃⌘ arrows insert, ⌃⌘⌫ / ⌃⌥⌘⌫ delete, ⌘{ ⌘| ⌘} align (the system's
+    /// alignment keys). ⌥⌘↑/↓ are taken by Next/Previous Thread.
+    var key: (equivalent: String, modifiers: NSEvent.ModifierFlags) {
+        func f(_ key: Int) -> String { String(UnicodeScalar(UInt16(key))!) }
+        switch self {
+        case .insertRowAbove: return (f(NSUpArrowFunctionKey), [.control, .command])
+        case .insertRowBelow: return (f(NSDownArrowFunctionKey), [.control, .command])
+        case .insertColumnLeft: return (f(NSLeftArrowFunctionKey), [.control, .command])
+        case .insertColumnRight: return (f(NSRightArrowFunctionKey), [.control, .command])
+        case .deleteRow: return ("\u{8}", [.control, .command])
+        case .deleteColumn: return ("\u{8}", [.control, .option, .command])
+        case .alignLeft: return ("{", [.command])
+        case .alignCenter: return ("|", [.command])
+        case .alignRight: return ("}", [.command])
+        }
+    }
+
+    /// A menu item for it (its command in `representedObject`).
+    func menuItem() -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: nil, keyEquivalent: key.equivalent)
+        item.keyEquivalentModifierMask = key.modifiers
+        item.image = NSImage(systemSymbolName: symbol, accessibilityDescription: title)
+        item.representedObject = rawValue
+        return item
+    }
 }

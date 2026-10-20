@@ -1013,6 +1013,14 @@ final class DocumentTextView: NSTextView {
         if revealing { reveal(false) }
     }
 
+    /// A table command (from the Table menu or a cell's context menu): acts
+    /// on the cell being edited; anywhere else there is no table to act on.
+    @objc func performTableCommand(_ sender: Any?) {
+        guard let raw = (sender as? NSMenuItem)?.representedObject as? String,
+              let command = TableCommand(rawValue: raw), let host = cellHost else { NSSound.beep(); return }
+        host.perform(command, from: self)
+    }
+
     @objc func toggleRevealMarkup(_ sender: Any?) {
         if let host = cellHost { host.revealSource(from: self) } else { reveal(!revealing) }
     }

@@ -121,6 +121,19 @@ struct ViewerMenuCommands: Commands {
                 .keyboardShortcut("m", modifiers: [.command, .option])
                 .disabled(commands == nil)
         }
+        CommandMenu("Table") {
+            // Act on the table cell being edited (its text view is the first responder).
+            ForEach(TableCommand.allCases, id: \.self) { command in
+                if command == .alignLeft { Divider() }
+                Button {
+                    NSApp.sendAction(#selector(DocumentTextView.performTableCommand(_:)), to: nil, from: command.menuItem())
+                } label: {
+                    Label(command.title, systemImage: command.symbol)
+                }
+                .keyboardShortcut(command.shortcut)
+                .disabled(commands?.isEditing != true)
+            }
+        }
         CommandMenu("Review") {
             // Commenting works while reading; it needs a file to save to.
             Button("Comment…") { commands?.review(.comment) }
@@ -152,5 +165,22 @@ struct ViewerMenuCommands: Commands {
     /// Send a standard action to the first responder of the key window.
     private static func send(_ action: String) {
         NSApp.sendAction(Selector((action)), to: nil, from: nil)
+    }
+}
+
+extension TableCommand {
+    /// The menu bar's form of `key`.
+    var shortcut: KeyboardShortcut {
+        switch self {
+        case .insertRowAbove: KeyboardShortcut(.upArrow, modifiers: [.control, .command])
+        case .insertRowBelow: KeyboardShortcut(.downArrow, modifiers: [.control, .command])
+        case .insertColumnLeft: KeyboardShortcut(.leftArrow, modifiers: [.control, .command])
+        case .insertColumnRight: KeyboardShortcut(.rightArrow, modifiers: [.control, .command])
+        case .deleteRow: KeyboardShortcut(.delete, modifiers: [.control, .command])
+        case .deleteColumn: KeyboardShortcut(.delete, modifiers: [.control, .option, .command])
+        case .alignLeft: KeyboardShortcut("{", modifiers: .command)
+        case .alignCenter: KeyboardShortcut("|", modifiers: .command)
+        case .alignRight: KeyboardShortcut("}", modifiers: .command)
+        }
     }
 }

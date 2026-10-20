@@ -152,4 +152,41 @@ final class TableGridTests: XCTestCase {
             XCTAssertEqual(grid.frame.minX, textLeft, accuracy: 0.5, "at \(width) pt")
         }
     }
+
+    // MARK: Icons and shortcuts
+
+    func testCellMenuItemsHaveIconsAndShortcuts() {
+        view.isEditable = true
+        view.layoutGrids()
+        let items = grid.menuItems(for: grid.cell(row: 1, column: 0)).filter { !$0.isSeparatorItem }
+        XCTAssertEqual(items.count, TableCommand.allCases.count)
+        for item in items {
+            XCTAssertNotNil(item.image, "an icon for «\(item.title)»")
+            XCTAssertFalse(item.keyEquivalent.isEmpty, "a shortcut for «\(item.title)»")
+        }
+        for command in TableCommand.allCases {
+            XCTAssertNotNil(NSImage(systemSymbolName: command.symbol, accessibilityDescription: nil), command.symbol)
+        }
+    }
+
+    func testTableCommandsActOnTheFocusedCell() {
+        view.isEditable = true
+        view.layoutGrids()
+        let cell = grid.cell(row: 1, column: 0)
+        cell.performTableCommand(TableCommand.insertRowBelow.menuItem())
+        XCTAssertEqual(grid.cellTexts, [["Name", "Score"], ["Ada", "10"], ["", ""], ["Bob", "7"]])
+        grid.cell(row: 1, column: 1).performTableCommand(TableCommand.insertColumnRight.menuItem())
+        XCTAssertEqual(grid.cellTexts.map(\.count), [3, 3, 3, 3])
+        grid.cell(row: 1, column: 0).performTableCommand(TableCommand.alignCenter.menuItem())
+        let delimiter = view.string.split(separator: "\n").first { $0.hasPrefix("|:") || $0.hasPrefix("| :") }!
+        let first = delimiter.split(separator: "|").first!.trimmingCharacters(in: .whitespaces)
+        XCTAssertTrue(first.hasPrefix(":") && first.hasSuffix(":"), "centred: \(delimiter)")
+    }
+
+    func testTableCommandsOutsideATableDoNothing() {
+        view.isEditable = true
+        let before = view.string
+        view.performTableCommand(TableCommand.insertRowBelow.menuItem())
+        XCTAssertEqual(view.string, before)
+    }
 }
