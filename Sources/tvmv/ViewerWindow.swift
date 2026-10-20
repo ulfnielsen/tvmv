@@ -95,8 +95,7 @@ struct ViewerWindow: View {
                 native.scrollTo(anchor: item.anchor)
             }
         }
-        .onChange(of: theme.paper, initial: true) { model.chromeColor = theme.chromeColor(editing: model.isEditing) }
-        .onChange(of: model.isEditing) { model.chromeColor = theme.chromeColor(editing: model.isEditing) }
+        .onChange(of: theme.paper, initial: true) { model.chromeColor = theme.chromeColor }
         .onAppear {
             columns = settings.showOutline ? .all : .detailOnly
             model.startWatching()
