@@ -104,4 +104,61 @@ final class ReviewViewTests: XCTestCase {
         } }
         XCTAssertGreaterThan(hits, 10, "an accent marker where the point comment is")
     }
+
+    // MARK: Actions
+
+    private let day = Date(timeIntervalSince1970: 1_760_400_000)   // 2025-10-14, UTC
+
+    func testCommentingOnTheSelectionIsOneUndoableEditWhileReading() {
+        view.load("The cache is cold.\n")
+        var edits = 0
+        view.onEdit = { _, _ in edits += 1 }
+        view.isEditable = false
+        view.setSelectedRange(ns.range(of: "cache"))
+        let id = view.addComment(body: "Why?", author: "ulf", date: day, timeZone: .gmt)
+        XCTAssertNotNil(id)
+        XCTAssertEqual(view.string, "The {==cache==}[^\(id!)] is cold.\n\n[^\(id!)]: @ulf 2025-10-14: Why?\n")
+        XCTAssertFalse(view.isEditable, "still reading")
+        XCTAssertGreaterThan(edits, 0, "the document saw the edit")
+        view.undo(nil)   // as Edit > Undo does, while reading too
+        XCTAssertEqual(view.string, "The cache is cold.\n")
+    }
+
+    func testSuggestingReplacesTheSelection() {
+        view.load("The cache is cold.\n")
+        view.setSelectedRange(ns.range(of: "cold"))
+        let id = view.addSuggestion(replacement: "warm", body: "", author: "ulf", date: day, timeZone: .gmt)!
+        XCTAssertTrue(view.string.hasPrefix("The cache is {~~cold~>warm~~}[^\(id)]."))
+    }
+
+    func testSettlingAThread() {
+        view.load(Self.doc)
+        XCTAssertTrue(view.settle("rv-a1b2", .resolve))
+        XCTAssertFalse(view.string.contains("rv-a1b2"))
+        XCTAssertTrue(view.string.hasPrefix("The cache is"))
+        XCTAssertTrue(view.settle("rv-c3d4", .accept))
+        XCTAssertTrue(view.string.hasPrefix("The cache is warm and"))
+        XCTAssertTrue(view.settle("rv-e5f6", .reject))
+        XCTAssertTrue(view.string.hasPrefix("The cache is warm and cold,"))
+        XCTAssertFalse(view.settle("rv-nope", .resolve), "nothing to settle")
+    }
+
+    func testReplyingAppendsToTheThread() {
+        view.load(Self.doc)
+        XCTAssertTrue(view.reply(to: "rv-a1b2", body: "Because.", author: "claude", date: day, timeZone: .gmt))
+        XCTAssertTrue(view.string.contains("[^rv-a1b2]: @ulf 2026-10-14: Why?\n    @claude 2025-10-14: Because.\n"))
+    }
+
+    func testACommentNeedsASelectionWithinOneBlock() {
+        view.load("One.\n\nTwo.\n")
+        view.setSelectedRange(NSRange(location: 0, length: ns.length))
+        XCTAssertNil(view.addComment(body: "x", author: "ulf", date: day))
+        XCTAssertEqual(view.string, "One.\n\nTwo.\n")
+    }
+
+    func testTheAuthorHandleIsTheFirstNameLowercased() {
+        XCTAssertEqual(ReviewAuthor.handle(gitName: "Ulf Nielsen", account: "un"), "ulf")
+        XCTAssertEqual(ReviewAuthor.handle(gitName: "  ", account: "un"), "un")
+        XCTAssertEqual(ReviewAuthor.handle(gitName: nil, account: "Un"), "un")
+    }
 }
