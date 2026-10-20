@@ -14,6 +14,13 @@ enum ReviewCards {
         /// The source location the card lines up with: its anchor's first
         /// visible character (an orphan thread's own start).
         var anchor: Int
+
+        /// Same card content (positions aside): the card can stay as it is.
+        func showsSame(as other: Model) -> Bool {
+            id == other.id && kind == other.kind && change == other.change
+                && entries.map { [$0.author, $0.date, $0.kind.rawValue, $0.body] }
+                    == other.entries.map { [$0.author, $0.date, $0.kind.rawValue, $0.body] }
+        }
     }
 
     static func models(_ review: ReviewMarkup.Review) -> [Model] {
@@ -54,14 +61,17 @@ enum ReviewCards {
 final class ReviewCardView: NSView {
     enum Action: Equatable { case accept, reject, resolve, reply(String), deleteThread, removeMarkup }
 
-    let model: ReviewCards.Model
+    /// Its thread; the anchor position is refreshed as the text changes.
+    var model: ReviewCards.Model
     var id: String { model.id }
+    /// The width it was last laid out at (nil: not yet).
+    private(set) var fittedWidth: CGFloat?
     var onAction: ((Action) -> Void)?
     let replyField = NSTextField()
     var isFocused = false { didSet { updateBorder() } }
 
     private let stack = NSStackView()
-    private let theme: NativeTheme
+    let theme: NativeTheme
     private var bodyLabels: [NSTextField] = []
     private var replyWidth: NSLayoutConstraint?
 
@@ -177,6 +187,7 @@ final class ReviewCardView: NSView {
         let height = stack.fittingSize.height
         stack.frame = NSRect(x: 0, y: 0, width: width, height: height)
         setFrameSize(NSSize(width: width, height: height))
+        fittedWidth = width
     }
 
     private func updateBorder() {
@@ -209,8 +220,8 @@ final class ReviewComposerView: NSView {
     let bodyField = NSTextField()
     let replacementField: NSTextField?
     let messageLabel = NSTextField(labelWithString: "")
-    /// Returns false when the comment can't be placed (the label then says why).
-    var onSubmit: ((_ body: String, _ replacement: String?) -> Bool)?
+    /// Returns nil once added, or why it couldn't be (shown in the label).
+    var onSubmit: ((_ body: String, _ replacement: String?) -> String?)?
     var onCancel: (() -> Void)?
 
     init(suggestion: String?) {
@@ -276,11 +287,11 @@ final class ReviewComposerView: NSView {
         let body = Self.text(of: bodyField).trimmingCharacters(in: .whitespacesAndNewlines)
         let replacement = replacementField.map(Self.text(of:))
         if replacementField == nil, body.isEmpty { return }
-        if onSubmit?(body, replacement) == true {
-            submitted = true
-        } else {
-            messageLabel.stringValue = "Select text within one paragraph, outside code and other comments."
+        if let problem = onSubmit?(body, replacement) {
+            messageLabel.stringValue = problem
             messageLabel.isHidden = false
+        } else {
+            submitted = true
         }
     }
 }

@@ -164,4 +164,36 @@ final class ReviewViewTests: XCTestCase {
         XCTAssertEqual(ReviewAuthor.handle(gitName: "  ", account: "un"), "un")
         XCTAssertEqual(ReviewAuthor.handle(gitName: nil, account: "Un"), "un")
     }
+
+    func testGitConfigUserNameIsReadWithoutRunningGit() throws {
+        XCTAssertEqual(ReviewAuthor.userName(inConfig: "[core]\n\tname = no\n[user]\n\tname = Ulf Nielsen\n"), "Ulf Nielsen")
+        XCTAssertEqual(ReviewAuthor.userName(inConfig: "[User]\n  Name = \"Ann B\" ; comment\n"), "Ann B")
+        XCTAssertNil(ReviewAuthor.userName(inConfig: "[user]\n\temail = a@b\n"))
+
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("tvmv-author-\(UUID().uuidString)")
+        let home = root.appendingPathComponent("home"), repo = root.appendingPathComponent("repo")
+        addTeardownBlock { try? FileManager.default.removeItem(at: root) }
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent(".git"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent("docs"), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        try "[user]\n\tname = Global Person\n".write(to: home.appendingPathComponent(".gitconfig"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(ReviewAuthor.gitUserName(in: repo.appendingPathComponent("docs"), home: home), "Global Person")
+        try "[user]\n\tname = Repo Person\n".write(to: repo.appendingPathComponent(".git/config"), atomically: true, encoding: .utf8)
+        XCTAssertEqual(ReviewAuthor.gitUserName(in: repo.appendingPathComponent("docs"), home: home), "Repo Person")
+    }
+
+    func testThePointCommentCaretStaysBeforeTheHiddenThread() {
+        view.load("Hello")
+        view.setSelectedRange(NSRange(location: 5, length: 0))
+        let id = view.addComment(body: "Hi", author: "ulf", date: day, timeZone: .gmt)!
+        XCTAssertEqual(view.selectedRange().location, 5 + ("[^\(id)]" as NSString).length)
+    }
+
+    func testSettlingWithTheCaretInsideTheChangeKeepsItThere() {
+        view.load("a {~~was~>is~~}[^rv-g7h8] omega\n\n[^rv-g7h8]: @ulf 2026-10-14 suggestion: c\n")
+        view.setSelectedRange(NSRange(location: ns.range(of: "was").location + 1, length: 0))
+        XCTAssertTrue(view.settle("rv-g7h8", .accept))
+        XCTAssertEqual(view.string, "a is omega\n")
+        XCTAssertEqual(view.selectedRange().location, 2, "at the change, not drifted into «omega»")
+    }
 }

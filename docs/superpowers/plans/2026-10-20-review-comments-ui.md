@@ -50,3 +50,19 @@
 - Task 3: complete — ReviewViewTests 11/11 (RED: missing API); Ruling: undo test uses view.undo(nil), the menu path (documentUndo direct while read-only can't edit) — cost if wrong: none, menu path is what users hit.
 - Task 4: complete — ReviewCardTests 7/7 (RED: missing API; popover test needs window on screen — Ruling: orderFront in that test, cost if wrong: none); visual check found strike running into the old/new gap → '>' kept as clear carrier (tests RED→GREEN); suite 99 app / 188 core.
 - Task 5: complete — composer/navigation/accept-all tests RED (missing API) → GREEN; found+fixed: fields sent their action on end editing (Tab submitted early; traced via call stack), live-editor text read; reply field verified not affected (test kept as guard). Menu routing test written after the code (not seen RED). Suite 106 app / 188 core.
+- Final review (fresh reviewer, opus): 1 critical, 5 important, 10 minor.
+- Final: fixed C1 cards rebuilt per keystroke — testTypingKeepsTheCardsAndAHalfWrittenReply RED→GREEN; 40 threads 140 → 5 ms/key (debug).
+- Final: fixed I1 styles around anchors dropped — testStylesAroundAnAnchorSurvive, testHeadingTitlesLeaveReviewMarkupOut RED→GREEN.
+- Final: fixed I2 composer applied to changed text — testAComposerRefusesTextThatChangedUnderIt, testReloadingTheDocumentClosesTheComposer RED→GREEN.
+- Final: fixed I3 cards kept old theme — testCardsFollowTheTheme RED→GREEN.
+- Final: fixed I4 git spawned on main thread / CLT prompt — reads config files; testGitConfigUserNameIsReadWithoutRunningGit RED→GREEN.
+- Final: fixed I5 (partly) — commenting while a table cell has focus beeps instead of using the stale main selection; testCommentingFromATableCellIsRefusedNotMisplaced RED→GREEN. Ruling: commenting inside cells deferred — cost if wrong: cell comments need source mapping later.
+- Final: re-graded M1 (caret behind hidden thread), M2 (caret drift), M5 pre-check (parse cost for every doc) to Important and fixed — caret tests RED→GREEN, testTextWithoutReviewMarkupSkipsTheReviewParse RED→GREEN. M3 (nav on stale layout) fixed alongside, covered by existing nav tests.
+- Final: minor (deferred): M4 hand-written thread right after a table drops the table grid.
+- Final: minor (deferred): M5 fold is quadratic in anchors (1000 anchors → 170 ms).
+- Final: minor (deferred): M6 duplicate threads get no card; malformed entries show empty author; cards don't show the id.
+- Final: minor (deferred): M7 Remove Markup on a dangling suggestion rejects it.
+- Final: minor (deferred): M8 reply from a narrow-mode popover closes it.
+- Final: minor (deferred): M9 selectionRect at document end logs invalid glyph index.
+- Final: minor (deferred): M10 per-run marker lookups in styler / point-marker draw scans.
+- Suite after fixes: 114 app / 191 core, 0 failures.

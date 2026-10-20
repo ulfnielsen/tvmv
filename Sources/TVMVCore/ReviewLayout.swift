@@ -1,6 +1,14 @@
 import Foundation
 
 extension MarkdownLayout {
+    /// Every anchor and thread has an "[^rv-" ref or label: without one
+    /// there is nothing to fold, and the review parse is skipped.
+    static func mayHaveReviewMarkup(_ text: String) -> Bool { text.contains("[^rv-") }
+
+    /// Review markup inside a heading's rendered title: anchors keep their
+    /// text (a substitution its new side), refs go.
+    private static let titleMarkup = try! NSRegularExpression(
+        pattern: #"\{~~(?:.*?)~>(.*?)~~\}|\{(?:==|\+\+|--)(.*?)(?:==|\+\+|--)\}|\[\^rv-[a-z0-9]+\]"#)
     /// Fold review markup into the layout. cmark knows nothing of it: with
     /// footnotes off it reads a `[^rv-…]` ref as a link and a thread as a
     /// paragraph, and `{~~a~>b~~}` holds a strikethrough. Whatever cmark made
@@ -18,14 +26,23 @@ extension MarkdownLayout {
         let threads = spans.filter { $0.role == .definition }.map { ns($0.range) }
         let opaque = refs + threads
 
-        // A style goes if it touches a ref or a thread, or sits inside an
-        // anchor across its syntax (the strikethrough cmark sees in "{~~a~~}").
+        // A style goes if it is cmark's reading of a ref or thread (inside one,
+        // or straddling its edge), or sits inside an anchor across its syntax
+        // (the strikethrough cmark sees in "{~~a~~}"). Emphasis, a heading or a
+        // link around a whole anchor stays.
         styles.removeAll { run in
-            opaque.contains { meets($0, run.range) }
+            opaque.contains { meets($0, run.range) && !(run.range.encloses($0) && run.range != $0) }
                 || (syntax.contains { meets($0, run.range) } && anchors.contains { $0.encloses(run.range) })
         }
+        let hiding = syntax + threads
         markers.removeAll { m in
-            (syntax + threads).contains { meets($0, m.range) } || threads.contains { meets($0, m.unit) }
+            hiding.contains { meets($0, m.range) } || threads.contains { meets($0, m.unit) }
+        }
+        for i in headings.indices where anchors.contains(where: { meets($0, headings[i].range) }) {
+            let title = headings[i].title
+            headings[i].title = Self.titleMarkup
+                .stringByReplacingMatches(in: title, range: NSRange(location: 0, length: (title as NSString).length),
+                                          withTemplate: "$1$2")
         }
         listItems.removeAll { item in threads.contains { meets($0, item.marker) } }
         quoteLines.removeAll { line in threads.contains { meets($0, line.prefix) } }

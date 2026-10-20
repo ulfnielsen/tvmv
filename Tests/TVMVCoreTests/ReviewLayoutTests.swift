@@ -82,4 +82,28 @@ final class ReviewLayoutTests: XCTestCase {
         XCTAssertEqual(hidden(text), ["`", "`"])
         XCTAssertEqual(styled(text, .highlight), [])
     }
+
+    func testStylesAroundAnAnchorSurvive() {
+        // A comment inside italics, a heading or a link must not unstyle them.
+        let cases: [(String, (MarkdownLayout.Style) -> Bool)] = [
+            ("*one {==two==}[^rv-a1b2] three*", { $0 == .emphasis }),
+            ("# Title {==two==}[^rv-a1b2]", { $0 == .heading(level: 1) }),
+            ("**bold[^rv-a1b2]**", { $0 == .strong }),
+            ("[see {==here==}[^rv-a1b2]](http://x.y)", { if case .link = $0 { return true } else { return false } }),
+        ]
+        for (line, match) in cases {
+            let text = line + thread
+            XCTAssertTrue(MarkdownLayoutParser.parse(text).styles.contains { match($0.style) }, "styled: «\(line)»")
+        }
+    }
+
+    func testHeadingTitlesLeaveReviewMarkupOut() {
+        let layout = MarkdownLayoutParser.parse("# Title {==two==}[^rv-a1b2] {~~old~>new~~}[^rv-c3d4]\n" + thread)
+        XCTAssertEqual(layout.headings.map(\.title), ["Title two new"])
+    }
+
+    func testTextWithoutReviewMarkupSkipsTheReviewParse() {
+        XCTAssertFalse(MarkdownLayout.mayHaveReviewMarkup("Plain {== text ==} with [^note]."))
+        XCTAssertTrue(MarkdownLayout.mayHaveReviewMarkup("A ref.[^rv-a1b2]"))
+    }
 }

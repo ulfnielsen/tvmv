@@ -60,6 +60,24 @@ extension DocumentTextView {
         return applyReview(accepting ? review.acceptAll() : review.rejectAll())
     }
 
+    /// Where a caret at `location` belongs after `patches`: shifted past the
+    /// ones before it, and at the end of one it was inside. A new thread
+    /// definition never carries it along: at the end of the text that would
+    /// leave the caret behind the hidden thread.
+    static func caret(_ location: Int, through patches: [TextPatcher.Patch]) -> Int {
+        var shift = 0
+        for patch in patches {
+            let length = (patch.insert as NSString).length
+            if patch.to <= location {
+                if patch.from == location, patch.insert.contains("]: @") { continue }
+                shift += length - (patch.to - patch.from)
+            } else if patch.from < location {
+                return patch.from + shift + length
+            }
+        }
+        return max(0, location + shift)
+    }
+
     /// Apply `patches` (ascending, non-overlapping) as one undoable edit.
     /// False — and nothing written — when there are none.
     @discardableResult
@@ -74,11 +92,7 @@ extension DocumentTextView {
             replace(NSRange(location: patch.from, length: patch.to - patch.from), with: patch.insert)
         }
         undoManager?.endUndoGrouping()
-        // Keep the caret where it was, shifted past any patches before it.
-        let shift = patches.filter { $0.to <= selection.location }
-            .reduce(0) { $0 + ($1.insert as NSString).length - ($1.to - $1.from) }
-        let location = min(max(0, selection.location + shift), (string as NSString).length)
-        setSelectedRange(NSRange(location: location, length: 0))
+        setSelectedRange(NSRange(location: Self.caret(selection.location, through: patches), length: 0))
         return true
     }
 }
@@ -102,17 +116,52 @@ enum ReviewAuthor {
 
     @MainActor private static var cache: [String: String] = [:]
 
-    private static func gitUserName(in folder: URL?) -> String? {
-        let git = Process()
-        git.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        git.arguments = (folder.map { ["-C", $0.path] } ?? []) + ["config", "user.name"]
-        let out = Pipe()
-        git.standardOutput = out
-        git.standardError = FileHandle.nullDevice
-        guard (try? git.run()) != nil else { return nil }
-        git.waitUntilExit()
-        guard git.terminationStatus == 0 else { return nil }
-        return String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8)
+    /// git's user.name for `folder`: its repository's config, then the global
+    /// ones. Read from the files, not by running git: without the developer
+    /// tools, /usr/bin/git only offers to install them.
+    static func gitUserName(in folder: URL?,
+                            home: URL = FileManager.default.homeDirectoryForCurrentUser) -> String? {
+        var configs: [URL] = []
+        var directory = folder?.standardizedFileURL
+        while let current = directory {
+            let dotGit = current.appendingPathComponent(".git")
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: dotGit.path, isDirectory: &isDirectory) {
+                if isDirectory.boolValue { configs.append(dotGit.appendingPathComponent("config")) }
+                break
+            }
+            let parent = current.deletingLastPathComponent()
+            directory = parent.path == current.path ? nil : parent
+        }
+        configs += [home.appendingPathComponent(".gitconfig"), home.appendingPathComponent(".config/git/config")]
+        for config in configs {
+            if let text = try? String(contentsOf: config, encoding: .utf8), let name = userName(inConfig: text) {
+                return name
+            }
+        }
+        return nil
+    }
+
+    /// `name` in the `[user]` section of a git config file.
+    static func userName(inConfig text: String) -> String? {
+        var inUser = false
+        for raw in text.split(whereSeparator: \.isNewline) {
+            let line = raw.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") {
+                inUser = line.lowercased().hasPrefix("[user]")
+                continue
+            }
+            guard inUser, let equals = line.firstIndex(of: "="),
+                  line[..<equals].trimmingCharacters(in: .whitespaces).lowercased() == "name" else { continue }
+            var value = line[line.index(after: equals)...].trimmingCharacters(in: .whitespaces)
+            if value.hasPrefix("\""), let close = value.dropFirst().firstIndex(of: "\"") {
+                value = String(value[value.index(after: value.startIndex)..<close])
+            } else if let comment = value.firstIndex(where: { $0 == ";" || $0 == "#" }) {
+                value = value[..<comment].trimmingCharacters(in: .whitespaces)
+            }
+            return value.isEmpty ? nil : value
+        }
+        return nil
     }
 }
 
@@ -135,30 +184,50 @@ extension DocumentTextView {
         let cardWidth = min(300, bounds.width - cardX - 20)
         let wide = cardWidth >= Self.minimumCardWidth
 
-        if models != reviewModels || wide != reviewMarginIsWide {
-            reviewCards.forEach { $0.removeFromSuperview() }
-            reviewMarkers.forEach { $0.removeFromSuperview() }
-            reviewCards = []
-            reviewMarkers = []
+        // Keep every card (and marker) whose content is unchanged: an edit
+        // moves anchors on every keystroke, and a rebuild would cost a layout
+        // pass per card and lose a reply being written.
+        let reuse = wide == reviewMarginIsWide && theme == reviewTheme
+        if wide {
+            var existing = reuse ? Dictionary(reviewCards.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) : [:]
+            var cards: [ReviewCardView] = []
             for model in models {
-                if wide {
+                if let card = existing.removeValue(forKey: model.id), card.model.showsSame(as: model) {
+                    card.model = model
+                    cards.append(card)
+                } else {
                     let card = makeCard(model)
                     addSubview(card)
-                    reviewCards.append(card)
-                } else {
+                    cards.append(card)
+                }
+            }
+            for card in reviewCards where !cards.contains(where: { $0 === card }) { card.removeFromSuperview() }
+            reviewCards = cards
+            reviewMarkers.forEach { $0.removeFromSuperview() }
+            reviewMarkers = []
+        } else {
+            let same = reuse && models.count == reviewModels.count
+                && zip(models, reviewModels).allSatisfy { $0.showsSame(as: $1) }
+            if !same {
+                reviewMarkers.forEach { $0.removeFromSuperview() }
+                reviewMarkers = models.map { model in
                     let marker = ClosureButton(title: "") { [weak self] in self?.showCardPopover(model.id) }
                     marker.isBordered = false
                     marker.image = NSImage(systemSymbolName: "text.bubble.fill", accessibilityDescription: "Comment")
                     marker.contentTintColor = theme.accent
                     marker.toolTip = model.entries.first.map { "@\($0.author): \($0.body)" }
                     addSubview(marker)
-                    reviewMarkers.append(marker)
+                    return marker
                 }
             }
-            reviewModels = models
-            reviewMarginIsWide = wide
-            updateReviewFocus()
+            reviewCards.forEach { $0.removeFromSuperview() }
+            reviewCards = []
         }
+        let changed = models != reviewModels
+        reviewModels = models
+        reviewMarginIsWide = wide
+        reviewTheme = theme
+        if changed { updateReviewFocus() }
 
         func lineTop(_ location: Int) -> CGFloat {
             guard storage.length > 0 else { return textContainerOrigin.y }
@@ -167,7 +236,7 @@ extension DocumentTextView {
         }
         var next = -CGFloat.greatestFiniteMagnitude
         for (card, model) in zip(reviewCards, models) {
-            card.fit(width: cardWidth)
+            if card.fittedWidth != cardWidth { card.fit(width: cardWidth) }
             let y = max(lineTop(model.anchor), next)
             card.setFrameOrigin(NSPoint(x: cardX, y: y))
             next = card.frame.maxY + 8
@@ -241,18 +310,30 @@ extension DocumentTextView {
     private var author: String { ReviewAuthor.current(for: documentURL?.deletingLastPathComponent()) }
 
     private func openComposer(suggestion: Bool) {
-        guard !isCell else { return }
+        // A table cell has its own selection, in its own text: commenting on
+        // a cell isn't supported yet, and the main text's selection is stale.
+        if isCell || (window?.firstResponder as? DocumentTextView)?.isCell == true {
+            NSSound.beep()
+            return
+        }
         let selection = selectedRange()
         let composer = ReviewComposerView(
             suggestion: suggestion ? (string as NSString).substring(with: selection) : nil)
+        // The selection is an offset into the text as it is now: if the text
+        // changes while the composer is open, it would land on other words.
+        let original = string
         composer.onSubmit = { [weak self] body, replacement in
-            guard let self else { return false }
+            guard let self else { return nil }
+            guard self.string == original else {
+                return "The document changed. Close this and select the text again."
+            }
             self.setSelectedRange(selection)
             let id = replacement.map {
                 self.addSuggestion(replacement: $0, body: body, author: self.author)
             } ?? self.addComment(body: body, author: self.author)
-            if id != nil { self.reviewComposerPopover?.close() }
-            return id != nil
+            guard id != nil else { return "Select text within one paragraph, outside code and other comments." }
+            self.reviewComposerPopover?.close()
+            return nil
         }
         composer.onCancel = { [weak self] in self?.reviewComposerPopover?.close() }
         let controller = NSViewController()
@@ -283,7 +364,9 @@ extension DocumentTextView {
 
     /// Put the caret at the next (previous) thread's anchor, wrapping around.
     private func moveToThread(forward: Bool) {
-        let anchors = (layout.review.map(ReviewCards.models) ?? [])
+        // The text as it is now: in a large document the layout's copy can
+        // lag behind a background parse.
+        let anchors = ReviewCards.models(currentReview)
             .filter { $0.kind != .orphanThread }.map(\.anchor)
         guard !anchors.isEmpty else { NSSound.beep(); return }
         let caret = selectedRange().location

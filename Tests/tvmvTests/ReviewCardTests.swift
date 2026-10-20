@@ -198,4 +198,67 @@ final class ReviewCardTests: XCTestCase {
         window.makeFirstResponder(view)
         XCTAssertFalse(view.string.contains("half a tho"))
     }
+
+    // MARK: Review fixes
+
+    func testTypingKeepsTheCardsAndAHalfWrittenReply() {
+        makeView(width: 1500)
+        view.load(Self.doc)
+        let before = view.reviewCards
+        before[1].replyField.stringValue = "half a tho"
+        view.isEditable = true
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        view.insertText("x", replacementRange: view.selectedRange())
+        XCTAssertEqual(view.reviewCards.count, 3)
+        for (a, b) in zip(before, view.reviewCards) { XCTAssertTrue(a === b, "card \(a.id) kept") }
+        XCTAssertEqual(view.reviewCards[1].replyField.stringValue, "half a tho")
+        // Still beside their anchors, which moved down with the edit? Same line here; but they follow:
+        let lm = view.layoutManager!
+        let line = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: ns.range(of: "cache").location),
+                                       effectiveRange: nil)
+        XCTAssertEqual(view.reviewCards[0].frame.minY, line.minY + view.textContainerOrigin.y, accuracy: 1)
+    }
+
+    func testCardsFollowTheTheme() {
+        makeView(width: 1500)
+        view.load(Self.doc)
+        view.theme = NativeTheme(bodyFamily: "Georgia", monoFamily: "Menlo", size: 16,
+                                 measure: 70, fullWidth: false, dark: true)
+        XCTAssertEqual(view.reviewCards.first?.layer?.backgroundColor, view.theme.paperDeep.cgColor)
+    }
+
+    func testAComposerRefusesTextThatChangedUnderIt() {
+        makeView(width: 1500)
+        window.orderFront(nil)
+        view.load("The cache is cold.\n")
+        view.setSelectedRange(ns.range(of: "cold"))
+        view.addReviewComment(nil)
+        let composer = view.reviewComposer!
+        view.isEditable = true
+        view.insertText("Hot: ", replacementRange: NSRange(location: 0, length: 0))   // an edit while it is open
+        type("Why?", into: composer.bodyField)
+        composer.submit()
+        XCTAssertEqual(view.string, "Hot: The cache is cold.\n")
+        XCTAssertTrue(composer.messageLabel.stringValue.contains("changed"))
+    }
+
+    func testReloadingTheDocumentClosesTheComposer() {
+        makeView(width: 1500)
+        window.orderFront(nil)
+        view.load("The cache is cold.\n")
+        view.setSelectedRange(ns.range(of: "cold"))
+        view.addReviewComment(nil)
+        view.load("Completely different words now.\n")
+        XCTAssertNotEqual(view.reviewComposerPopover?.isShown, true)
+    }
+
+    func testCommentingFromATableCellIsRefusedNotMisplaced() {
+        makeView(width: 1500)
+        window.makeKeyAndOrderFront(nil)
+        view.load("Before.\n\n| a | b |\n|---|---|\n| c | d |\n")
+        view.setSelectedRange(ns.range(of: "Before"))   // an old selection in the main text
+        window.makeFirstResponder(view.tableGrids[0].cell(row: 1, column: 0))
+        view.addReviewComment(nil)
+        XCTAssertNil(view.reviewComposer, "no composer for the main text's old selection")
+    }
 }

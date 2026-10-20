@@ -55,6 +55,8 @@ final class DocumentTextView: NSTextView {
     var reviewPopover: NSPopover?
     var reviewModels: [ReviewCards.Model] = []
     var reviewMarginIsWide: Bool?
+    /// The theme the cards and markers were built with.
+    var reviewTheme: NativeTheme?
     var layingOutReview = false
     /// The comment or suggestion being written (⌘⇧M, ⌘⇧E).
     var reviewComposer: ReviewComposerView?
@@ -130,6 +132,7 @@ final class DocumentTextView: NSTextView {
     /// Replace the whole text (initial load, external reload). Not undoable.
     func load(_ text: String) {
         guard let storage = textStorage else { return }
+        reviewComposerPopover?.close()   // its selection was in the old text
         hooks.loading = true
         storage.replaceCharacters(in: NSRange(location: 0, length: storage.length), with: text)
         hooks.loading = false
