@@ -60,6 +60,24 @@ hidden. To see or change it, double-click a formatted span or press ⌘' (Esc, o
 moving away, hides it again); ⌥⌘M shows all the Markdown. ⌘B and ⌘I format a
 selection. Spelling and grammar are the system's, and skip code and URLs.
 
+Tables edit as grids. In edit mode, hover a cell: `+` buttons on the borders
+insert a row or column there, and the `⋯` handles above the column and left of
+the row open menus to insert, delete and align. The same commands are in the
+**Table** menu and a cell's right-click menu, with shortcuts — ⌃⌘ + arrow keys
+insert, ⌃⌘⌫ deletes the row, ⌃⌥⌘⌫ the column, ⌘{ ⌘| ⌘} align.
+
+Review comments live in the Markdown itself — CriticMarkup anchors
+(`{==text==}`, `{++add++}`, `{--cut--}`, `{~~old~>new~~}`) tied to footnote
+threads (`[^rv-…]`) — so they travel with the file and survive any editor. TVMV
+hides the markup and shows each thread as a card in a column beside the text.
+Select text and right-click → **Comment…** or **Suggest Edit…** (⌘⇧M / ⌘⇧E);
+cards take replies, resolve, and accept or reject suggestions. The **Review**
+menu steps between threads (⌥⌘↓ / ⌥⌘↑) and accepts or rejects all suggestions.
+Comments are signed with your git `user.name`.
+
+To remove a saved bookmark, use **View → Clear Bookmark** or right-click the
+bookmark button.
+
 Design spec and implementation plan live in `docs/superpowers/`.
 
 ## QuickLook
