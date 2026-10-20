@@ -136,4 +136,21 @@ final class MarkdownLayoutParserTests: XCTestCase {
         XCTAssertEqual(images.map(\.url), ["img/chart.png", "https://e.x/p.png"])
         XCTAssertEqual(images.map(\.alt), ["A chart", "remote"])
     }
+
+    func testTablesRecordTheirCellsRowsAndAlignment() {
+        let text = "Intro.\n\n| Name | *Score* | Note |\n|:-----|------:|:---:|\n| Ada  | 10 | a \\| b |\n| Bob | 7 |  |\n\nAfter.\n"
+        let ns = text as NSString
+        let tables = MarkdownLayoutParser.parse(text).tables
+        XCTAssertEqual(tables.count, 1)
+        let table = tables[0]
+        XCTAssertEqual(ns.substring(with: table.range), "| Name | *Score* | Note |\n|:-----|------:|:---:|\n| Ada  | 10 | a \\| b |\n| Bob | 7 |  |")
+        XCTAssertEqual(table.alignments, [.left, .right, .center])
+        // Cell ranges cover the content only — no pipes, no padding.
+        XCTAssertEqual(table.rows.map { $0.map { ns.substring(with: $0) } },
+                       [["Name", "*Score*", "Note"], ["Ada", "10", "a \\| b"], ["Bob", "7", ""]])
+        // An empty cell is an empty range sitting between its pipes.
+        let empty = table.rows[2][2]
+        XCTAssertEqual(empty.length, 0)
+        XCTAssertEqual(ns.character(at: empty.location - 1), 32)   // after the space following "|"
+    }
 }

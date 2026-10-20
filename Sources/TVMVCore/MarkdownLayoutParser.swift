@@ -119,6 +119,7 @@ struct LayoutBuilder {
                 r.length = min(r.length, max(0, limit - r.location))
                 if recordBlocks {
                     layout.blocks.append(.init(range: docRange(r), kind: CMark.type(block)))
+                    if CMark.type(block) == "table" { recordTable(r) }
                     if CMark.type(block) == "paragraph" {
                         recordSoftBreaks(in: r)
                         recordBlockImage(block)
@@ -144,6 +145,68 @@ struct LayoutBuilder {
             }
             i += 1
         }
+    }
+
+    /// A table's rows and cells, split on unescaped pipes in each source line
+    /// (cmark's cell positions include padding and can be missing for empty
+    /// cells); cmark still decides that this is a table.
+    mutating func recordTable(_ r: NSRange) {
+        var lines: [NSRange] = []
+        var start = r.location
+        while start < NSMaxRange(r) {
+            var line = lineRange(at: start)
+            let next = NSMaxRange(line)
+            if line.length > 0, ns.character(at: NSMaxRange(line) - 1) == 10 { line.length -= 1 }
+            line.length = min(line.length, NSMaxRange(r) - line.location)
+            lines.append(line)
+            start = next
+        }
+        guard lines.count >= 2 else { return }
+        let alignments = cells(in: lines[1]).map { cell -> MarkdownLayout.Table.Alignment in
+            let spec = ns.substring(with: cell.raw).trimmingCharacters(in: .whitespaces)
+            switch (spec.hasPrefix(":"), spec.hasSuffix(":")) {
+            case (true, true): return .center
+            case (true, false): return .left
+            case (false, true): return .right
+            default: return .none
+            }
+        }
+        let rows = ([lines[0]] + lines.dropFirst(2)).map { cells(in: $0).map(\.content) }
+        let range = NSRange(location: r.location, length: NSMaxRange(lines[lines.count - 1]) - r.location)
+        layout.tables.append(.init(range: docRange(range),
+                                   rows: rows.map { $0.map(docRange) },
+                                   alignments: alignments))
+    }
+
+    /// The cells of one table line: `raw` between the pipes, `content` trimmed.
+    func cells(in line: NSRange) -> [(raw: NSRange, content: NSRange)] {
+        let pipe: unichar = 124, backslash: unichar = 92
+        var i = line.location
+        let end = NSMaxRange(line)
+        while i < end, [32, 9].contains(ns.character(at: i)) { i += 1 }
+        if i < end, ns.character(at: i) == pipe { i += 1 }
+        var out: [(NSRange, NSRange)] = []
+        var cellStart = i
+        while i <= end {
+            let atEnd = i == end
+            if !atEnd, ns.character(at: i) == backslash { i += 2; continue }
+            if atEnd || ns.character(at: i) == pipe {
+                let raw = NSRange(location: cellStart, length: min(i, end) - cellStart)
+                let text = ns.substring(with: raw)
+                let trailingPipeOnly = atEnd && text.trimmingCharacters(in: .whitespaces).isEmpty && !out.isEmpty
+                if !trailingPipeOnly {
+                    let leading = text.prefix { $0 == " " || $0 == "\t" }.utf16.count
+                    let trimmed = text.trimmingCharacters(in: .whitespaces)
+                    let content = trimmed.isEmpty
+                        ? NSRange(location: raw.location + min(1, raw.length), length: 0)
+                        : NSRange(location: raw.location + leading, length: (trimmed as NSString).length)
+                    out.append((raw, content))
+                }
+                cellStart = i + 1
+            }
+            i += 1
+        }
+        return out
     }
 
     /// A paragraph whose only content is one image (whitespace aside).

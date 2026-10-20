@@ -64,6 +64,20 @@ public struct MarkdownLayout: Equatable, Sendable {
     /// Newlines inside top-level paragraphs that are soft line breaks: the
     /// paragraph reflows across them, so they lay out as spaces.
     public var softBreaks: [Int] = []
+    /// Top-level GFM tables: shown as an editable grid over their hidden source.
+    public var tables: [Table] = []
+
+    public struct Table: Equatable, Sendable {
+        public enum Alignment: Equatable, Sendable { case none, left, right, center }
+        /// The whole table source, header line through the last row (no final newline).
+        public var range: NSRange
+        /// Header row first, then body rows (the delimiter row is not a row).
+        /// Each cell is its content only: no pipes, no padding; an empty cell
+        /// is a zero-length range inside its pipes.
+        public var rows: [[NSRange]]
+        public var alignments: [Alignment]
+    }
+
     /// Images that are the whole content of a top-level paragraph: shown as
     /// the picture itself, with the `![alt](url)` source hidden until revealed.
     public var blockImages: [BlockImage] = []
