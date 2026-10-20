@@ -49,6 +49,9 @@ final class DocumentTextView: NSTextView {
     private(set) var tableGrids: [TableGridView] = []
     private var tableHeights: [Int: CGFloat] = [:]
     private var layingOutGrids = false
+    /// True from a text change until it has been handled: caret moves an
+    /// edit causes don't end a reveal.
+    private var editing = false
     /// A cell's edits wait here until its edit has finished processing.
     private var pendingCellPatches: [TextPatcher.Patch] = []
 
@@ -155,12 +158,14 @@ final class DocumentTextView: NSTextView {
         unchangedSuffix = min(unchangedSuffix, oldLength - NSMaxRange(oldRange))
         let insert = (storage.string as NSString).substring(with: editedRange)
         let patch = TextPatcher.Patch(from: oldRange.location, to: NSMaxRange(oldRange), insert: insert)
+        editing = true
         if isCell { pendingCellPatches.append(patch) }
         onEdit?(patch, storage.length)
     }
 
     /// Re-parse after edits (called from textDidChange, outside processEditing).
     fileprivate func textChanged() {
+        defer { editing = false }
         guard let storage = textStorage, !hasMarkedText() else { return }
         if let host = cellHost, !pendingCellPatches.isEmpty {
             let patches = pendingCellPatches
@@ -318,8 +323,8 @@ final class DocumentTextView: NSTextView {
         }
     }
 
-    private func setRevealedUnits(_ units: [NSRange]) {
-        revealing = !units.isEmpty
+    private func setRevealedUnits(_ units: [NSRange], keepRevealing: Bool = false) {
+        revealing = keepRevealing || !units.isEmpty
         guard units != revealedUnits else { return }
         let touched = (units + revealedUnits).reduce(nil as NSRange?) { acc, r in acc.map { NSUnionRange($0, r) } ?? r }
         revealedUnits = units
@@ -328,15 +333,18 @@ final class DocumentTextView: NSTextView {
 
     /// Selection moved: a reveal ends once the selection leaves every revealed unit.
     fileprivate func selectionChanged() {
-        guard revealing else { return }
+        guard revealing, !editing else { return }   // the user moved, not an edit
         let current = Set(unitsEnclosingSelection())
         if !revealedUnits.contains(where: current.contains) { setRevealedUnits([]) }
     }
 
     /// After a re-parse, revealed units are re-found around the selection
     /// (their ranges moved with the edit).
+    /// While the source being revealed is edited it can stop parsing as its
+    /// construct for a moment (an image missing its ")"): stay revealing, so
+    /// it shows again as source, not as the picture, once it is valid again.
     fileprivate func updateRevealedUnits() {
-        if revealing { setRevealedUnits(unitsEnclosingSelection()) }
+        if revealing { setRevealedUnits(unitsEnclosingSelection(), keepRevealing: true) }
     }
 
     /// Code, URLs and other exempt ranges never get spelling or grammar marks.
@@ -862,7 +870,8 @@ final class DocumentTextView: NSTextView {
     }
 
     override func cancelOperation(_ sender: Any?) {
-        if revealing { reveal(false) } else { super.cancelOperation(sender) }
+        // NSTextView doesn't implement cancelOperation:; passing it to super throws.
+        if revealing { reveal(false) }
     }
 
     @objc func toggleRevealMarkup(_ sender: Any?) {

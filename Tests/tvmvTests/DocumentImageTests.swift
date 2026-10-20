@@ -218,4 +218,34 @@ final class DocumentImageTests: XCTestCase {
         XCTAssertEqual(insideImageOutsideShape.brightnessComponent, page.brightnessComponent, accuracy: 0.01,
                        "transparent areas show the page")
     }
+
+    func testARevealedImageStaysRevealedWhileItsSourceIsEdited() throws {
+        // Reported: editing an image link flipped between source and picture.
+        // Mid-edit the line stops being an image (a ")" missing), the reveal
+        // ended, and the picture came back as soon as the text was valid.
+        try writePNG("img/chart.png", width: 200, height: 100)
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load("![A chart](img/chart.png)\n")
+        pump { view.imageState(for: "img/chart.png") == .loaded }
+        view.setSelectedRange(NSRange(location: 12, length: 0))
+        view.reveal(true)
+        XCTAssertFalse(glyphHidden(0))
+        let close = (view.string as NSString).range(of: ")")
+        view.setSelectedRange(NSRange(location: NSMaxRange(close), length: 0))
+        view.deleteBackward(nil)                                   // invalid: no ")"
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertFalse(glyphHidden(0), "source still shown mid-edit")
+        view.insertText(")", replacementRange: view.selectedRange())   // valid again
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertEqual(view.string, "![A chart](img/chart.png)\n")
+        XCTAssertFalse(glyphHidden(0), "still editing: the source stays")
+        XCTAssertTrue(view.revealing)
+        // Moving away ends it.
+        view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0))
+        view.moveToEndOfDocument(nil)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        view.cancelOperation(nil)
+        XCTAssertFalse(view.revealing)
+    }
 }
