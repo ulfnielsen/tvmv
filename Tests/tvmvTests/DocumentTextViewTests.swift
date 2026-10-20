@@ -414,4 +414,21 @@ final class DocumentTextViewTests: XCTestCase {
         view.load(current)
         XCTAssertEqual(edited, fragments().map(\.text))
     }
+
+    func testUndoAndProgrammaticEditsAreNotRetargetedAroundHiddenMarkup() {
+        // The delete rule (hidden markup → delete the visible neighbor) is for
+        // keystrokes. Undoing an edit inside hidden text, or the app replacing
+        // hidden text, must happen exactly as asked.
+        view.isEditable = true
+        view.load("a **bold** b\n")
+        XCTAssertTrue(view.replace(NSRange(location: 2, length: 1), with: ""))   // a hidden "*"
+        pump()
+        XCTAssertEqual(view.string, "a *bold** b\n", "programmatic edits are exact")
+        view.undoManager?.undo()
+        pump()
+        XCTAssertEqual(view.string, "a **bold** b\n", "undo restores the hidden character")
+        view.undoManager?.redo()
+        pump()
+        XCTAssertEqual(view.string, "a *bold** b\n")
+    }
 }

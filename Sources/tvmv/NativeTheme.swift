@@ -28,6 +28,8 @@ struct NativeTheme: Equatable {
     var columnWidth: CGFloat?
     /// Minimum horizontal padding either side of the column (app.css --tvmv-pad).
     var padding: CGFloat = 68
+    /// Paragraph alignment (table cells follow their column's alignment).
+    var textAlignment: NSTextAlignment = .natural
 
     init(bodyFamily: String, monoFamily: String, size: CGFloat, measure: Double, fullWidth: Bool, dark: Bool) {
         body = NSFont(name: bodyFamily, size: size)
@@ -55,6 +57,7 @@ struct NativeTheme: Equatable {
         let p = NSMutableParagraphStyle()
         p.minimumLineHeight = body.pointSize * 1.7
         p.maximumLineHeight = body.pointSize * 1.7
+        p.alignment = textAlignment
         return p
     }
 

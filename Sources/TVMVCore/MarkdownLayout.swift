@@ -103,7 +103,7 @@ public struct MarkdownLayout: Equatable, Sendable {
     /// Every reveal unit, in source order without duplicates.
     public var revealUnits: [NSRange] {
         var seen = Set<NSRange>()
-        return (markers.map(\.unit) + blockImages.map(\.range)).compactMap { seen.insert($0).inserted ? $0 : nil }
+        return (markers.map(\.unit) + blockImages.map(\.range) + tables.map(\.range)).compactMap { seen.insert($0).inserted ? $0 : nil }
     }
 }
 

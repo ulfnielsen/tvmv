@@ -8,7 +8,8 @@ enum DocumentStyler {
     ///   loaded (nil while loading or after a failure: a normal text line).
     static func apply(_ layout: MarkdownLayout, to storage: NSTextStorage, in range: NSRange,
                       theme: NativeTheme, isRevealed: (NSRange) -> Bool,
-                      imageHeight: (MarkdownLayout.BlockImage) -> CGFloat? = { _ in nil }) {
+                      imageHeight: (MarkdownLayout.BlockImage) -> CGFloat? = { _ in nil },
+                      tableHeight: (Int) -> CGFloat? = { _ in nil }) {
         let range = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
         guard range.length > 0 else { return }
         func clip(_ r: NSRange) -> NSRange? {
@@ -95,6 +96,28 @@ enum DocumentStyler {
                 p.minimumLineHeight = height + theme.body.pointSize
                 p.maximumLineHeight = height + theme.body.pointSize
                 storage.addAttribute(.paragraphStyle, value: p, range: r)
+            }
+        }
+        // Tables: the source hides (its final newline too, so the caret
+        // passes it as one collapsed block); the first line reserves the
+        // grid's height plus a half-em margin each side, the rest collapse.
+        let tableText = storage.string as NSString
+        for (index, table) in layout.tables.enumerated() where !isRevealed(table.range) {
+            var hidden = table.range
+            if NSMaxRange(hidden) < tableText.length, tableText.character(at: NSMaxRange(hidden)) == 10 { hidden.length += 1 }
+            guard let r = clip(hidden) else { continue }
+            storage.addAttribute(.tvmvHidden, value: true, range: r)
+            let firstLine = tableText.lineRange(for: NSRange(location: table.range.location, length: 0))
+            if let height = tableHeight(index), let first = clip(firstLine) {
+                let p = NSMutableParagraphStyle()
+                p.minimumLineHeight = height + theme.body.pointSize
+                p.maximumLineHeight = height + theme.body.pointSize
+                storage.addAttribute(.paragraphStyle, value: p, range: first)
+            }
+            let rest = NSRange(location: NSMaxRange(firstLine), length: max(0, NSMaxRange(hidden) - NSMaxRange(firstLine)))
+            if let r = clip(rest) {
+                storage.addAttributes([.font: NSFont.systemFont(ofSize: 0.1),
+                                       .paragraphStyle: NativeTheme.collapsedParagraph], range: r)
             }
         }
         for exempt in layout.spellExempt {

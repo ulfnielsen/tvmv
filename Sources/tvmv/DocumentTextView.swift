@@ -42,6 +42,19 @@ final class DocumentTextView: NSTextView {
     var onSized: (() -> Void)?
     /// The document's file: relative image paths resolve against its folder.
     var documentURL: URL?
+    /// Set on a table cell's editor: the grid it belongs to.
+    weak var cellHost: TableGridView?
+    var isCell: Bool { cellHost != nil }
+    /// One grid per table in `layout.tables`, in order.
+    private(set) var tableGrids: [TableGridView] = []
+    private var tableHeights: [Int: CGFloat] = [:]
+    private var layingOutGrids = false
+    /// A cell's edits wait here until its edit has finished processing.
+    private var pendingCellPatches: [TextPatcher.Patch] = []
+
+    override var isEditable: Bool {
+        didSet { if !isCell { tableGrids.forEach { $0.setEditable(isEditable) } } }
+    }
 
     enum ImageState: Equatable { case loading, loaded, failed }
     /// Block images by their address as written, loaded once and cached.
@@ -55,7 +68,7 @@ final class DocumentTextView: NSTextView {
     /// Private undo stack: the window's document undo manager belongs to a
     /// DocumentGroup(viewing:) document that can't be saved, and registering
     /// edits there triggers autosave alerts (see CodeMirrorEditorPane's history).
-    private let documentUndo = UndoManager()
+    private(set) var documentUndo = UndoManager()
     override var undoManager: UndoManager? { documentUndo }
 
     private let hooks = Hooks()
@@ -110,14 +123,21 @@ final class DocumentTextView: NSTextView {
         parseGeneration += 1   // a parse still in flight was for the old text
         layout = MarkdownLayoutParser.parse(text)
         unchangedPrefix = .max; unchangedSuffix = .max
+        pendingCellPatches = []
         restyle(NSRange(location: 0, length: storage.length))
         requestImages()
         onLayout?(layout)
     }
 
-    /// Replace `range` through the undoable edit path.
+    /// True while the app (not a keystroke) is changing the text.
+    fileprivate var applyingEdit = false
+
+    /// Replace `range` through the undoable edit path, exactly as asked: the
+    /// keystroke rules around hidden markup do not apply.
     @discardableResult
     func replace(_ range: NSRange, with string: String) -> Bool {
+        applyingEdit = true
+        defer { applyingEdit = false }
         guard shouldChangeText(in: range, replacementString: string) else { return false }
         textStorage?.replaceCharacters(in: range, with: string)
         didChangeText()
@@ -134,12 +154,19 @@ final class DocumentTextView: NSTextView {
         unchangedPrefix = min(unchangedPrefix, oldRange.location)
         unchangedSuffix = min(unchangedSuffix, oldLength - NSMaxRange(oldRange))
         let insert = (storage.string as NSString).substring(with: editedRange)
-        onEdit?(.init(from: oldRange.location, to: NSMaxRange(oldRange), insert: insert), storage.length)
+        let patch = TextPatcher.Patch(from: oldRange.location, to: NSMaxRange(oldRange), insert: insert)
+        if isCell { pendingCellPatches.append(patch) }
+        onEdit?(patch, storage.length)
     }
 
     /// Re-parse after edits (called from textDidChange, outside processEditing).
     fileprivate func textChanged() {
         guard let storage = textStorage, !hasMarkedText() else { return }
+        if let host = cellHost, !pendingCellPatches.isEmpty {
+            let patches = pendingCellPatches
+            pendingCellPatches = []
+            patches.forEach { host.cellDidEdit(self, $0) }
+        }
         let text = storage.string
         let old = layout
         let prefix = min(unchangedPrefix, old.length), suffix = min(unchangedSuffix, old.length - prefix)
@@ -196,13 +223,16 @@ final class DocumentTextView: NSTextView {
         guard let storage = textStorage else { return }
         let units = revealedUnits
         let all = showAllMarkup
+        let heights = tableHeights
         DocumentStyler.apply(layout, to: storage, in: range, theme: theme,
                              isRevealed: { all || units.contains($0) },
-                             imageHeight: { [weak self] in self?.imageSize(for: $0)?.height })
+                             imageHeight: { [weak self] in self?.imageSize(for: $0)?.height },
+                             tableHeight: { heights[$0] })
         // TextKit re-lays out an edit from the line after the previous
         // newline, assuming a newline ends a line. In a reflowed paragraph a
         // soft break doesn't, so re-lay the whole paragraph from its start.
         relayParagraphs(touching: range)
+        layoutGrids()
     }
 
     /// Invalidate layout from the start of every top-level paragraph that
@@ -231,6 +261,11 @@ final class DocumentTextView: NSTextView {
     /// Center a column of `theme.columnWidth` (or fill the width) with at least `theme.padding` each side.
     func layoutColumn() {
         guard let container = textContainer else { return }
+        if isCell {   // a table cell fills its frame, inside its own inset
+            container.containerSize = NSSize(width: max(1, bounds.width - 2 * textContainerInset.width),
+                                             height: .greatestFiniteMagnitude)
+            return
+        }
         let available = max(200, bounds.width - 2 * theme.padding)
         let width = min(theme.columnWidth ?? available, available)
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
@@ -241,7 +276,10 @@ final class DocumentTextView: NSTextView {
         let column = textContainer?.size.width
         super.setFrameSize(newSize)
         layoutColumn()
-        if textContainer?.size.width != column { restyleImages { _ in true } }   // they scale with the column
+        if textContainer?.size.width != column {   // images and tables scale with the column
+            restyleImages { _ in true }
+            layoutGrids()
+        }
         if newSize.width > 0, let sized = onSized {
             onSized = nil
             sized()
@@ -253,6 +291,14 @@ final class DocumentTextView: NSTextView {
     /// Show the markup of the unit(s) enclosing the selection (on), or hide it again (off).
     func reveal(_ on: Bool) {
         setRevealedUnits(on ? unitsEnclosingSelection() : [])
+    }
+
+    /// Reveal one unit and put the caret at its start (a table revealed from
+    /// one of its cells: its source is hidden until revealed, so the caret
+    /// could not be placed in it first).
+    func reveal(unit: NSRange) {
+        setRevealedUnits([unit])
+        setSelectedRange(NSRange(location: unit.location, length: 0))
     }
 
     func toggleShowAllMarkup() { showAllMarkup.toggle() }
@@ -328,6 +374,118 @@ final class DocumentTextView: NSTextView {
         let index = lm.characterIndex(for: p, in: tc, fractionOfDistanceBetweenInsertionPoints: &fraction)
         guard index < storage.length else { return nil }
         return storage.attribute(.tvmvLink, at: index, effectiveRange: nil) as? String
+    }
+
+    // MARK: Tables
+
+    /// Inline code runs that get a pill: not those in a table's hidden
+    /// source (its grid draws the cells).
+    func codePillRuns() -> [MarkdownLayout.StyleRun] {
+        let hiddenTables = layout.tables.map(\.range).filter { !(showAllMarkup || revealedUnits.contains($0)) }
+        return layout.styles.filter { run in
+            run.style == .code && !hiddenTables.contains { NSIntersectionRange($0, run.range).length > 0 }
+        }
+    }
+
+    /// Width the text needs on one line (a table column's natural width).
+    /// Measured through the frame: the container can't outgrow the view.
+    func naturalTextWidth() -> CGFloat {
+        guard let lm = layoutManager, let tc = textContainer else { return 0 }
+        let saved = frame.size
+        setFrameSize(NSSize(width: 100_000, height: saved.height))
+        lm.ensureLayout(for: tc)
+        let width = lm.usedRect(for: tc).width
+        setFrameSize(saved)
+        return width
+    }
+
+    /// Height of the text laid out at `width` (text width, inside the inset).
+    func textHeight(forWidth width: CGFloat) -> CGFloat {
+        guard let lm = layoutManager, let tc = textContainer else { return 0 }
+        setFrameSize(NSSize(width: max(1, width) + 2 * textContainerInset.width, height: frame.height))
+        lm.ensureLayout(for: tc)
+        return max(lm.usedRect(for: tc).height, theme.body.pointSize * 1.3)
+    }
+
+    /// Keep one grid per table, refreshed from the source and placed over its
+    /// hidden lines; a grid's height change restyles the lines that reserve it.
+    func layoutGrids() {
+        guard !isCell, !layingOutGrids, let storage = textStorage, let lm = layoutManager, let tc = textContainer
+        else { return }
+        layingOutGrids = true
+        defer { layingOutGrids = false }
+        while tableGrids.count > layout.tables.count { tableGrids.removeLast().removeFromSuperview() }
+        while tableGrids.count < layout.tables.count {
+            let grid = TableGridView(document: self)
+            addSubview(grid)
+            tableGrids.append(grid)
+        }
+        let width = tc.size.width - 2 * tc.lineFragmentPadding
+        for (i, table) in layout.tables.enumerated() where NSMaxRange(table.range) <= storage.length {
+            let grid = tableGrids[i]
+            grid.index = i
+            grid.isHidden = showAllMarkup || revealedUnits.contains(table.range)
+            guard !grid.isHidden else { continue }
+            grid.update(table: table, text: storage.string as NSString, width: width, theme: theme, editable: isEditable)
+            if tableHeights[i] != grid.frame.height {
+                tableHeights[i] = grid.frame.height
+                let heights = tableHeights, units = revealedUnits, all = showAllMarkup
+                DocumentStyler.apply(layout, to: storage, in: table.range, theme: theme,
+                                     isRevealed: { all || units.contains($0) },
+                                     imageHeight: { [weak self] in self?.imageSize(for: $0)?.height },
+                                     tableHeight: { heights[$0] })
+            }
+            // The first line is all hidden glyphs, which TextKit puts on the line
+            // before; its reserved height is on the line starting at its newline.
+            let text = storage.string as NSString
+            let newline = max(table.range.location,
+                              NSMaxRange(text.lineRange(for: NSRange(location: table.range.location, length: 0))) - 1)
+            let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: newline), effectiveRange: nil)
+            grid.setFrameOrigin(NSPoint(x: textContainerOrigin.x + tc.lineFragmentPadding,
+                                        y: fragment.minY + textContainerOrigin.y + theme.body.pointSize / 2))
+        }
+    }
+
+    /// Bring `layout` up to date with the text now (a cell edit needs the
+    /// table's current cell ranges, which a pending background parse may not have).
+    private func ensureCurrentLayout() {
+        guard let storage = textStorage, layout.length != storage.length || unchangedPrefix != .max || parseInFlight
+        else { return }
+        parseGeneration += 1
+        applyParsed(MarkdownLayoutParser.parse(storage.string), from: layout,
+                    edit: NSRange(location: 0, length: layout.length), delta: storage.length - layout.length,
+                    generation: parseGeneration)
+    }
+
+    /// A cell's own edit, applied to that cell's source.
+    func applyCellEdit(table index: Int, row: Int, column: Int, _ patch: TextPatcher.Patch) {
+        ensureCurrentLayout()
+        guard index < layout.tables.count, row < layout.tables[index].rows.count,
+              column < layout.tables[index].rows[row].count else { return }
+        let source = TableSource.cellEdit(layout.tables[index], row: row, column: column, patch)
+        replace(NSRange(location: source.from, length: source.to - source.from), with: source.insert)
+    }
+
+    /// A structural change: the table is rewritten neatly.
+    func reformatTable(_ index: Int, _ change: (inout [[String]], inout [MarkdownLayout.Table.Alignment]) -> Void) {
+        ensureCurrentLayout()
+        guard isEditable, index < layout.tables.count, let storage = textStorage else { return }
+        let patch = TableSource.reformat(layout.tables[index], in: storage.string as NSString, change)
+        replace(NSRange(location: patch.from, length: patch.to - patch.from), with: patch.insert)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let menu = super.menu(for: event)
+        if let host = cellHost { host.menuItems(for: self).forEach { menu?.addItem($0) } }
+        return menu
+    }
+
+    override func insertTab(_ sender: Any?) {
+        if let host = cellHost { host.move(from: self, .next) } else { super.insertTab(sender) }
+    }
+
+    override func insertBacktab(_ sender: Any?) {
+        if let host = cellHost { host.move(from: self, .previous) } else { super.insertBacktab(sender) }
     }
 
     // MARK: Images
@@ -481,13 +639,17 @@ final class DocumentTextView: NSTextView {
 
     /// undo:/redo: travelling up the responder chain would reach the window,
     /// which uses its own undo manager. Answer them here, from this view's stack.
-    @objc func undo(_ sender: Any?) { documentUndo.undo() }
-    @objc func redo(_ sender: Any?) { documentUndo.redo() }
+    @objc func undo(_ sender: Any?) {
+        if let document = cellHost?.document { document.undo(sender) } else { documentUndo.undo() }
+    }
+    @objc func redo(_ sender: Any?) {
+        if let document = cellHost?.document { document.redo(sender) } else { documentUndo.redo() }
+    }
 
     override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
         switch item.action {
-        case Selector(("undo:")): return documentUndo.canUndo
-        case Selector(("redo:")): return documentUndo.canRedo
+        case Selector(("undo:")): return (cellHost?.document?.documentUndo ?? documentUndo).canUndo
+        case Selector(("redo:")): return (cellHost?.document?.documentUndo ?? documentUndo).canRedo
         default: return super.validateUserInterfaceItem(item)
         }
     }
@@ -504,6 +666,7 @@ final class DocumentTextView: NSTextView {
     /// a single "\n" would be a Markdown soft break and reflow away.
     /// Elsewhere (code, lists, quotes, tables) it stays a plain newline.
     override func insertNewline(_ sender: Any?) {
+        if let host = cellHost { host.move(from: self, .down); return }
         guard isEditable, ["paragraph", "heading"].contains(blockKindAtCaret() ?? "") else {
             super.insertNewline(sender)
             return
@@ -517,6 +680,7 @@ final class DocumentTextView: NSTextView {
     /// Shift-Return breaks the line within a paragraph: a Markdown hard
     /// break ("\\" + newline), not AppKit's invisible U+2028.
     override func insertLineBreak(_ sender: Any?) {
+        if isCell { NSSound.beep(); return }   // a table cell is one line
         guard isEditable, ["paragraph", "heading"].contains(blockKindAtCaret() ?? "") else {
             super.insertNewline(sender)
             return
@@ -551,7 +715,9 @@ final class DocumentTextView: NSTextView {
         if revealing { reveal(false) } else { super.cancelOperation(sender) }
     }
 
-    @objc func toggleRevealMarkup(_ sender: Any?) { reveal(!revealing) }
+    @objc func toggleRevealMarkup(_ sender: Any?) {
+        if let host = cellHost { host.revealSource(from: self) } else { reveal(!revealing) }
+    }
     @objc func toggleShowMarkdown(_ sender: Any?) { toggleShowAllMarkup() }
     @objc func toggleBold(_ sender: Any?) { wrapSelection("**") }
     @objc func toggleItalic(_ sender: Any?) { wrapSelection("*") }
@@ -596,7 +762,7 @@ final class DocumentTextView: NSTextView {
         }
         // Inline code: a pill hugging the code font around its baseline, per line.
         let pad = theme.mono.pointSize * 0.14
-        for run in layout.styles where run.style == .code && NSIntersectionRange(run.range, visible).length > 0 {
+        for run in codePillRuns() where NSIntersectionRange(run.range, visible).length > 0 {
             let glyphs = lm.glyphRange(forCharacterRange: run.range, actualCharacterRange: nil)
             var g = glyphs.location
             while g < NSMaxRange(glyphs) {
@@ -647,7 +813,9 @@ final class DocumentTextView: NSTextView {
         }
 
         func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString string: String?) -> Bool {
-            guard let view, !view.showAllMarkup, string == "", let storage = view.textStorage else { return true }
+            guard let view, !view.showAllMarkup, string == "", let storage = view.textStorage,
+                  !view.applyingEdit, view.documentUndo.isUndoing == false, view.documentUndo.isRedoing == false
+            else { return true }   // keystrokes only: not undo/redo, not the app's own edits
             let caret = view.selectedRange().location
             switch EditRules.retargetDelete(range, caret: caret, in: storage.string as NSString, isHidden: view.isHidden) {
             case .allow:
