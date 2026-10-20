@@ -67,8 +67,20 @@ final class ReviewCardView: NSView {
     /// The width it was last laid out at (nil: not yet).
     private(set) var fittedWidth: CGFloat?
     var onAction: ((Action) -> Void)?
+    /// Clicked: the card asks to be the focused one.
+    var onFocus: (() -> Void)?
     let replyField = NSTextField()
-    var isFocused = false { didSet { updateBorder() } }
+    /// Only the focused card shows its buttons and reply field; the others
+    /// stay compact so they can sit close to their lines.
+    var isFocused = false {
+        didSet {
+            guard isFocused != oldValue else { return }
+            updateBorder()
+            actions.forEach { $0.isHidden = !isFocused }
+            fittedWidth = nil
+        }
+    }
+    private var actions: [NSView] = []
 
     private let stack = NSStackView()
     let theme: NativeTheme
@@ -147,8 +159,10 @@ final class ReviewCardView: NSView {
         case .danglingAnchor: add("Remove Markup", .removeMarkup)
         }
         stack.addArrangedSubview(buttons)
+        actions.append(buttons)
 
         if model.kind == .comment || model.kind == .suggestion {
+            actions.append(replyField)
             replyField.placeholderString = "Reply"
             replyField.controlSize = .small
             replyField.font = .systemFont(ofSize: 12)
@@ -158,6 +172,12 @@ final class ReviewCardView: NSView {
             replyWidth = replyField.widthAnchor.constraint(equalToConstant: 200)
             replyWidth?.isActive = true
         }
+        actions.forEach { $0.isHidden = true }
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // A click in the card's own space (not a button or the field) focuses it.
+        onFocus?()
     }
 
     @objc private func replyEntered(_ sender: Any?) { submitReply() }
@@ -213,32 +233,42 @@ final class ClosureButton: NSButton {
     @objc private func fire(_ sender: Any?) { handler() }
 }
 
-/// The popover for a new comment or suggestion: a replacement field for a
-/// suggestion (starting from the selected text), a note, and Add.
+/// A new comment or suggestion, written in a card in the side column: a
+/// replacement field for a suggestion (starting from the selected text), a
+/// note, and Add.
 @MainActor
 final class ReviewComposerView: NSView {
     let bodyField = NSTextField()
     let replacementField: NSTextField?
     let messageLabel = NSTextField(labelWithString: "")
+    /// Where the selection starts: the composer lines up with it.
+    var anchor = 0
     /// Returns nil once added, or why it couldn't be (shown in the label).
     var onSubmit: ((_ body: String, _ replacement: String?) -> String?)?
     var onCancel: (() -> Void)?
 
-    init(suggestion: String?) {
+    private let stack = NSStackView()
+    private var fieldWidths: [NSLayoutConstraint] = []
+
+    init(suggestion: String?, theme: NativeTheme) {
         replacementField = suggestion.map { NSTextField(string: $0) }
-        super.init(frame: NSRect(x: 0, y: 0, width: 320, height: 10))
-        let stack = NSStackView()
+        super.init(frame: NSRect(x: 0, y: 0, width: 300, height: 10))
+        wantsLayer = true
+        layer?.cornerRadius = 8
+        layer?.backgroundColor = theme.paperDeep.cgColor
+        layer?.borderWidth = 2
+        layer?.borderColor = theme.accent.cgColor
         stack.orientation = .vertical
         stack.alignment = .leading
         stack.spacing = 8
-        stack.edgeInsets = NSEdgeInsets(top: 14, left: 14, bottom: 14, right: 14)
-        let title = NSTextField(labelWithString: suggestion == nil ? "Comment" : "Suggest Edit")
-        title.font = .systemFont(ofSize: 13, weight: .semibold)
+        stack.edgeInsets = NSEdgeInsets(top: 10, left: 12, bottom: 10, right: 12)
+        let title = NSTextField(labelWithString: suggestion == nil ? "NEW COMMENT" : "SUGGEST EDIT")
+        title.font = .systemFont(ofSize: 10, weight: .semibold)
+        title.textColor = theme.accent
         stack.addArrangedSubview(title)
         if let replacementField {
             replacementField.placeholderString = "Replace with (empty deletes)"
             stack.addArrangedSubview(replacementField)
-            replacementField.widthAnchor.constraint(equalToConstant: 292).isActive = true
         }
         bodyField.placeholderString = suggestion == nil ? "Comment" : "Note (optional)"
         bodyField.target = self
@@ -246,28 +276,47 @@ final class ReviewComposerView: NSView {
         replacementField?.target = self
         replacementField?.action = #selector(enter(_:))
         // Return submits; leaving a field (Tab to the next) must not.
-        for field in [bodyField, replacementField].compactMap({ $0 }) {
+        for field in [replacementField, bodyField].compactMap({ $0 }) {
             (field.cell as? NSTextFieldCell)?.sendsActionOnEndEditing = false
+            field.font = .systemFont(ofSize: 12)
+            if field !== replacementField { stack.addArrangedSubview(field) }
+            let width = field.widthAnchor.constraint(equalToConstant: 250)
+            width.isActive = true
+            fieldWidths.append(width)
         }
-        stack.addArrangedSubview(bodyField)
-        bodyField.widthAnchor.constraint(equalToConstant: 292).isActive = true
         messageLabel.textColor = .systemRed
         messageLabel.font = .systemFont(ofSize: 11)
+        messageLabel.lineBreakMode = .byWordWrapping
+        messageLabel.maximumNumberOfLines = 0
         messageLabel.isHidden = true
         stack.addArrangedSubview(messageLabel)
         let buttons = NSStackView()
         buttons.orientation = .horizontal
+        buttons.spacing = 6
         let cancel = ClosureButton(title: "Cancel") { [weak self] in self?.onCancel?() }
         cancel.keyEquivalent = "\u{1b}"
         let add = ClosureButton(title: "Add") { [weak self] in self?.submit() }
         add.keyEquivalent = "\r"
-        buttons.addArrangedSubview(cancel)
-        buttons.addArrangedSubview(add)
+        for button in [cancel, add] {
+            button.controlSize = .small
+            button.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            buttons.addArrangedSubview(button)
+        }
         stack.addArrangedSubview(buttons)
         addSubview(stack)
-        let size = stack.fittingSize
-        stack.frame = NSRect(origin: .zero, size: size)
-        setFrameSize(size)
+        fit(width: 300)
+    }
+
+    override var isFlipped: Bool { true }
+
+    /// Lay out at `width`; the height follows the content.
+    func fit(width: CGFloat) {
+        let inner = width - stack.edgeInsets.left - stack.edgeInsets.right
+        fieldWidths.forEach { $0.constant = inner }
+        messageLabel.preferredMaxLayoutWidth = inner
+        let height = stack.fittingSize.height
+        stack.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        setFrameSize(NSSize(width: width, height: height))
     }
 
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
@@ -290,6 +339,7 @@ final class ReviewComposerView: NSView {
         if let problem = onSubmit?(body, replacement) {
             messageLabel.stringValue = problem
             messageLabel.isHidden = false
+            fit(width: frame.width)
         } else {
             submitted = true
         }

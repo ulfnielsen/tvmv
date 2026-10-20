@@ -165,97 +165,121 @@ enum ReviewAuthor {
     }
 }
 
-// MARK: Margin
+// MARK: Side column
 
 extension DocumentTextView {
-    /// Cards narrower than this become markers.
-    static let minimumCardWidth: CGFloat = 180
+    /// The comment column right of the text: a gap, the cards, a margin.
+    static let reviewGap: CGFloat = 24
+    static let reviewCardWidth: CGFloat = 280
+    static let reviewRightMargin: CGFloat = 20
+    static var reviewColumnWidth: CGFloat { reviewGap + reviewCardWidth + reviewRightMargin }
 
-    /// Place a card (or, in a narrow margin, a marker) beside each thread's
-    /// anchor, stacked top to bottom without overlapping.
+    /// Room the text column leaves on its right: the comment column while the
+    /// document has threads or one is being written, else none.
+    var reviewColumnReserve: CGFloat { showsReviewColumn ? Self.reviewColumnWidth : 0 }
+
+    /// Lay the comment column out: a card beside each thread's anchor (and
+    /// the composer beside its selection), stacked without overlapping. The
+    /// text column narrows to make room when the column appears.
     func layoutReviewMargin() {
         guard !isCell, !layingOutReview, let lm = layoutManager, let tc = textContainer, let storage = textStorage
         else { return }
         layingOutReview = true
         defer { layingOutReview = false }
         let models = layout.review.map(ReviewCards.models) ?? []
-        let columnRight = textContainerOrigin.x + tc.size.width
-        let cardX = columnRight + 28
-        let cardWidth = min(300, bounds.width - cardX - 20)
-        let wide = cardWidth >= Self.minimumCardWidth
 
-        // Keep every card (and marker) whose content is unchanged: an edit
-        // moves anchors on every keystroke, and a rebuild would cost a layout
-        // pass per card and lose a reply being written.
-        let reuse = wide == reviewMarginIsWide && theme == reviewTheme
-        if wide {
-            var existing = reuse ? Dictionary(reviewCards.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) : [:]
-            var cards: [ReviewCardView] = []
-            for model in models {
-                if let card = existing.removeValue(forKey: model.id), card.model.showsSame(as: model) {
-                    card.model = model
-                    cards.append(card)
-                } else {
-                    let card = makeCard(model)
-                    addSubview(card)
-                    cards.append(card)
-                }
-            }
-            for card in reviewCards where !cards.contains(where: { $0 === card }) { card.removeFromSuperview() }
-            reviewCards = cards
-            reviewMarkers.forEach { $0.removeFromSuperview() }
-            reviewMarkers = []
-        } else {
-            let same = reuse && models.count == reviewModels.count
-                && zip(models, reviewModels).allSatisfy { $0.showsSame(as: $1) }
-            if !same {
-                reviewMarkers.forEach { $0.removeFromSuperview() }
-                reviewMarkers = models.map { model in
-                    let marker = ClosureButton(title: "") { [weak self] in self?.showCardPopover(model.id) }
-                    marker.isBordered = false
-                    marker.image = NSImage(systemSymbolName: "text.bubble.fill", accessibilityDescription: "Comment")
-                    marker.contentTintColor = theme.accent
-                    marker.toolTip = model.entries.first.map { "@\($0.author): \($0.body)" }
-                    addSubview(marker)
-                    return marker
-                }
-            }
-            reviewCards.forEach { $0.removeFromSuperview() }
-            reviewCards = []
+        let shows = !models.isEmpty || reviewComposer != nil
+        if shows != showsReviewColumn {
+            showsReviewColumn = shows
+            columnChanged()
         }
+
+        // Keep every card whose content is unchanged: an edit moves anchors on
+        // every keystroke, and a rebuild would cost a layout pass per card and
+        // lose a reply being written.
+        var existing = theme == reviewTheme
+            ? Dictionary(reviewCards.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) : [:]
+        var cards: [ReviewCardView] = []
+        for model in models {
+            if let card = existing.removeValue(forKey: model.id), card.model.showsSame(as: model) {
+                card.model = model
+                cards.append(card)
+            } else {
+                let card = makeCard(model)
+                addSubview(card)
+                cards.append(card)
+            }
+        }
+        for card in reviewCards where !cards.contains(where: { $0 === card }) { card.removeFromSuperview() }
+        reviewCards = cards
         let changed = models != reviewModels
         reviewModels = models
-        reviewMarginIsWide = wide
         reviewTheme = theme
         if changed { updateReviewFocus() }
 
+        let x = textContainerOrigin.x + tc.size.width + Self.reviewGap
+        let width = max(200, min(Self.reviewCardWidth + 20, bounds.width - x - Self.reviewRightMargin))
         func lineTop(_ location: Int) -> CGFloat {
             guard storage.length > 0 else { return textContainerOrigin.y }
-            let glyph = lm.glyphIndexForCharacter(at: min(location, storage.length - 1))
+            let glyph = lm.glyphIndexForCharacter(at: min(max(0, location), storage.length - 1))
             return lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY + textContainerOrigin.y
         }
-        var next = -CGFloat.greatestFiniteMagnitude
-        for (card, model) in zip(reviewCards, models) {
-            if card.fittedWidth != cardWidth { card.fit(width: cardWidth) }
-            let y = max(lineTop(model.anchor), next)
-            card.setFrameOrigin(NSPoint(x: cardX, y: y))
-            next = card.frame.maxY + 8
+        // Cards and the composer, in anchor order.
+        var items: [(anchor: Int, view: NSView)] = zip(models, cards).map { ($0.anchor, $1) }
+        if let composer = reviewComposer { items.append((composer.anchor, composer)) }
+        items.sort { $0.anchor < $1.anchor }
+        for item in items {
+            if let card = item.view as? ReviewCardView, card.fittedWidth != width { card.fit(width: width) }
+            if let composer = item.view as? ReviewComposerView, composer.frame.width != width { composer.fit(width: width) }
         }
-        for (marker, model) in zip(reviewMarkers, models) {
-            let size = NSSize(width: 20, height: 18)
-            let y = max(lineTop(model.anchor) + 4, next)
-            marker.frame = NSRect(origin: NSPoint(x: columnRight + 10, y: y), size: size)
-            next = marker.frame.maxY + 4
-        }
+        let tops = Self.stack(items.map { (lineTop($0.anchor), $0.view.frame.height) },
+                              pinned: items.firstIndex { $0.view === reviewComposer }
+                                ?? items.firstIndex { ($0.view as? ReviewCardView)?.isFocused == true },
+                              gap: 8, top: textContainerOrigin.y)
+        for (item, y) in zip(items, tops) { item.view.setFrameOrigin(NSPoint(x: x, y: y)) }
         // The view grows to hold a card that reaches past the text.
+        let next = zip(items, tops).map { $1 + $0.view.frame.height }.max() ?? 0
         let bottom = max(next, 0) + textContainerInset.height
         if minSize.height != bottom, bottom > 0 { minSize.height = bottom; sizeToFit() }
+    }
+
+    /// Tops for items wanting to sit at `wanted` (each with its height),
+    /// without overlapping: the pinned one (the focused card, the composer)
+    /// exactly at its line, those after it pushed down, those before it
+    /// pushed up — and all of them down again if that runs past `top`.
+    static func stack(_ items: [(wanted: CGFloat, height: CGFloat)], pinned: Int?, gap: CGFloat, top: CGFloat) -> [CGFloat] {
+        guard !items.isEmpty else { return [] }
+        var tops = items.map(\.wanted)
+        let p = pinned ?? 0
+        for i in (p + 1)..<max(p + 1, items.count) {
+            tops[i] = max(items[i].wanted, tops[i - 1] + items[i - 1].height + gap)
+        }
+        if p > 0 {
+            for i in stride(from: p - 1, through: 0, by: -1) {
+                tops[i] = min(items[i].wanted, tops[i + 1] - gap - items[i].height)
+            }
+        }
+        if let first = tops.first, first < top {
+            // Out of room above: push the whole stack down.
+            let shift = top - first
+            tops[0] += shift
+            for i in 1..<tops.count { tops[i] = max(tops[i], tops[i - 1] + items[i - 1].height + gap) }
+        }
+        return tops
     }
 
     private func makeCard(_ model: ReviewCards.Model) -> ReviewCardView {
         let card = ReviewCardView(model: model, theme: theme)
         card.onAction = { [weak self] action in self?.perform(action, on: model.id) }
+        card.onFocus = { [weak self] in self?.focusCard(model.id) }
         return card
+    }
+
+    /// Focus a card from a click on it: it shows its actions and moves to its line.
+    func focusCard(_ id: String) {
+        focusedReviewID = id
+        for card in reviewCards { card.isFocused = card.id == id }
+        layoutReviewMargin()
     }
 
     private func perform(_ action: ReviewCardView.Action, on id: String) {
@@ -266,23 +290,6 @@ extension DocumentTextView {
         case .reply(let body):
             reply(to: id, body: body, author: ReviewAuthor.current(for: documentURL?.deletingLastPathComponent()))
         }
-        reviewPopover?.close()
-    }
-
-    func showCardPopover(_ id: String) {
-        guard let model = reviewModels.first(where: { $0.id == id }),
-              let index = reviewModels.firstIndex(of: model), index < reviewMarkers.count else { return }
-        let card = makeCard(model)
-        card.fit(width: 300)
-        let controller = NSViewController()
-        controller.view = card
-        let popover = NSPopover()
-        popover.contentViewController = controller
-        popover.behavior = .transient
-        popover.contentSize = card.frame.size
-        reviewPopover?.close()
-        reviewPopover = popover
-        popover.show(relativeTo: reviewMarkers[index].bounds, of: reviewMarkers[index], preferredEdge: .maxX)
     }
 
     /// Focus the card of the anchor the caret is in (none outside anchors).
@@ -293,7 +300,10 @@ extension DocumentTextView {
         for location in [caret, caret - 1] where location >= 0 && location < storage.length {
             if let found = storage.attribute(.tvmvReview, at: location, effectiveRange: nil) as? String { id = found; break }
         }
+        focusedReviewID = id
+        let before = reviewCards.map(\.isFocused)
         for card in reviewCards { card.isFocused = card.id == id }
+        if reviewCards.map(\.isFocused) != before { layoutReviewMargin() }
     }
 }
 
@@ -309,6 +319,8 @@ extension DocumentTextView {
 
     private var author: String { ReviewAuthor.current(for: documentURL?.deletingLastPathComponent()) }
 
+    /// Write a comment or suggestion in a card in the side column, beside
+    /// the selection.
     private func openComposer(suggestion: Bool) {
         // A table cell has its own selection, in its own text: commenting on
         // a cell isn't supported yet, and the main text's selection is stale.
@@ -316,50 +328,42 @@ extension DocumentTextView {
             NSSound.beep()
             return
         }
+        closeComposer()
         let selection = selectedRange()
         let composer = ReviewComposerView(
-            suggestion: suggestion ? (string as NSString).substring(with: selection) : nil)
+            suggestion: suggestion ? (string as NSString).substring(with: selection) : nil, theme: theme)
+        composer.anchor = selection.location
         // The selection is an offset into the text as it is now: if the text
         // changes while the composer is open, it would land on other words.
         let original = string
         composer.onSubmit = { [weak self] body, replacement in
             guard let self else { return nil }
             guard self.string == original else {
-                return "The document changed. Close this and select the text again."
+                return "The document changed. Cancel and select the text again."
             }
             self.setSelectedRange(selection)
             let id = replacement.map {
                 self.addSuggestion(replacement: $0, body: body, author: self.author)
             } ?? self.addComment(body: body, author: self.author)
             guard id != nil else { return "Select text within one paragraph, outside code and other comments." }
-            self.reviewComposerPopover?.close()
+            self.closeComposer()
             return nil
         }
-        composer.onCancel = { [weak self] in self?.reviewComposerPopover?.close() }
-        let controller = NSViewController()
-        controller.view = composer
-        let popover = NSPopover()
-        popover.animates = false
-        popover.contentViewController = controller
-        popover.contentSize = composer.frame.size
-        popover.behavior = .transient
-        reviewComposerPopover?.close()
+        composer.onCancel = { [weak self] in self?.closeComposer() }
         reviewComposer = composer
-        reviewComposerPopover = popover
-        popover.show(relativeTo: selectionRect(selection), of: self, preferredEdge: .maxY)
+        addSubview(composer)
+        layoutReviewMargin()
+        scrollToVisible(composer.frame)
         window?.makeFirstResponder(composer.replacementField ?? composer.bodyField)
     }
 
-    /// Where the selection is drawn, in view coordinates (its first line).
-    private func selectionRect(_ selection: NSRange) -> NSRect {
-        guard let lm = layoutManager, let tc = textContainer else { return bounds }
-        let glyphs = lm.glyphRange(forCharacterRange: NSRange(location: selection.location, length: max(1, selection.length)),
-                                   actualCharacterRange: nil)
-        var line = NSRange()
-        lm.lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: &line)
-        let rect = lm.boundingRect(forGlyphRange: NSIntersectionRange(glyphs, line).length > 0
-                                   ? NSIntersectionRange(glyphs, line) : glyphs, in: tc)
-        return rect.offsetBy(dx: textContainerOrigin.x, dy: textContainerOrigin.y)
+    func closeComposer() {
+        guard let composer = reviewComposer else { return }
+        let hadFocus = (window?.firstResponder as? NSView).map { $0.isDescendant(of: composer) } ?? false
+        composer.removeFromSuperview()
+        reviewComposer = nil
+        layoutReviewMargin()
+        if hadFocus { window?.makeFirstResponder(self) }
     }
 
     /// Put the caret at the next (previous) thread's anchor, wrapping around.

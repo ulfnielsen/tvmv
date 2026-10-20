@@ -64,7 +64,6 @@ final class ReviewCardTests: XCTestCase {
         let line = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: ns.range(of: "cache").location),
                                        effectiveRange: nil)
         XCTAssertEqual(cards[0].frame.minY, line.minY + view.textContainerOrigin.y, accuracy: 1)
-        XCTAssertTrue(view.reviewMarkers.isEmpty)
     }
 
     func testCardButtonsSettleAndReply() {
@@ -91,17 +90,32 @@ final class ReviewCardTests: XCTestCase {
         XCTAssertEqual(view.string, "A b c.\n")
     }
 
-    func testANarrowWindowShowsMarkersThatOpenTheCard() {
-        makeView(width: 700, fullWidth: true)
+    func testANarrowWindowMakesRoomForTheCardsBesideTheText() {
+        // Comments live on the side, never in popovers: a full-width or narrow
+        // window narrows the text column to fit the card column.
+        makeView(width: 800, fullWidth: true)
+        view.load("Plain text with no comments at all, long enough to wrap the line.\n")
+        let plainColumn = view.textContainer!.size.width
         view.load(Self.doc)
-        XCTAssertTrue(view.reviewCards.allSatisfy(\.isHidden) || view.reviewCards.isEmpty)
-        XCTAssertEqual(view.reviewMarkers.count, 3)
-        let column = view.textContainerOrigin.x + view.textContainer!.size.width
-        XCTAssertGreaterThanOrEqual(view.reviewMarkers[0].frame.minX, column)
-        XCTAssertLessThanOrEqual(view.reviewMarkers[0].frame.maxX, view.bounds.width)
-        window.orderFront(nil)   // a popover shows from a window on screen
-        view.reviewMarkers[0].performClick(nil)
-        XCTAssertEqual(view.reviewPopover?.isShown, true)
+        XCTAssertEqual(view.reviewCards.count, 3)
+        let columnRight = view.textContainerOrigin.x + view.textContainer!.size.width
+        XCTAssertLessThan(view.textContainer!.size.width, plainColumn)
+        for card in view.reviewCards {
+            XCTAssertGreaterThan(card.frame.minX, columnRight)
+            XCTAssertLessThanOrEqual(card.frame.maxX, view.bounds.width)
+            XCTAssertGreaterThanOrEqual(card.frame.width, 200)
+        }
+    }
+
+    func testTheColumnComesBackWhenTheLastCommentGoes() {
+        makeView(width: 800, fullWidth: true)
+        view.load("Plain text with no comments.\n")
+        let plainColumn = view.textContainer!.size.width
+        view.load("A {==b==}[^rv-a1b2] c.\n\n[^rv-a1b2]: @ulf 2026-10-14: x\n")
+        XCTAssertLessThan(view.textContainer!.size.width, plainColumn)
+        view.settle("rv-a1b2", .resolve)
+        XCTAssertEqual(view.textContainer!.size.width, plainColumn)
+        XCTAssertTrue(view.reviewCards.isEmpty)
     }
 
     func testTheCaretInAnAnchorFocusesItsCard() {
@@ -128,13 +142,19 @@ final class ReviewCardTests: XCTestCase {
         view.setSelectedRange(ns.range(of: "cache"))
         view.addReviewComment(nil)
         let composer = view.reviewComposer!
-        XCTAssertEqual(view.reviewComposerPopover?.isShown, true)
+        XCTAssertTrue(composer.superview === view, "written in the side column, not a popover")
+        let columnRight = view.textContainerOrigin.x + view.textContainer!.size.width
+        XCTAssertGreaterThan(composer.frame.minX, columnRight)
+        let lm = view.layoutManager!
+        let line = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: ns.range(of: "cache").location),
+                                       effectiveRange: nil)
+        XCTAssertEqual(composer.frame.minY, line.minY + view.textContainerOrigin.y, accuracy: 1, "beside the selection")
         XCTAssertNil(composer.replacementField, "a comment has no replacement")
         type("Why?", into: composer.bodyField)
         composer.submit()
         XCTAssertTrue(view.string.hasPrefix("The {==cache==}[^rv-"))
         XCTAssertTrue(view.string.contains(": Why?\n"))
-        XCTAssertNotEqual(view.reviewComposerPopover?.isShown, true)
+        XCTAssertNil(view.reviewComposer?.superview, "closed once added")
     }
 
     func testSuggestionComposerStartsFromTheSelectedText() {
@@ -249,7 +269,7 @@ final class ReviewCardTests: XCTestCase {
         view.setSelectedRange(ns.range(of: "cold"))
         view.addReviewComment(nil)
         view.load("Completely different words now.\n")
-        XCTAssertNotEqual(view.reviewComposerPopover?.isShown, true)
+        XCTAssertNil(view.reviewComposer?.superview)
     }
 
     func testCommentingFromATableCellIsRefusedNotMisplaced() {
@@ -260,5 +280,73 @@ final class ReviewCardTests: XCTestCase {
         window.makeFirstResponder(view.tableGrids[0].cell(row: 1, column: 0))
         view.addReviewComment(nil)
         XCTAssertNil(view.reviewComposer, "no composer for the main text's old selection")
+    }
+
+    func testTheContextMenuOffersCommentAndSuggestEdit() {
+        makeView(width: 1500)
+        view.load("The cache is cold.\n")
+        view.setSelectedRange(ns.range(of: "cache"))
+        let point = view.convert(NSPoint(x: view.textContainerOrigin.x + 30, y: view.textContainerOrigin.y + 10), to: nil)
+        let event = NSEvent.mouseEvent(with: .rightMouseDown, location: point, modifierFlags: [], timestamp: 0,
+                                       windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                       clickCount: 1, pressure: 1)!
+        let menu = view.menu(for: event)!
+        let titles = menu.items.map(\.title)
+        XCTAssertEqual(Array(titles.prefix(2)), ["Comment…", "Suggest Edit…"])
+        XCTAssertEqual(menu.items[0].action, #selector(DocumentTextView.addReviewComment(_:)))
+        XCTAssertEqual(menu.items[1].action, #selector(DocumentTextView.suggestReviewEdit(_:)))
+    }
+
+    // MARK: Compact cards
+
+    private func lineTop(of word: String) -> CGFloat {
+        let lm = view.layoutManager!
+        let line = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: ns.range(of: word).location),
+                                       effectiveRange: nil)
+        return line.minY + view.textContainerOrigin.y
+    }
+
+    func testOnlyTheFocusedCardShowsItsActions() {
+        makeView(width: 1500)
+        view.load(Self.doc)
+        XCTAssertTrue(view.reviewCards.allSatisfy { $0.replyField.isHiddenOrHasHiddenAncestor })
+        let compact = view.reviewCards[1].frame.height
+        view.setSelectedRange(NSRange(location: ns.range(of: "cold").location + 1, length: 0))
+        XCTAssertFalse(view.reviewCards[1].replyField.isHiddenOrHasHiddenAncestor)
+        XCTAssertFalse(view.reviewCards[1].button("Accept")!.isHiddenOrHasHiddenAncestor)
+        XCTAssertGreaterThan(view.reviewCards[1].frame.height, compact)
+    }
+
+    func testTheFocusedCardSitsOnItsLineAndTheOthersMakeWay() {
+        makeView(width: 1500)
+        // Three comments on one line: stacked, the third would sit far below it.
+        // (Room above for the cards that make way.)
+        let text = String(repeating: "Filler paragraph to leave room above.\n\n", count: 12) + "A {==b==}[^rv-a1b2] {==c==}[^rv-c3d4] {==d==}[^rv-e5f6].\n\n"
+            + "[^rv-a1b2]: @ulf 2026-10-14: One.\n[^rv-c3d4]: @ulf 2026-10-14: Two.\n[^rv-e5f6]: @ulf 2026-10-14: Three.\n"
+        view.load(text)
+        view.setSelectedRange(NSRange(location: ns.range(of: "d==").location, length: 0))
+        let cards = view.reviewCards
+        XCTAssertEqual(cards[2].frame.minY, lineTop(of: "d=="), accuracy: 1, "the focused card on its line")
+        XCTAssertLessThanOrEqual(cards[1].frame.maxY, cards[2].frame.minY)
+        XCTAssertLessThanOrEqual(cards[0].frame.maxY, cards[1].frame.minY)
+    }
+
+    func testClickingACardFocusesIt() {
+        makeView(width: 1500)
+        view.load(Self.doc)
+        view.reviewCards[2].mouseDown(with: NSEvent.mouseEvent(
+            with: .leftMouseDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber,
+            context: nil, eventNumber: 0, clickCount: 1, pressure: 1)!)
+        XCTAssertEqual(view.reviewCards.filter(\.isFocused).map(\.id), ["rv-e5f6"])
+        XCTAssertFalse(view.reviewCards[2].replyField.isHiddenOrHasHiddenAncestor)
+    }
+
+    func testTheComposerSitsOnItsLine() {
+        makeView(width: 1500)
+        window.orderFront(nil)
+        view.load(Self.doc + "\n" + String(repeating: "Filler paragraph to leave room above.\n\n", count: 12) + "Last line.\n")
+        view.setSelectedRange(ns.range(of: "Last"))
+        view.addReviewComment(nil)
+        XCTAssertEqual(view.reviewComposer!.frame.minY, lineTop(of: "Last"), accuracy: 1)
     }
 }

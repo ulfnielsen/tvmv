@@ -51,16 +51,16 @@ final class DocumentTextView: NSTextView {
     /// Review margin: cards beside their anchors when the margin is wide
     /// enough, otherwise markers that open a card in a popover.
     var reviewCards: [ReviewCardView] = []
-    var reviewMarkers: [NSButton] = []
-    var reviewPopover: NSPopover?
     var reviewModels: [ReviewCards.Model] = []
-    var reviewMarginIsWide: Bool?
+    /// The thread whose card is focused (by the caret, or a click on the card).
+    var focusedReviewID: String?
+    /// The text column is narrowed for the comment column.
+    var showsReviewColumn = false
     /// The theme the cards and markers were built with.
     var reviewTheme: NativeTheme?
     var layingOutReview = false
-    /// The comment or suggestion being written (⌘⇧M, ⌘⇧E).
+    /// The comment or suggestion being written (⌘⇧M, ⌘⇧E), in the side column.
     var reviewComposer: ReviewComposerView?
-    var reviewComposerPopover: NSPopover?
     private var layingOutGrids = false
     /// True from a text change until it has been handled: caret moves an
     /// edit causes don't end a reveal.
@@ -132,7 +132,7 @@ final class DocumentTextView: NSTextView {
     /// Replace the whole text (initial load, external reload). Not undoable.
     func load(_ text: String) {
         guard let storage = textStorage else { return }
-        reviewComposerPopover?.close()   // its selection was in the old text
+        closeComposer()   // its selection was in the old text
         hooks.loading = true
         storage.replaceCharacters(in: NSRange(location: 0, length: storage.length), with: text)
         hooks.loading = false
@@ -279,6 +279,16 @@ final class DocumentTextView: NSTextView {
     }
 
     /// Center a column of `theme.columnWidth` (or fill the width) with at least `theme.padding` each side.
+    /// Re-lay the column and what follows it: images scale with its width,
+    /// tables and comment cards follow its width and position.
+    func columnChanged() {
+        let column = textContainer?.size.width
+        layoutColumn()
+        if textContainer?.size.width != column { restyleImages { _ in true } }
+        layoutGrids()
+        layoutReviewMargin()
+    }
+
     func layoutColumn() {
         guard let container = textContainer else { return }
         if isCell {   // a table cell fills its frame, inside its own inset
@@ -286,20 +296,21 @@ final class DocumentTextView: NSTextView {
                                              height: .greatestFiniteMagnitude)
             return
         }
-        let available = max(200, bounds.width - 2 * theme.padding)
+        // With comments, the column on the right takes the place of the
+        // right padding; the text stays centred while the cards fit beside it.
+        let reserve = reviewColumnReserve
+        let available = max(200, bounds.width - theme.padding - (reserve > 0 ? reserve : theme.padding))
         let width = min(theme.columnWidth ?? available, available)
         container.containerSize = NSSize(width: width, height: .greatestFiniteMagnitude)
-        textContainerInset = NSSize(width: max(theme.padding, (bounds.width - width) / 2), height: 36)
+        var x = max(theme.padding, (bounds.width - width) / 2)
+        if reserve > 0, x + width + reserve > bounds.width { x = max(theme.padding, bounds.width - reserve - width) }
+        textContainerInset = NSSize(width: x, height: 36)
     }
 
     override func setFrameSize(_ newSize: NSSize) {
-        let column = textContainer?.size.width
         let oldWidth = frame.width
         super.setFrameSize(newSize)
-        layoutColumn()
-        if textContainer?.size.width != column { restyleImages { _ in true } }   // they scale with the column
-        // Tables follow the column: its width, and its centring beyond the measure.
-        if newSize.width != oldWidth { layoutGrids(); layoutReviewMargin() }
+        if newSize.width != oldWidth { columnChanged() } else { layoutColumn() }
         if newSize.width > 0, let sized = onSized {
             onSized = nil
             sized()
@@ -638,6 +649,16 @@ final class DocumentTextView: NSTextView {
     override func menu(for event: NSEvent) -> NSMenu? {
         let menu = super.menu(for: event)
         if let host = cellHost { host.menuItems(for: self).forEach { menu?.addItem($0) } }
+        // Comment on what's selected (or at the caret), while reading too.
+        if !isCell, let menu {
+            menu.insertItem(.separator(), at: 0)
+            for (title, action) in [("Suggest Edit…", #selector(suggestReviewEdit(_:))),
+                                    ("Comment…", #selector(addReviewComment(_:)))] {
+                let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+                item.target = self
+                menu.insertItem(item, at: 0)
+            }
+        }
         return menu
     }
 
