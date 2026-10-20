@@ -29,6 +29,11 @@ public struct ReadingPositionStore {
 
     public func setReadingOffset(_ offset: Int) { defaults.set(offset, forKey: readingOffsetKey) }
     public func setBookmarkOffset(_ offset: Int) { defaults.set(offset, forKey: bookmarkOffsetKey) }
+    /// Remove the bookmark: the offset and any legacy fraction behind it.
+    public func clearBookmark() {
+        defaults.removeObject(forKey: bookmarkOffsetKey)
+        defaults.removeObject(forKey: legacyBookmarkKey)
+    }
 
     private func position(offsetKey: String, legacyKey: String) -> Position? {
         if let offset = defaults.object(forKey: offsetKey) as? Int { return .offset(offset) }

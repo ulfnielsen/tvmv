@@ -11,6 +11,7 @@ struct ViewerCommands {
     var reload: () -> Void
     var toggleOutline: () -> Void
     var toggleEditing: () -> Void
+    var clearBookmark: () -> Void
     var save: () -> Void
     /// ⌘': show the markup of the span under the selection (again: hide it).
     var revealMarkup: () -> Void
@@ -26,6 +27,8 @@ struct ViewerCommands {
     var canEdit: Bool
     /// Enables ⌘B/⌘I, which write markup into the text.
     var isEditing: Bool
+    /// Enables Clear Bookmark: this document has a bookmark to remove.
+    var hasBookmark: Bool
 }
 
 enum ReviewCommand { case comment, suggest, nextThread, previousThread, acceptAll, rejectAll }
@@ -62,6 +65,9 @@ struct ViewerMenuCommands: Commands {
             Button("Toggle Editing") { commands?.toggleEditing() }
                 .keyboardShortcut("e", modifiers: .command)
                 .disabled(commands?.canEdit != true)
+            Divider()
+            Button("Clear Bookmark") { commands?.clearBookmark() }
+                .disabled(commands?.hasBookmark != true)
         }
         CommandGroup(after: .textEditing) {
             Button("Find…") { commands?.find() }

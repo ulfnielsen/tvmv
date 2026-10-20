@@ -380,6 +380,14 @@ public final class ViewerModel: ObservableObject {
         hasBookmark = true
     }
 
+    /// Forget this document's bookmark wherever it lives: the native offset,
+    /// the legacy scroll fraction, and this session's copy.
+    public func clearBookmark() {
+        readingStore?.clearBookmark()
+        sessionBookmark = nil
+        hasBookmark = false
+    }
+
     public func saveBookmark() async {
         guard let controller else { return }
         let ratio = min(1, max(0, await controller.getScrollRatio()))

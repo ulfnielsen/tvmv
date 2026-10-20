@@ -88,6 +88,10 @@ struct ViewerWindow: View {
                 }
                 .disabled(!model.hasBookmark)
                 .help("Go to bookmark")
+                .contextMenu {
+                    Button("Clear Bookmark") { model.clearBookmark() }
+                        .disabled(!model.hasBookmark)
+                }
             }
         }
         .onChange(of: selection) { _, new in
@@ -122,6 +126,7 @@ struct ViewerWindow: View {
             reload: { Task { await model.reload() } },
             toggleOutline: { columns = (columns == .detailOnly) ? .all : .detailOnly },
             toggleEditing: { model.toggleEditing() },
+            clearBookmark: { model.clearBookmark() },
             save: { Task { await model.flushAndSave() } },
             revealMarkup: { native.toggleRevealMarkup() },
             showMarkdown: { native.toggleShowMarkdown() },
@@ -130,7 +135,8 @@ struct ViewerWindow: View {
             review: { native.review($0) },
             canSave: (model.isDirty || model.isEditing) && fileURL != nil,
             canEdit: fileURL != nil,
-            isEditing: model.isEditing
+            isEditing: model.isEditing,
+            hasBookmark: model.hasBookmark
         ))
     }
 

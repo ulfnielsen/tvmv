@@ -33,4 +33,21 @@ final class ReadingPositionStoreTests: XCTestCase {
         XCTAssertEqual(store.readingPosition, .offset(1234))
         XCTAssertEqual(store.bookmark, .offset(99))
     }
+
+    func testClearBookmarkRemovesOffsetAndLegacyFractionOnly() {
+        defaults.set(0.7, forKey: "bookmark./tmp/doc.md")
+        let store = ReadingPositionStore(fileURL: file, defaults: defaults)
+        store.setBookmarkOffset(99)
+        store.setReadingOffset(5)
+
+        store.clearBookmark()
+        XCTAssertNil(store.bookmark, "neither the offset nor the legacy fraction survives")
+        XCTAssertNil(ReadingPositionStore(fileURL: file, defaults: defaults).bookmark)
+        XCTAssertEqual(store.readingPosition, .offset(5))
+
+        store.clearBookmark()   // nothing left: harmless
+        XCTAssertNil(store.bookmark)
+        store.setBookmarkOffset(3)
+        XCTAssertEqual(store.bookmark, .offset(3))
+    }
 }
