@@ -122,4 +122,14 @@ extension NativeTheme {
         return RGBAColor(red: Double(c.redComponent), green: Double(c.greenComponent),
                          blue: Double(c.blueComponent)).blended(fraction: 0.16, of: .white)
     }
+
+    /// Edit mode shows on the window, not the page: the chrome leans toward
+    /// the accent while editing, so the mode is visible at a glance.
+    func chromeColor(editing: Bool) -> RGBAColor {
+        guard editing else { return chromeColor }
+        let a = accent.usingColorSpace(.sRGB) ?? accent
+        return chromeColor.blended(fraction: 0.22, of: RGBAColor(red: Double(a.redComponent),
+                                                                 green: Double(a.greenComponent),
+                                                                 blue: Double(a.blueComponent)))
+    }
 }

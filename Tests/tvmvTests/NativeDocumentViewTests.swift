@@ -117,4 +117,21 @@ final class NativeDocumentViewTests: XCTestCase {
         view.layoutManager!.ensureLayout(for: view.textContainer!)
         XCTAssertEqual(controller.topVisibleOffset(), target, accuracy: 2)
     }
+
+    func testEditingTintsTheWindowChromeTowardTheAccent() {
+        // Edit mode is shown on the window (title bar, sidebar), not the page.
+        for dark in [false, true] {
+            let theme = NativeTheme(bodyFamily: "Georgia", monoFamily: "Menlo", size: 16,
+                                    measure: 80, fullWidth: false, dark: dark)
+            let reading = theme.chromeColor(editing: false)
+            let editing = theme.chromeColor(editing: true)
+            XCTAssertEqual(reading, theme.chromeColor, "reading keeps today's chrome")
+            XCTAssertNotEqual(editing, reading)
+            let accent = theme.accent.usingColorSpace(.sRGB)!
+            func distance(_ c: RGBAColor) -> Double {
+                abs(c.red - accent.redComponent) + abs(c.green - accent.greenComponent) + abs(c.blue - accent.blueComponent)
+            }
+            XCTAssertLessThan(distance(editing), distance(reading), "editing leans toward the accent")
+        }
+    }
 }

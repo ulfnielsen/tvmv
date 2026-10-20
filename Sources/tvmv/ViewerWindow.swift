@@ -70,6 +70,12 @@ struct ViewerWindow: View {
         .navigationSubtitle(model.isDirty ? "Edited" : "")
         .toolbar {
             ToolbarItemGroup {
+                Button { model.toggleEditing() } label: {
+                    Image(systemName: model.isEditing ? "pencil.circle.fill" : "pencil.circle")
+                        .foregroundStyle(model.isEditing ? Color(nsColor: theme.accent) : Color.secondary)
+                }
+                .disabled(fileURL == nil)
+                .help(model.isEditing ? "Stop editing (⌘E)" : "Edit (⌘E)")
                 Text("\(Int((model.readingProgress * 100).rounded()))%")
                     .monospacedDigit()
                     .help("Reading progress")
@@ -89,7 +95,8 @@ struct ViewerWindow: View {
                 native.scrollTo(anchor: item.anchor)
             }
         }
-        .onChange(of: theme.paper, initial: true) { model.chromeColor = theme.chromeColor }
+        .onChange(of: theme.paper, initial: true) { model.chromeColor = theme.chromeColor(editing: model.isEditing) }
+        .onChange(of: model.isEditing) { model.chromeColor = theme.chromeColor(editing: model.isEditing) }
         .onAppear {
             columns = settings.showOutline ? .all : .detailOnly
             model.startWatching()
