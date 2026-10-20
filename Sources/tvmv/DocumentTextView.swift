@@ -39,6 +39,14 @@ final class DocumentTextView: NSTextView {
     var onFollowLink: ((String) -> Void)?
     /// Called once, the first time the view gets a non-zero width.
     var onSized: (() -> Void)?
+    /// The document's file: relative image paths resolve against its folder.
+    var documentURL: URL?
+
+    enum ImageState: Equatable { case loading, loaded, failed }
+    /// Block images by their address as written, loaded once and cached.
+    private var images: [String: (state: ImageState, image: NSImage?)] = [:]
+
+    func imageState(for address: String) -> ImageState? { images[address]?.state }
 
     /// Private undo stack: the window's document undo manager belongs to a
     /// DocumentGroup(viewing:) document that can't be saved, and registering
@@ -99,6 +107,7 @@ final class DocumentTextView: NSTextView {
         layout = MarkdownLayoutParser.parse(text)
         unchangedPrefix = .max; unchangedSuffix = .max
         restyle(NSRange(location: 0, length: storage.length))
+        requestImages()
         onLayout?(layout)
     }
 
@@ -168,6 +177,7 @@ final class DocumentTextView: NSTextView {
         layout = new
         updateRevealedUnits()
         restyle(changed)
+        requestImages()
         onLayout?(new)
     }
 
@@ -182,9 +192,9 @@ final class DocumentTextView: NSTextView {
         guard let storage = textStorage else { return }
         let units = revealedUnits
         let all = showAllMarkup
-        DocumentStyler.apply(layout, to: storage, in: range, theme: theme) { unit in
-            all || units.contains(unit)
-        }
+        DocumentStyler.apply(layout, to: storage, in: range, theme: theme,
+                             isRevealed: { all || units.contains($0) },
+                             imageHeight: { [weak self] in self?.imageSize(for: $0)?.height })
         // TextKit re-lays out an edit from the line after the previous
         // newline, assuming a newline ends a line. In a reflowed paragraph a
         // soft break doesn't, so re-lay the whole paragraph from its start.
@@ -224,8 +234,10 @@ final class DocumentTextView: NSTextView {
     }
 
     override func setFrameSize(_ newSize: NSSize) {
+        let column = textContainer?.size.width
         super.setFrameSize(newSize)
         layoutColumn()
+        if textContainer?.size.width != column { restyleImages { _ in true } }   // they scale with the column
         if newSize.width > 0, let sized = onSized {
             onSized = nil
             sized()
@@ -312,6 +324,85 @@ final class DocumentTextView: NSTextView {
         let index = lm.characterIndex(for: p, in: tc, fractionOfDistanceBetweenInsertionPoints: &fraction)
         guard index < storage.length else { return nil }
         return storage.attribute(.tvmvLink, at: index, effectiveRange: nil) as? String
+    }
+
+    // MARK: Images
+
+    /// Where an image address points: http, https, file and data URLs as
+    /// written; other paths relative to the document's folder.
+    static func imageURL(_ address: String, documentURL: URL?) -> URL? {
+        if let url = URL(string: address), let scheme = url.scheme?.lowercased() {
+            return ["http", "https", "file", "data"].contains(scheme) ? url : nil
+        }
+        let path = address.removingPercentEncoding ?? address
+        if path.hasPrefix("/") { return URL(fileURLWithPath: path) }
+        guard let folder = documentURL?.deletingLastPathComponent() else { return nil }
+        return folder.appendingPathComponent(path).standardizedFileURL
+    }
+
+    /// The size a loaded block image is drawn at: its own size, scaled down
+    /// (never up) to the text column.
+    private func imageSize(for image: MarkdownLayout.BlockImage) -> NSSize? {
+        guard let picture = images[image.url]?.image, picture.size.width > 0, let container = textContainer else { return nil }
+        let column = container.size.width - 2 * container.lineFragmentPadding
+        let width = min(picture.size.width, column)
+        return NSSize(width: width, height: picture.size.height * width / picture.size.width)
+    }
+
+    /// Start loading every block image not yet requested.
+    private func requestImages() {
+        for image in layout.blockImages where images[image.url] == nil {
+            let address = image.url
+            images[address] = (.loading, nil)
+            guard let url = Self.imageURL(address, documentURL: documentURL) else {
+                imageLoaded(address, data: nil)
+                continue
+            }
+            Task {
+                let data: Data?
+                if ["http", "https"].contains(url.scheme?.lowercased() ?? "") {
+                    data = try? await URLSession.shared.data(from: url).0
+                } else {
+                    data = await Task.detached(priority: .utility) { try? Data(contentsOf: url) }.value
+                }
+                self.imageLoaded(address, data: data)
+            }
+        }
+    }
+
+    private func imageLoaded(_ address: String, data: Data?) {
+        let picture = data.flatMap(NSImage.init(data:))
+        images[address] = (picture == nil ? .failed : .loaded, picture)
+        restyleImages { $0.url == address }
+    }
+
+    private func restyleImages(where match: (MarkdownLayout.BlockImage) -> Bool) {
+        for image in layout.blockImages where match(image) { restyle(image.range) }
+    }
+
+    /// Draw each shown block image into the line its hidden source reserves;
+    /// a failed one shows its alt text instead.
+    private func drawImages(visible: NSRange) {
+        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage else { return }
+        for image in layout.blockImages
+        where NSIntersectionRange(image.range, visible).length > 0 && NSMaxRange(image.range) <= storage.length
+            && !(showAllMarkup || revealedUnits.contains(image.range)) {
+            let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: image.range.location),
+                                               effectiveRange: nil)
+            let x = fragment.minX + tc.lineFragmentPadding + textContainerOrigin.x
+            if let size = imageSize(for: image), let picture = images[image.url]?.image {
+                let rect = NSRect(x: x, y: fragment.minY + textContainerOrigin.y + theme.body.pointSize / 2,
+                                  width: size.width, height: size.height)
+                picture.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
+                             respectFlipped: true, hints: nil)
+            } else if images[image.url]?.state == .failed {
+                let label = image.alt.isEmpty ? image.url : image.alt
+                let font = NSFontManager.shared.convert(theme.body, toHaveTrait: .italicFontMask)
+                let y = fragment.minY + textContainerOrigin.y + (fragment.height - font.boundingRectForFont.height) / 2
+                ("▨ " + label as NSString).draw(at: NSPoint(x: x, y: y),
+                                                withAttributes: [.font: font, .foregroundColor: theme.muted])
+            }
+        }
     }
 
     // MARK: Undo
@@ -451,6 +542,7 @@ final class DocumentTextView: NSTextView {
                 g = NSMaxRange(part)
             }
         }
+        drawImages(visible: visible)
     }
 
     // MARK: Delegates

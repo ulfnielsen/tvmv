@@ -4,8 +4,11 @@ import TVMVCore
 /// Applies a `MarkdownLayout` to a text storage, limited to one range.
 enum DocumentStyler {
     /// - Parameter isRevealed: whether a reveal unit's markup is currently shown.
+    /// - Parameter imageHeight: the height a block image is drawn at, once
+    ///   loaded (nil while loading or after a failure: a normal text line).
     static func apply(_ layout: MarkdownLayout, to storage: NSTextStorage, in range: NSRange,
-                      theme: NativeTheme, isRevealed: (NSRange) -> Bool) {
+                      theme: NativeTheme, isRevealed: (NSRange) -> Bool,
+                      imageHeight: (MarkdownLayout.BlockImage) -> CGFloat? = { _ in nil }) {
         let range = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
         guard range.length > 0 else { return }
         func clip(_ r: NSRange) -> NSRange? {
@@ -80,6 +83,18 @@ enum DocumentStyler {
             if marker.collapsesLine {
                 storage.addAttributes([.font: NSFont.systemFont(ofSize: 0.1),
                                        .paragraphStyle: NativeTheme.collapsedParagraph], range: r)
+            }
+        }
+        // Block images: the source hides and its line takes the picture's
+        // height plus a half-em margin above and below (drawn by the view).
+        for image in layout.blockImages where !isRevealed(image.range) {
+            guard let r = clip(image.range) else { continue }
+            storage.addAttribute(.tvmvHidden, value: true, range: r)
+            if let height = imageHeight(image) {
+                let p = NSMutableParagraphStyle()
+                p.minimumLineHeight = height + theme.body.pointSize
+                p.maximumLineHeight = height + theme.body.pointSize
+                storage.addAttribute(.paragraphStyle, value: p, range: r)
             }
         }
         for exempt in layout.spellExempt {

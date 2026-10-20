@@ -179,6 +179,7 @@ struct NativeDocumentView: NSViewRepresentable {
             if outline != model.outline { model.outline = outline }
         }
         view.onFollowLink = { [weak controller] link in controller?.follow(link, documentURL: model.fileURL) }
+        view.documentURL = model.fileURL
         view.load(model.text)
         controller.attach(view)
 
