@@ -325,4 +325,45 @@ final class DocumentTextViewTests: XCTestCase {
                               "caret stayed at \(view.selectedRange().location) (from \(start)) in «\(text)»")
         }
     }
+
+    func testReturnInsideAParagraphStartsANewParagraph() {
+        // Reported: edits break lines in strange ways. A single "\n" inside a
+        // paragraph is a Markdown soft break, so a typed Return reflowed away.
+        // Return now starts a new paragraph, as in a word processor.
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load("one two three\n")
+        view.setSelectedRange(NSRange(location: 3, length: 0))
+        view.insertNewline(nil)
+        pump()
+        XCTAssertEqual(view.string, "one\n\n two three\n")
+        XCTAssertEqual(view.selectedRange().location, 5)
+        let lines = fragments().map(\.text).filter { $0.trimmingCharacters(in: .whitespacesAndNewlines) != "" }
+        XCTAssertEqual(lines.count, 2, "\(lines)")
+        view.undoManager?.undo()
+        pump()
+        XCTAssertEqual(view.string, "one two three\n", "one undo step")
+    }
+
+    func testShiftReturnBreaksTheLineWithinTheParagraph() {
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load("one two three\n")
+        view.setSelectedRange(NSRange(location: 3, length: 0))
+        view.insertLineBreak(nil)
+        pump()
+        XCTAssertEqual(view.string, "one\\\n two three\n")
+        let lines = fragments().map(\.text).filter { $0.trimmingCharacters(in: .whitespacesAndNewlines) != "" }
+        XCTAssertEqual(lines.count, 2, "\(lines)")
+    }
+
+    func testReturnInCodeIsAPlainNewline() {
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load("```\nlet a = 1\n```\n")
+        view.setSelectedRange(NSRange(location: 13, length: 0))   // end of the code line
+        view.insertNewline(nil)
+        pump()
+        XCTAssertEqual(view.string, "```\nlet a = 1\n\n```\n")
+    }
 }

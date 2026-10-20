@@ -293,6 +293,41 @@ final class DocumentTextView: NSTextView {
         return storage.attribute(.tvmvLink, at: index, effectiveRange: nil) as? String
     }
 
+    // MARK: Return
+
+    /// The kind of the top-level block the caret is in (nil between blocks).
+    private func blockKindAtCaret() -> String? {
+        let caret = selectedRange().location
+        return layout.blocks.first { $0.range.location <= caret && caret <= NSMaxRange($0.range) }?.kind
+    }
+
+    /// Return in a paragraph or heading starts a new paragraph ("\n\n"):
+    /// a single "\n" would be a Markdown soft break and reflow away.
+    /// Elsewhere (code, lists, quotes, tables) it stays a plain newline.
+    override func insertNewline(_ sender: Any?) {
+        guard isEditable, ["paragraph", "heading"].contains(blockKindAtCaret() ?? "") else {
+            super.insertNewline(sender)
+            return
+        }
+        let at = selectedRange()
+        if replace(at, with: "\n\n") {
+            setSelectedRange(NSRange(location: at.location + 2, length: 0))
+        }
+    }
+
+    /// Shift-Return breaks the line within a paragraph: a Markdown hard
+    /// break ("\\" + newline), not AppKit's invisible U+2028.
+    override func insertLineBreak(_ sender: Any?) {
+        guard isEditable, ["paragraph", "heading"].contains(blockKindAtCaret() ?? "") else {
+            super.insertNewline(sender)
+            return
+        }
+        let at = selectedRange()
+        if replace(at, with: "\\\n") {
+            setSelectedRange(NSRange(location: at.location + 2, length: 0))
+        }
+    }
+
     /// AppKit's arrow-up from a line that starts with a hidden prefix ("# ")
     /// proposes that same line's start (the null glyphs sit at x = 0), and
     /// the caret rule then puts it back past the prefix: the caret never
