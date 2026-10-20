@@ -61,6 +61,9 @@ public struct MarkdownLayout: Equatable, Sendable {
     public var codeBlocks: [CodeBlock] = []
     public var headings: [Heading] = []
     public var blocks: [Block] = []
+    /// Newlines inside top-level paragraphs that are soft line breaks: the
+    /// paragraph reflows across them, so they lay out as spaces.
+    public var softBreaks: [Int] = []
     /// Link reference definition lines (`[label]: url`) outside code. Partial
     /// re-parses are wrapped with them so reference links resolve exactly as
     /// in a full parse.

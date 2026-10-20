@@ -119,12 +119,28 @@ struct LayoutBuilder {
                 r.length = min(r.length, max(0, limit - r.location))
                 if recordBlocks {
                     layout.blocks.append(.init(range: docRange(r), kind: CMark.type(block)))
+                    if CMark.type(block) == "paragraph" { recordSoftBreaks(in: r) }
                 }
                 visitBlock(block, limit: limit)
             }
         }
         layout.styles.removeAll { $0.range.length == 0 }
         layout.spellExempt.removeAll { $0.length == 0 }
+    }
+
+    /// Every newline inside a top-level paragraph except one that ends a
+    /// hard break ("\\" or two trailing spaces). Paragraphs inside lists and
+    /// quotes keep their source layout: their next line carries a prefix.
+    mutating func recordSoftBreaks(in r: NSRange) {
+        var i = r.location
+        while i < NSMaxRange(r) {
+            if ns.character(at: i) == 10 {
+                let line = lineRange(at: i)
+                let content = ns.substring(with: NSRange(location: line.location, length: i - line.location))
+                if !content.hasSuffix("\\"), !content.hasSuffix("  ") { layout.softBreaks.append(i + adjust) }
+            }
+            i += 1
+        }
     }
 
     // MARK: Ranges

@@ -113,4 +113,17 @@ final class MarkdownLayoutParserTests: XCTestCase {
         XCTAssertEqual(MarkdownLayoutParser.parse("plain words").markers, [])
         XCTAssertEqual(MarkdownLayoutParser.parse("plain words").length, 11)
     }
+
+    func testSoftLineBreaksInsideParagraphsAreRecorded() {
+        // A paragraph wrapped across source lines reflows when rendered; only
+        // its internal newlines are soft breaks — not hard breaks ("\\" or two
+        // trailing spaces), not paragraph ends, not code, lists or quotes
+        // (those keep their source layout until they render natively).
+        let text = "one\ntwo\nthree\n\nhard\\\nnext  \nlast\n\n```\na\nb\n```\n\n- x\n  y\n\n> q\n> r\n"
+        let ns = text as NSString
+        let breaks = MarkdownLayoutParser.parse(text).softBreaks
+        let lineAfter = breaks.map { ns.substring(with: ns.lineRange(for: NSRange(location: $0 + 1, length: 0))) }
+        XCTAssertEqual(lineAfter, ["two\n", "three\n"])
+        XCTAssertTrue(breaks.allSatisfy { ns.character(at: $0) == 10 })
+    }
 }
