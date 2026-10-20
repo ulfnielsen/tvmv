@@ -217,4 +217,97 @@ final class DocumentTextViewTests: XCTestCase {
         XCTAssertLessThanOrEqual(view.backgroundParsesStarted, 2)
         XCTAssertTrue(hiddenMatchesAFreshParse())
     }
+
+    // MARK: Parity with the web reader (app.css)
+
+    /// Line fragments as (text, height), in order.
+    private func fragments() -> [(text: String, height: CGFloat)] {
+        let lm = view.layoutManager!
+        lm.ensureLayout(for: view.textContainer!)
+        var out: [(String, CGFloat)] = []
+        lm.enumerateLineFragments(forGlyphRange: NSRange(location: 0, length: lm.numberOfGlyphs)) { rect, _, _, glyphs, _ in
+            let chars = lm.characterRange(forGlyphRange: glyphs, actualGlyphRange: nil)
+            out.append((self.ns.substring(with: chars), rect.height))
+        }
+        return out
+    }
+
+    func testParagraphsReflowAcrossSoftLineBreaks() {
+        view.load("one\ntwo\nthree\n\nnext\n")
+        XCTAssertEqual(fragments().first?.text, "one\ntwo\nthree\n", "one visual line for the wrapped paragraph")
+        XCTAssertEqual(view.string, "one\ntwo\nthree\n\nnext\n", "the text itself is untouched")
+    }
+
+    func testBodyLinesUseTheCSSLineHeightAndBlankLinesAreAOneEmGap() {
+        // app.css: line-height 1.7; paragraphs separated by a 1em margin.
+        view.load("first\n\nsecond\n")
+        let size = view.theme.body.pointSize
+        let lines = fragments()
+        XCTAssertEqual(lines.map(\.text), ["first\n", "\n", "second\n"])
+        XCTAssertEqual(lines[0].height, 1.7 * size, accuracy: 1)
+        XCTAssertEqual(lines[1].height, 1.0 * size, accuracy: 1)
+    }
+
+    func testHeadingsAreRegularWeightAsInTheCSS() {
+        let font = view.theme.headingFont(1)
+        XCTAssertFalse(NSFontManager.shared.traits(of: font).contains(.boldFontMask))
+        XCTAssertEqual(font.pointSize, 2 * view.theme.body.pointSize, accuracy: 0.01)
+    }
+
+    func testTextIsDrawnWithoutFontSmoothingLikeTheWebReader() {
+        // app.css sets -webkit-font-smoothing: antialiased; AppKit's default
+        // smoothing thickens strokes, which reads as less crisp.
+        view.load("Crisp text sample with plenty of strokes to measure.\n")
+        func ink() -> Int {
+            let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+            view.cacheDisplay(in: view.bounds, to: rep)
+            var total = 0
+            for x in stride(from: 0, to: rep.pixelsWide, by: 1) {
+                for y in 0..<min(rep.pixelsHigh, 200) {
+                    total += Int((1 - (rep.colorAt(x: x, y: y)?.brightnessComponent ?? 1)) * 255)
+                }
+            }
+            return total
+        }
+        XCTAssertFalse(view.fontSmoothing)
+        let crisp = ink()
+        view.fontSmoothing = true
+        let smoothed = ink()
+        XCTAssertLessThan(crisp, smoothed)
+    }
+
+    func testASoftBreakIsAsWideAsASpace() {
+        // Reflowed words must not run together: "one\ntwo" reads "one two".
+        view.load("one\ntwo\n")
+        let lm = view.layoutManager!
+        lm.ensureLayout(for: view.textContainer!)
+        func x(_ index: Int) -> CGFloat { lm.location(forGlyphAt: lm.glyphIndexForCharacter(at: index)).x }
+        let space = (" " as NSString).size(withAttributes: [.font: view.theme.body]).width
+        let endOfOne = x(2) + ("e" as NSString).size(withAttributes: [.font: view.theme.body]).width
+        XCTAssertEqual(x(4) - endOfOne, space, accuracy: 1)
+    }
+
+    func testInlineCodeBackgroundHugsTheTextNotTheLine() {
+        // app.css: a code span gets a small padded pill (≈1.1em tall), not a
+        // block filling the 1.7 line height. Measured down one pixel column
+        // through the space inside the span, where there is no glyph ink.
+        view.load("before `code span` after\n")
+        let lm = view.layoutManager!
+        lm.ensureLayout(for: view.textContainer!)
+        let space = ns.range(of: "code span").location + 4
+        let glyphRect = lm.boundingRect(forGlyphRange: lm.glyphRange(forCharacterRange: NSRange(location: space, length: 1),
+                                                                    actualCharacterRange: nil), in: view.textContainer!)
+        let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let column = Int((glyphRect.midX + view.textContainerOrigin.x) * scale)
+        let paper = rep.colorAt(x: column, y: 2)!.brightnessComponent   // top margin: plain paper
+        let tinted = (0..<rep.pixelsHigh).filter { y in
+            abs((rep.colorAt(x: column, y: y)?.brightnessComponent ?? paper) - paper) > 0.004
+        }
+        let height = CGFloat(tinted.count) / scale
+        let size = view.theme.body.pointSize
+        XCTAssertGreaterThan(height, 0.8 * size, "the pill is drawn")
+        XCTAssertLessThan(height, 1.4 * size, "the pill is \(height) pt tall")
+    }
 }

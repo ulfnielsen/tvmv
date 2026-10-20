@@ -8,6 +8,9 @@ extension NSAttributedString.Key {
     static let tvmvNoSpell = NSAttributedString.Key("tvmvNoSpell")
     /// Link destination; clicks follow it when read-only or with ⌘.
     static let tvmvLink = NSAttributedString.Key("tvmvLink")
+    /// A soft line break inside a paragraph: laid out as a space, so the
+    /// paragraph reflows like the web reader's.
+    static let tvmvSoftBreak = NSAttributedString.Key("tvmvSoftBreak")
 }
 
 /// Fonts, colors and measure for the native view: the paper & ink palette
@@ -46,10 +49,31 @@ struct NativeTheme: Equatable {
         columnWidth = fullWidth ? nil : CGFloat(measure) * zero
     }
 
+    /// app.css: body line-height 1.7. Gaps between paragraphs come from
+    /// the blank lines that separate them (`blankLineParagraph`).
     var paragraphStyle: NSParagraphStyle {
         let p = NSMutableParagraphStyle()
-        p.lineHeightMultiple = 1.3
-        p.paragraphSpacing = body.pointSize * 0.6
+        p.minimumLineHeight = body.pointSize * 1.7
+        p.maximumLineHeight = body.pointSize * 1.7
+        return p
+    }
+
+    /// A blank line between blocks is the 1em paragraph margin of app.css.
+    var blankLineParagraph: NSParagraphStyle {
+        let p = NSMutableParagraphStyle()
+        p.minimumLineHeight = body.pointSize
+        p.maximumLineHeight = body.pointSize
+        return p
+    }
+
+    /// app.css headings: line-height 1.25, extra room above (margin-top 1.6em,
+    /// of which the preceding blank line supplies 1em).
+    func headingParagraph(_ level: Int) -> NSParagraphStyle {
+        let p = NSMutableParagraphStyle()
+        let height = headingFont(level).pointSize * 1.25
+        p.minimumLineHeight = height
+        p.maximumLineHeight = height
+        p.paragraphSpacingBefore = body.pointSize * 0.6
         return p
     }
 
@@ -74,11 +98,11 @@ struct NativeTheme: Equatable {
         [.font: body, .foregroundColor: ink, .paragraphStyle: paragraphStyle]
     }
 
-    /// app.css heading scale: h1 2.0em … h6 0.85em.
+    /// app.css heading scale: h1 2.0em … h6 0.85em, regular weight (400) —
+    /// the serif's display sizes carry the hierarchy, not boldness.
     func headingFont(_ level: Int) -> NSFont {
         let scale: [CGFloat] = [2.0, 1.5, 1.28, 1.1, 0.95, 0.85]
-        let font = body.withSize(body.pointSize * scale[max(1, min(level, 6)) - 1])
-        return NSFontManager.shared.convert(font, toHaveTrait: .boldFontMask)
+        return body.withSize(body.pointSize * scale[max(1, min(level, 6)) - 1])
     }
 }
 

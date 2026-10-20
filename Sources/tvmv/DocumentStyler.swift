@@ -25,7 +25,8 @@ enum DocumentStyler {
             guard let r = clip(run.range) else { continue }
             switch run.style {
             case .heading(let level):
-                storage.addAttribute(.font, value: theme.headingFont(level), range: r)
+                storage.addAttributes([.font: theme.headingFont(level),
+                                       .paragraphStyle: theme.headingParagraph(level)], range: r)
             case .emphasis:
                 addTrait(.italicFontMask, r)
             case .strong:
@@ -33,7 +34,9 @@ enum DocumentStyler {
             case .strikethrough:
                 storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: r)
             case .code:
-                storage.addAttributes([.font: theme.mono, .backgroundColor: theme.paperDeep], range: r)
+                // The pill behind it is drawn by DocumentTextView: a background
+                // attribute would fill the whole (1.7×) line height.
+                storage.addAttribute(.font, value: theme.mono, range: r)
             case .codeBlock:
                 storage.addAttribute(.font, value: theme.mono, range: r)
             case .link(let url), .autolink(let url):
@@ -43,9 +46,23 @@ enum DocumentStyler {
                 storage.addAttributes([.font: theme.mono, .foregroundColor: theme.muted], range: r)
             }
         }
+        // Blank lines (outside code) are the gap between blocks.
+        let text = storage.string as NSString
+        var lineStart = text.lineRange(for: NSRange(location: range.location, length: 0)).location
+        while lineStart < NSMaxRange(range), lineStart < text.length {
+            let line = text.lineRange(for: NSRange(location: lineStart, length: 0))
+            if line.length == 1, text.character(at: line.location) == 10,
+               !layout.codeBlocks.contains(where: { NSLocationInRange(line.location, $0.range) }),
+               let r = clip(line) {
+                storage.addAttribute(.paragraphStyle, value: theme.blankLineParagraph, range: r)
+            }
+            lineStart = NSMaxRange(line)
+        }
+        for offset in layout.softBreaks {
+            if let r = clip(NSRange(location: offset, length: 1)) { storage.addAttribute(.tvmvSoftBreak, value: true, range: r) }
+        }
         for block in layout.codeBlocks where block.body.length > 0 {
             guard NSIntersectionRange(block.body, range).length > 0 else { continue }
-            let text = storage.string as NSString
             var line = text.lineRange(for: NSRange(location: block.body.location, length: 0))
             while line.location < NSMaxRange(block.body) {
                 let first = line.location <= block.body.location

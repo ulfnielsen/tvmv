@@ -22,7 +22,12 @@ final class DocumentTextView: NSTextView {
     var showAllMarkup = false {
         didSet { restyle(NSRange(location: 0, length: textStorage?.length ?? 0)) }
     }
-    /// True after a reveal request, until the selection leaves every revealed unit.
+    /// Draw with AppKit font smoothing (stroke thickening). Off, as in the
+    /// web reader (-webkit-font-smoothing: antialiased).
+    var fontSmoothing = false {
+        didSet { needsDisplay = true }
+    }
+        /// True after a reveal request, until the selection leaves every revealed unit.
     private(set) var revealing = false
     private var revealedUnits: [NSRange] = []
 
@@ -311,6 +316,14 @@ final class DocumentTextView: NSTextView {
 
     // MARK: Drawing
 
+    override func draw(_ dirtyRect: NSRect) {
+        if let context = NSGraphicsContext.current?.cgContext {
+            context.setAllowsFontSmoothing(true)
+            context.setShouldSmoothFonts(fontSmoothing)
+        }
+        super.draw(dirtyRect)
+    }
+
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
         guard let lm = layoutManager, let tc = textContainer else { return }
@@ -326,6 +339,26 @@ final class DocumentTextView: NSTextView {
             box.origin.y += textContainerOrigin.y - 8
             box.size.height += 16
             NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6).fill()
+        }
+        // Inline code: a pill hugging the code font around its baseline, per line.
+        let pad = theme.mono.pointSize * 0.14
+        for run in layout.styles where run.style == .code && NSIntersectionRange(run.range, visible).length > 0 {
+            let glyphs = lm.glyphRange(forCharacterRange: run.range, actualCharacterRange: nil)
+            var g = glyphs.location
+            while g < NSMaxRange(glyphs) {
+                var lineGlyphs = NSRange()
+                let fragment = lm.lineFragmentRect(forGlyphAt: g, effectiveRange: &lineGlyphs)
+                let part = NSIntersectionRange(glyphs, lineGlyphs)
+                guard part.length > 0 else { break }
+                let extent = lm.boundingRect(forGlyphRange: part, in: tc)
+                let baseline = fragment.minY + lm.location(forGlyphAt: part.location).y
+                let pill = NSRect(x: extent.minX - 2 + textContainerOrigin.x,
+                                  y: baseline - theme.mono.ascender - pad + textContainerOrigin.y,
+                                  width: extent.width + 4,
+                                  height: theme.mono.ascender - theme.mono.descender + 2 * pad)
+                NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4).fill()
+                g = NSMaxRange(part)
+            }
         }
     }
 
@@ -379,6 +412,23 @@ final class DocumentTextView: NSTextView {
 
         func textView(_ textView: NSTextView, shouldSetSpellingState value: Int, range: NSRange) -> Int {
             view?.isSpellExempt(range) == true ? 0 : value
+        }
+
+        /// Soft line breaks lay out as spaces: the paragraph reflows.
+        func layoutManager(_ lm: NSLayoutManager, shouldUse action: NSLayoutManager.ControlCharacterAction,
+                           forControlCharacterAt index: Int) -> NSLayoutManager.ControlCharacterAction {
+            lm.textStorage?.attribute(.tvmvSoftBreak, at: index, effectiveRange: nil) != nil ? .whitespace : action
+        }
+
+        /// A whitespace-action control glyph is zero-wide unless sized here:
+        /// a soft break takes the width of a space, or words run together.
+        func layoutManager(_ lm: NSLayoutManager, boundingBoxForControlGlyphAt glyphIndex: Int,
+                           for textContainer: NSTextContainer, proposedLineFragment: NSRect,
+                           glyphPosition: NSPoint, characterIndex: Int) -> NSRect {
+            let font = lm.textStorage?.attribute(.font, at: characterIndex, effectiveRange: nil) as? NSFont
+                ?? .systemFont(ofSize: NSFont.systemFontSize)
+            let width = (" " as NSString).size(withAttributes: [.font: font]).width
+            return NSRect(x: glyphPosition.x, y: 0, width: width, height: proposedLineFragment.height)
         }
 
         func layoutManager(_ lm: NSLayoutManager, shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
