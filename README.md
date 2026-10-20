@@ -2,21 +2,27 @@
 
 **TVMV** — *totally vibe coded markdown viewer*.
 
-![TVMV rendering its own README](docs/screenshot.png)
+![TVMV on macOS: a document with review comments in the side column](docs/screenshot.png)
 
 A native Markdown viewer and editor for macOS, iOS and Linux. Opens `.md` files
 in real windows and renders GitHub-Flavored Markdown (via cmark-gfm) with a warm
-"paper & ink" reading theme, syntax highlighting, KaTeX math, and Mermaid
-diagrams. Select & copy, find-in-page (with match count), an outline sidebar,
-editing (on macOS in place, in the rendered document; on iOS and Linux in a
-CodeMirror editor with live preview), live reload on file change, print /
+"paper & ink" reading theme. Select & copy, find-in-page (with match count), an
+outline sidebar, editing, review comments and suggestions kept in the file,
+reading positions and bookmarks, live reload on file change, print /
 Save-as-PDF, and font/size/measure/theme settings. Fully offline — all assets
 are vendored.
 
-The rendering layer (`Sources/TVMVCore/Resources/web/`) is shared verbatim by
-all three platforms; only the shell differs — SwiftUI + `WKWebView` on Apple
-platforms, Rust + GTK4 + WebKitGTK on Linux. Both link the same pinned
-cmark-gfm revision, so the HTML is byte-identical.
+On **macOS** the document is a native text view: you read and edit in the same
+place, the Markdown renders as you type, and tables edit as grids. Code blocks
+show as plain monospace, and math and Mermaid diagrams as their source; print
+and Save as PDF render all three.
+
+On **iOS and Linux** a web layer (`Sources/TVMVCore/Resources/web/`, shared
+verbatim) renders the document with syntax highlighting, KaTeX math and Mermaid
+diagrams, and edits in a CodeMirror pane with live preview — SwiftUI +
+`WKWebView` on iOS, Rust + GTK4 + WebKitGTK on Linux. Both link the same pinned
+cmark-gfm revision, so the HTML is byte-identical. macOS uses the same layer
+for printing.
 
 ## Build & install
 
@@ -65,6 +71,8 @@ insert a row or column there, and the `⋯` handles above the column and left of
 the row open menus to insert, delete and align. The same commands are in the
 **Table** menu and a cell's right-click menu, with shortcuts — ⌃⌘ + arrow keys
 insert, ⌃⌘⌫ deletes the row, ⌃⌥⌘⌫ the column, ⌘{ ⌘| ⌘} align.
+
+![Hovering a table cell in edit mode shows insert buttons and row and column menus](docs/table-hover.png)
 
 Review comments live in the Markdown itself — CriticMarkup anchors
 (`{==text==}`, `{++add++}`, `{--cut--}`, `{~~old~>new~~}`) tied to footnote
@@ -260,7 +268,8 @@ window, and title bar — to a slightly-lightened version of your background col
 and **live-reloads** as you edit the file. *Reset to default* goes back to the
 built-in theme. Nothing is loaded unless you pick a file.
 
-Try [`examples/comic-msd.css`](examples/comic-msd.css) — Comic Sans on MSD teal:
+Try [`examples/comic-msd.css`](examples/comic-msd.css) — Comic Sans on MSD teal
+(pictured in the web-rendered window, which Linux uses):
 
 ![TVMV with a custom theme](docs/theme-screenshot.png)
 
