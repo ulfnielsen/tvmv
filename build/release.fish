@@ -1,6 +1,12 @@
 #!/usr/bin/env fish
 #
-# release.fish [major|minor|patch]  (default: patch)
+# release.fish [major|minor|patch]        (default: patch)
+# release.fish beta [major|minor|patch]   a pre-release of the next version
+#
+# A beta is tagged vX.Y.Z-beta.N and published as a GitHub pre-release (the
+# latest full release stays "Latest"). Further betas of the same version count
+# N up; a full release run while X.Y.Z has betas but no release finishes
+# X.Y.Z itself instead of bumping past it.
 #
 # Cuts a TVMV release:
 #   1. runs the test suite
@@ -21,10 +27,15 @@
 # Notarization requires network access and normally takes 1-5 minutes per
 # submission; there are two per release (the app, then the disk image).
 
+set -l beta false
 set -l part $argv[1]
+if test "$part" = beta
+    set beta true
+    set part $argv[2]
+end
 test -z "$part"; and set part patch
 if not contains -- $part major minor patch
-    echo "usage: release.fish [major|minor|patch]" >&2
+    echo "usage: release.fish [beta] [major|minor|patch]" >&2
     exit 1
 end
 
@@ -123,15 +134,28 @@ end
 
 # --- Compute the new version ---------------------------------------------
 set -l cur (/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" $plist)
-set -l p (string split . $cur)
-set -l maj $p[1]; set -l min $p[2]; set -l pat $p[3]
-switch $part
-    case major; set maj (math $maj + 1); set min 0; set pat 0
-    case minor; set min (math $min + 1); set pat 0
-    case patch; set pat (math $pat + 1)
+set -l ver
+if test -n "$(git tag -l "v$cur-beta.*")"; and not git rev-parse -q --verify "refs/tags/v$cur" >/dev/null
+    # $cur is in beta (betas tagged, no release yet): continue with it.
+    set ver $cur
+    echo "==> $cur has betas but no release — continuing $cur (ignoring '$part')"
+else
+    set -l p (string split . $cur)
+    set -l maj $p[1]; set -l min $p[2]; set -l pat $p[3]
+    switch $part
+        case major; set maj (math $maj + 1); set min 0; set pat 0
+        case minor; set min (math $min + 1); set pat 0
+        case patch; set pat (math $pat + 1)
+    end
+    set ver "$maj.$min.$pat"
 end
-set -l ver "$maj.$min.$pat"
 set -l tag "v$ver"
+set -l title "TVMV $ver"
+if test $beta = true
+    set -l n (math (count (git tag -l "v$ver-beta.*")) + 1)
+    set tag "v$ver-beta.$n"
+    set title "TVMV $ver beta $n"
+end
 set -l build (math (/usr/libexec/PlistBuddy -c "Print CFBundleVersion" $plist) + 1)
 
 if git rev-parse "$tag" >/dev/null 2>&1
@@ -139,10 +163,11 @@ if git rev-parse "$tag" >/dev/null 2>&1
     exit 1
 end
 
-echo "==> Releasing TVMV $ver (build $build) — $part bump from $cur"
+echo "==> Releasing $title ($tag, build $build) from $cur"
 
 # --- Changelog (commits since the previous tag) --------------------------
-set -l prev (git describe --tags --abbrev=0 2>/dev/null)
+# Since the last full release: a beta's notes cover everything new in $ver.
+set -l prev (git describe --tags --abbrev=0 --exclude '*-beta.*' 2>/dev/null)
 set -l changelog
 if test -n "$prev"
     set changelog (git log "$prev..HEAD" --no-merges --pretty="- %s")
@@ -220,7 +245,7 @@ mkdir -p $stage
 ditto $app $stage/TVMV.app; or abort_release "staging the app for the dmg failed"
 ln -s /Applications $stage/Applications  # classic drag-to-install layout
 echo "==> building $dmg"
-hdiutil create -volname "TVMV $ver" -srcfolder $stage -ov -format UDZO -quiet $dmg
+hdiutil create -volname "$title" -srcfolder $stage -ov -format UDZO -quiet $dmg
 or begin
     rm -rf (path dirname $stage)
     abort_release "hdiutil failed to build the disk image"
@@ -254,8 +279,12 @@ git push origin "$tag"
 # --- GitHub Release -------------------------------------------------------
 set -l notes_file (mktemp)
 begin
-    echo "## TVMV $ver"
+    echo "## $title"
     echo
+    if test $beta = true
+        echo "**Pre-release** for testing; the latest full release is still the default download."
+        echo
+    end
     echo "### Changes"
     for line in $changelog
         echo $line
@@ -271,7 +300,9 @@ begin
     echo "Open, and no \`xattr\` workaround. Requires macOS 14 or later."
 end > $notes_file
 
-gh release create "$tag" $dmg $zip --title "TVMV $ver" --notes-file $notes_file
+set -l prerelease
+test $beta = true; and set prerelease --prerelease
+gh release create "$tag" $dmg $zip --title "$title" --notes-file $notes_file $prerelease
 rm -f $notes_file
 
 set -l nwo (gh repo view --json nameWithOwner -q .nameWithOwner)
