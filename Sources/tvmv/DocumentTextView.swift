@@ -54,6 +54,8 @@ final class DocumentTextView: NSTextView {
     var reviewModels: [ReviewCards.Model] = []
     /// The thread whose card is focused (by the caret, or a click on the card).
     var focusedReviewID: String?
+    /// The height the comment cards need (the frame never gets shorter).
+    var reviewMinHeight: CGFloat = 0
     /// The text column is narrowed for the comment column.
     var showsReviewColumn = false
     /// The theme the cards and markers were built with.
@@ -309,6 +311,8 @@ final class DocumentTextView: NSTextView {
 
     override func setFrameSize(_ newSize: NSSize) {
         let oldWidth = frame.width
+        var newSize = newSize
+        if isVerticallyResizable { newSize.height = max(newSize.height, reviewMinHeight) }
         super.setFrameSize(newSize)
         if newSize.width != oldWidth { columnChanged() } else { layoutColumn() }
         if newSize.width > 0, let sized = onSized {

@@ -237,10 +237,21 @@ extension DocumentTextView {
                                 ?? items.firstIndex { ($0.view as? ReviewCardView)?.isFocused == true },
                               gap: 8, top: textContainerOrigin.y)
         for (item, y) in zip(items, tops) { item.view.setFrameOrigin(NSPoint(x: x, y: y)) }
-        // The view grows to hold a card that reaches past the text.
-        let next = zip(items, tops).map { $1 + $0.view.frame.height }.max() ?? 0
-        let bottom = max(next, 0) + textContainerInset.height
-        if minSize.height != bottom, bottom > 0 { minSize.height = bottom; sizeToFit() }
+        // The view grows to hold a card that reaches past the text (enforced
+        // in setFrameSize: the scroll view resets minSize as it tiles).
+        let next = zip(items, tops).map { $1 + $0.view.frame.height }.max()
+        let bottom = next.map { $0 + textContainerInset.height } ?? 0
+        if bottom != reviewMinHeight {
+            let grew = bottom > reviewMinHeight
+            reviewMinHeight = bottom
+            // sizeToFit measures the text alone and skips a size it already
+            // has, so a growing column sets the height itself.
+            if grew, frame.height < bottom {
+                setFrameSize(NSSize(width: frame.width, height: bottom))
+            } else if !grew {
+                sizeToFit()
+            }
+        }
     }
 
     /// Tops for items wanting to sit at `wanted` (each with its height),

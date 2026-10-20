@@ -8,10 +8,11 @@ final class ReviewCardTests: XCTestCase {
     private var window: NSWindow!
     private var view: DocumentTextView!
 
-    private func makeView(width: CGFloat, fullWidth: Bool = false) {
+    private func makeView(width: CGFloat, fullWidth: Bool = false, scroller: Bool = false) {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: width, height: 800),
                           styleMask: [.titled], backing: .buffered, defer: false)
         let scroll = NSScrollView(frame: window.contentView!.bounds)
+        scroll.hasVerticalScroller = scroller   // as the app's: it appears when the page outgrows the window
         view = DocumentTextView.make()
         view.theme = NativeTheme(bodyFamily: "Georgia", monoFamily: "Menlo", size: 16,
                                  measure: 70, fullWidth: fullWidth, dark: false)
@@ -398,5 +399,25 @@ final class ReviewCardTests: XCTestCase {
         type("x", into: composer.bodyField)
         composer.submit()   // refused: the message makes it taller
         XCTAssertGreaterThanOrEqual(view.frame.height, composer.frame.maxY + view.textContainerInset.height - 1)
+    }
+
+    func testThreadsWithRepliesAtTheEndOfAShortDocumentFitInIt() {
+        // Reported: several comments at the end, with replies, ran off the
+        // page. The cards outgrow a document shorter than the window, and the
+        // scroll view's own sizing reset the text view's minimum height.
+        makeView(width: 1400, scroller: true)
+        var text = "Body paragraph.\n\n", defs = ""
+        for i in 0..<5 {
+            let id = "rv-e\(i)00"
+            text += "Last part {==word \(i)==}[^\(id)] here.\n\n"
+            defs += "[^\(id)]: @ulf 2026-10-14: Comment \(i) that is long enough to wrap in the card.\n"
+            for r in 0..<3 { defs += "    @claude 2026-10-14: Reply \(r) to comment \(i), also wrapping onto lines.\n" }
+        }
+        view.load(text + defs)
+        let last = view.reviewCards.map(\.frame.maxY).max()!
+        XCTAssertGreaterThan(last, view.enclosingScrollView!.contentSize.height, "the cards outgrow the window")
+        XCTAssertGreaterThanOrEqual(view.frame.height, last, "the page holds every card")
+        for i in 0..<5 { view.settle("rv-e\(i)00", .resolve) }
+        XCTAssertLessThan(view.frame.height, last, "and shrinks back once they're resolved")
     }
 }
