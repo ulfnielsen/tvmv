@@ -293,6 +293,26 @@ final class DocumentTextView: NSTextView {
         return storage.attribute(.tvmvLink, at: index, effectiveRange: nil) as? String
     }
 
+    /// AppKit's arrow-up from a line that starts with a hidden prefix ("# ")
+    /// proposes that same line's start (the null glyphs sit at x = 0), and
+    /// the caret rule then puts it back past the prefix: the caret never
+    /// leaves the line. If it is still on the same visual line, go up one.
+    override func moveUp(_ sender: Any?) {
+        let before = selectedRange()
+        super.moveUp(sender)
+        guard let lm = layoutManager, selectedRange().length == 0, before.length == 0,
+              let storage = textStorage, storage.length > 0 else { return }
+        func lineTop(_ index: Int) -> CGFloat {
+            let glyph = lm.glyphIndexForCharacter(at: min(index, storage.length - 1))
+            return lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minY
+        }
+        let after = selectedRange().location
+        guard after > 0, lineTop(after) == lineTop(before.location) else { return }
+        let lineStart = (storage.string as NSString).lineRange(for: NSRange(location: after, length: 0)).location
+        guard lineStart > 0 else { return }
+        setSelectedRange(NSRange(location: lineStart - 1, length: 0))
+    }
+
     override func cancelOperation(_ sender: Any?) {
         if revealing { reveal(false) } else { super.cancelOperation(sender) }
     }

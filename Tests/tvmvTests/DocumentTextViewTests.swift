@@ -310,4 +310,19 @@ final class DocumentTextViewTests: XCTestCase {
         XCTAssertGreaterThan(height, 0.8 * size, "the pill is drawn")
         XCTAssertLessThan(height, 1.4 * size, "the pill is \(height) pt tall")
     }
+
+    func testArrowUpLeavesAHeading() {
+        // Reported: arrow up from a heading didn't move.
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        for text in ["Para above.\n\n# Heading\n\nbelow\n", "Para above.\n# Heading\n", "Para above.\n\n## Sub heading\n"] {
+            view.load(text)
+            let heading = (text as NSString).range(of: "eading")
+            view.setSelectedRange(NSRange(location: heading.location + 2, length: 0))
+            let start = view.selectedRange().location
+            view.moveUp(nil)
+            XCTAssertLessThan(view.selectedRange().location, (text as NSString).range(of: "#").location,
+                              "caret stayed at \(view.selectedRange().location) (from \(start)) in «\(text)»")
+        }
+    }
 }
