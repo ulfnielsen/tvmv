@@ -189,4 +189,80 @@ final class TableGridTests: XCTestCase {
         view.performTableCommand(TableCommand.insertRowBelow.menuItem())
         XCTAssertEqual(view.string, before)
     }
+
+    // MARK: Hover controls
+
+    /// The centre of cell (r, c), in the grid's coordinates.
+    private func center(_ r: Int, _ c: Int) -> NSPoint {
+        let f = grid.cell(row: r, column: c).frame
+        return NSPoint(x: f.midX, y: f.midY)
+    }
+
+    func testHoveringACellShowsControlsOnItsBorders() {
+        view.isEditable = true
+        view.layoutGrids()
+        grid.hover(at: center(1, 0))
+        let c = grid.hoverControls
+        XCTAssertTrue(c.allSatisfy { $0.superview === view && !$0.isHidden })
+        let gridFrame = grid.frame
+        let cell = grid.cell(row: 1, column: 0).frame.offsetBy(dx: gridFrame.minX, dy: gridFrame.minY)
+        // Column controls above the grid; row controls left of it.
+        XCTAssertLessThan(grid.columnHandle.frame.maxY, gridFrame.minY + 1)
+        XCTAssertEqual(grid.columnHandle.frame.midX, cell.midX, accuracy: 1)
+        XCTAssertEqual(grid.addColumnRight.frame.midX, cell.maxX, accuracy: 1)
+        XCTAssertLessThan(grid.rowHandle.frame.maxX, gridFrame.minX + 1)
+        XCTAssertEqual(grid.rowHandle.frame.midY, cell.midY, accuracy: 1)
+        XCTAssertEqual(grid.addRowBelow.frame.midY, cell.maxY, accuracy: 1)
+        grid.hover(at: nil)
+        XCTAssertTrue(grid.hoverControls.allSatisfy(\.isHidden))
+    }
+
+    func testThePlusButtonsInsertWhereTheySit() {
+        view.isEditable = true
+        view.layoutGrids()
+        grid.hover(at: center(1, 0))
+        grid.addRowBelow.performClick(nil)
+        XCTAssertEqual(grid.cellTexts, [["Name", "Score"], ["Ada", "10"], ["", ""], ["Bob", "7"]])
+        grid.hover(at: center(1, 0))
+        grid.addColumnRight.performClick(nil)
+        XCTAssertEqual(grid.cellTexts[0], ["Name", "", "Score"])
+        grid.hover(at: center(1, 0))
+        grid.addColumnLeft.performClick(nil)
+        XCTAssertEqual(grid.cellTexts[0], ["", "Name", "", "Score"])
+    }
+
+    func testTheHandlesOfferTheRestAndTheHeaderStays() {
+        view.isEditable = true
+        view.layoutGrids()
+        grid.hover(at: center(1, 1))
+        XCTAssertEqual(grid.columnMenu().items.filter { !$0.isSeparatorItem }.map(\.title),
+                       ["Insert Column Left", "Insert Column Right", "Delete Column",
+                        "Align Column Left", "Align Column Center", "Align Column Right"])
+        XCTAssertEqual(grid.rowMenu().items.map(\.title), ["Insert Row Above", "Insert Row Below", "Delete Row"])
+        grid.hover(at: center(0, 0))
+        XCTAssertTrue(grid.addRowAbove.isHidden, "nothing goes above the header")
+        XCTAssertEqual(grid.rowMenu().items.map(\.title), ["Insert Row Below"])
+    }
+
+    func testNoControlsWhileReading() {
+        view.isEditable = false
+        view.layoutGrids()
+        grid.hover(at: center(1, 0))
+        XCTAssertTrue(grid.hoverControls.allSatisfy(\.isHidden))
+    }
+
+    func testMovingThePointerOverTheTableShowsTheControls() {
+        view.isEditable = true
+        view.layoutGrids()
+        let point = view.convert(NSPoint(x: grid.frame.minX + center(1, 0).x, y: grid.frame.minY + center(1, 0).y), to: nil)
+        view.mouseMoved(with: NSEvent.mouseEvent(with: .mouseMoved, location: point, modifierFlags: [], timestamp: 0,
+                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                                 clickCount: 0, pressure: 0)!)
+        XCTAssertFalse(grid.columnHandle.isHidden)
+        let away = view.convert(NSPoint(x: grid.frame.minX, y: grid.frame.maxY + 200), to: nil)
+        view.mouseMoved(with: NSEvent.mouseEvent(with: .mouseMoved, location: away, modifierFlags: [], timestamp: 0,
+                                                 windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                                                 clickCount: 0, pressure: 0)!)
+        XCTAssertTrue(grid.columnHandle.isHidden)
+    }
 }

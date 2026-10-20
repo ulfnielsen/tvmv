@@ -248,6 +248,119 @@ final class TableGridView: NSView {
         }
     }
 
+    // MARK: Hover controls
+
+    /// While editing, the pointer over a cell shows a handle and "+" buttons
+    /// on its column's top border and its row's left border. They live in the
+    /// document view, outside the grid's own frame.
+    private(set) lazy var columnHandle: NSButton = control("ellipsis.circle.fill", "Column") { [weak self] in
+        self?.popColumnMenu()
+    }
+    private(set) lazy var rowHandle: NSButton = control("ellipsis.circle.fill", "Row") { [weak self] in
+        self?.popRowMenu()
+    }
+    private(set) lazy var addColumnLeft: NSButton = control("plus.circle.fill", "Insert Column Left") { [weak self] in
+        self?.act { grid, _, c in grid.insertColumn(after: c - 1) }
+    }
+    private(set) lazy var addColumnRight: NSButton = control("plus.circle.fill", "Insert Column Right") { [weak self] in
+        self?.act { grid, _, c in grid.insertColumn(after: c) }
+    }
+    private(set) lazy var addRowAbove: NSButton = control("plus.circle.fill", "Insert Row Above") { [weak self] in
+        self?.act { grid, r, _ in grid.insertRow(above: r) }
+    }
+    private(set) lazy var addRowBelow: NSButton = control("plus.circle.fill", "Insert Row Below") { [weak self] in
+        self?.act { grid, r, _ in grid.insertRow(below: r) }
+    }
+    var hoverControls: [NSButton] { [columnHandle, rowHandle, addColumnLeft, addColumnRight, addRowAbove, addRowBelow] }
+    private var hovered: (row: Int, column: Int)?
+
+    private func control(_ symbol: String, _ label: String, _ action: @escaping () -> Void) -> NSButton {
+        let button = ClosureButton(title: "", handler: action)
+        button.isBordered = false
+        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: label)
+        button.imageScaling = .scaleProportionallyUpOrDown
+        button.toolTip = label
+        button.isHidden = true
+        return button
+    }
+
+    private func act(_ change: (TableGridView, Int, Int) -> Void) {
+        guard let (r, c) = hovered else { return }
+        hover(at: nil)
+        change(self, r, c)
+    }
+
+    private func popColumnMenu() { pop(columnMenu(), from: columnHandle) }
+    private func popRowMenu() { pop(rowMenu(), from: rowHandle) }
+
+    private func pop(_ menu: NSMenu, from button: NSButton) {
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: button.bounds.maxY + 2), in: button)
+    }
+
+    /// The cell under `point` (grid coordinates).
+    private func cellIndex(at point: NSPoint) -> (row: Int, column: Int)? {
+        for (r, row) in cells.enumerated() {
+            for (c, cell) in row.enumerated() where cell.frame.contains(point) { return (r, c) }
+        }
+        return nil
+    }
+
+    /// Show the controls for the cell under `point` (grid coordinates), or
+    /// hide them (nil, or not editing).
+    func hover(at point: NSPoint?) {
+        guard let point, let document, document.isEditable, !isHidden, let (r, c) = cellIndex(at: point) else {
+            hovered = nil
+            hoverControls.forEach { $0.isHidden = true }
+            return
+        }
+        hovered = (r, c)
+        let cell = cells[r][c].frame.offsetBy(dx: frame.minX, dy: frame.minY)
+        let side: CGFloat = 16
+        func place(_ button: NSButton, _ center: NSPoint) {
+            if button.superview !== document { document.addSubview(button) }
+            button.frame = NSRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)
+            button.contentTintColor = button === columnHandle || button === rowHandle
+                ? theme?.muted : theme?.accent
+            button.isHidden = false
+        }
+        let above = frame.minY - side / 2 - 3
+        place(columnHandle, NSPoint(x: cell.midX, y: above))
+        place(addColumnLeft, NSPoint(x: cell.minX, y: above))
+        place(addColumnRight, NSPoint(x: cell.maxX, y: above))
+        place(rowHandle, NSPoint(x: frame.minX - side * 1.9, y: cell.midY))
+        place(addRowAbove, NSPoint(x: frame.minX - side / 2 - 3, y: cell.minY))
+        place(addRowBelow, NSPoint(x: frame.minX - side / 2 - 3, y: cell.maxY))
+        addRowAbove.isHidden = r == 0   // the header stays the first row
+    }
+
+    /// The column handle's menu: insert, delete, align.
+    func columnMenu() -> NSMenu {
+        menu([.insertColumnLeft, .insertColumnRight, .deleteColumn, nil, .alignLeft, .alignCenter, .alignRight])
+    }
+
+    /// The row handle's menu; the header row can only get a row below it.
+    func rowMenu() -> NSMenu {
+        hovered?.row == 0 ? menu([.insertRowBelow]) : menu([.insertRowAbove, .insertRowBelow, .deleteRow])
+    }
+
+    private func menu(_ commands: [TableCommand?]) -> NSMenu {
+        let menu = NSMenu()
+        guard let (r, c) = hovered else { return menu }
+        for command in commands {
+            guard let command else { menu.addItem(.separator()); continue }
+            let item = command.menuItem()
+            item.action = #selector(DocumentTextView.performTableCommand(_:))
+            item.target = cells[r][c]
+            menu.addItem(item)
+        }
+        return menu
+    }
+
+    override func viewWillMove(toSuperview newSuperview: NSView?) {
+        super.viewWillMove(toSuperview: newSuperview)
+        if newSuperview == nil { hoverControls.forEach { $0.removeFromSuperview() } }
+    }
+
     /// Table commands for a cell's context menu.
     func menuItems(for cell: DocumentTextView) -> [NSMenuItem] {
         guard position(of: cell) != nil, document?.isEditable == true else { return [] }

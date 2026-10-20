@@ -1013,6 +1013,35 @@ final class DocumentTextView: NSTextView {
         if revealing { reveal(false) }
     }
 
+    // MARK: Table hover controls
+
+    private var hoverTracking: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard !isCell else { return }
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect],
+                                  owner: self, userInfo: nil)
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    /// Over a table: show its controls for the cell under the pointer. Just
+    /// outside it (where the controls sit) they stay; farther away they go.
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        guard !isCell else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        for grid in tableGrids where !grid.isHidden {
+            if grid.frame.contains(point) {
+                grid.hover(at: convert(point, to: grid))
+            } else if !grid.frame.insetBy(dx: -44, dy: -24).contains(point) {
+                grid.hover(at: nil)
+            }
+        }
+    }
+
     /// A table command (from the Table menu or a cell's context menu): acts
     /// on the cell being edited; anywhere else there is no table to act on.
     @objc func performTableCommand(_ sender: Any?) {
