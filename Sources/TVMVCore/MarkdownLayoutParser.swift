@@ -119,7 +119,10 @@ struct LayoutBuilder {
                 r.length = min(r.length, max(0, limit - r.location))
                 if recordBlocks {
                     layout.blocks.append(.init(range: docRange(r), kind: CMark.type(block)))
-                    if CMark.type(block) == "paragraph" { recordSoftBreaks(in: r) }
+                    if CMark.type(block) == "paragraph" {
+                        recordSoftBreaks(in: r)
+                        recordBlockImage(block)
+                    }
                 }
                 visitBlock(block, limit: limit)
             }
@@ -141,6 +144,18 @@ struct LayoutBuilder {
             }
             i += 1
         }
+    }
+
+    /// A paragraph whose only content is one image (whitespace aside).
+    mutating func recordBlockImage(_ paragraph: CMarkNode) {
+        let content = CMark.children(paragraph).filter {
+            !(["softbreak", "linebreak"].contains(CMark.type($0))
+              || (CMark.type($0) == "text" && CMark.literal($0).allSatisfy(\.isWhitespace)))
+        }
+        guard content.count == 1, CMark.type(content[0]) == "image", let r = localRange(content[0]),
+              NSMaxRange(r) <= ns.length, ns.character(at: r.location) == 33 else { return }   // "!"
+        let url = cmark_node_get_url(content[0]).map { String(cString: $0) } ?? ""
+        layout.blockImages.append(.init(range: docRange(r), url: url, alt: Self.plainText(content[0])))
     }
 
     // MARK: Ranges

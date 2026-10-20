@@ -126,4 +126,14 @@ final class MarkdownLayoutParserTests: XCTestCase {
         XCTAssertEqual(lineAfter, ["two\n", "three\n"])
         XCTAssertTrue(breaks.allSatisfy { ns.character(at: $0) == 10 })
     }
+
+    func testAnImageAloneInItsParagraphIsABlockImage() {
+        let text = "Intro.\n\n![A chart](img/chart.png \"Title\")\n\nText with ![inline](x.png) inside.\n\n![remote](https://e.x/p.png)\n"
+        let ns = text as NSString
+        let images = MarkdownLayoutParser.parse(text).blockImages
+        XCTAssertEqual(images.map { ns.substring(with: $0.range) },
+                       ["![A chart](img/chart.png \"Title\")", "![remote](https://e.x/p.png)"])
+        XCTAssertEqual(images.map(\.url), ["img/chart.png", "https://e.x/p.png"])
+        XCTAssertEqual(images.map(\.alt), ["A chart", "remote"])
+    }
 }

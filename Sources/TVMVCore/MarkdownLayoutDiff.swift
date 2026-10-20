@@ -36,6 +36,9 @@ extension MarkdownLayout {
             o.range.shifted(by: d) == n.range && o.unit.shifted(by: d) == n.unit && o.collapsesLine == n.collapsesLine
         }
         widen(old.spellExempt, spellExempt, { $0 }) { o, n, d in o.shifted(by: d) == n }
+        widen(old.blockImages, blockImages, { $0.range }) { o, n, d in
+            o.range.shifted(by: d) == n.range && o.url == n.url && o.alt == n.alt
+        }
         widen(old.softBreaks.map { NSRange(location: $0, length: 1) }, softBreaks.map { NSRange(location: $0, length: 1) },
               { $0 }) { o, n, d in o.shifted(by: d) == n }
         widen(old.codeBlocks, codeBlocks, { $0.range }) { o, n, d in

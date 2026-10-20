@@ -64,6 +64,16 @@ public struct MarkdownLayout: Equatable, Sendable {
     /// Newlines inside top-level paragraphs that are soft line breaks: the
     /// paragraph reflows across them, so they lay out as spaces.
     public var softBreaks: [Int] = []
+    /// Images that are the whole content of a top-level paragraph: shown as
+    /// the picture itself, with the `![alt](url)` source hidden until revealed.
+    public var blockImages: [BlockImage] = []
+
+    public struct BlockImage: Equatable, Sendable {
+        /// The `![alt](url "title")` source; also its reveal unit.
+        public var range: NSRange
+        public var url: String
+        public var alt: String
+    }
     /// Link reference definition lines (`[label]: url`) outside code. Partial
     /// re-parses are wrapped with them so reference links resolve exactly as
     /// in a full parse.
@@ -79,7 +89,7 @@ public struct MarkdownLayout: Equatable, Sendable {
     /// Every reveal unit, in source order without duplicates.
     public var revealUnits: [NSRange] {
         var seen = Set<NSRange>()
-        return markers.compactMap { seen.insert($0.unit).inserted ? $0.unit : nil }
+        return (markers.map(\.unit) + blockImages.map(\.range)).compactMap { seen.insert($0).inserted ? $0 : nil }
     }
 }
 
