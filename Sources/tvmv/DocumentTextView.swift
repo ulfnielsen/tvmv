@@ -274,12 +274,12 @@ final class DocumentTextView: NSTextView {
 
     override func setFrameSize(_ newSize: NSSize) {
         let column = textContainer?.size.width
+        let oldWidth = frame.width
         super.setFrameSize(newSize)
         layoutColumn()
-        if textContainer?.size.width != column {   // images and tables scale with the column
-            restyleImages { _ in true }
-            layoutGrids()
-        }
+        if textContainer?.size.width != column { restyleImages { _ in true } }   // they scale with the column
+        // Tables follow the column: its width, and its centring beyond the measure.
+        if newSize.width != oldWidth { layoutGrids() }
         if newSize.width > 0, let sized = onSized {
             onSized = nil
             sized()

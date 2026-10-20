@@ -142,4 +142,14 @@ final class TableGridTests: XCTestCase {
         XCTAssertEqual(view.codePillRuns().count, 2, "a revealed table's source draws as text again")
         _ = cell
     }
+
+    func testTheGridStaysAlignedWithTheTextWhenTheWindowWidens() {
+        // Reported: beyond the measure the text column recentres, the table
+        // stayed where it was (it only moved when the column width changed).
+        for width: CGFloat in [1600, 2400, 900] {
+            view.setFrameSize(NSSize(width: width, height: view.frame.height))
+            let textLeft = view.textContainerOrigin.x + view.textContainer!.lineFragmentPadding
+            XCTAssertEqual(grid.frame.minX, textLeft, accuracy: 0.5, "at \(width) pt")
+        }
+    }
 }
