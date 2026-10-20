@@ -315,7 +315,7 @@ final class TableGridView: NSView {
         }
         hovered = (r, c)
         let cell = cells[r][c].frame.offsetBy(dx: frame.minX, dy: frame.minY)
-        let side: CGFloat = 16
+        let side: CGFloat = 20
         func place(_ button: NSButton, _ center: NSPoint) {
             if button.superview !== document { document.addSubview(button) }
             button.frame = NSRect(x: center.x - side / 2, y: center.y - side / 2, width: side, height: side)

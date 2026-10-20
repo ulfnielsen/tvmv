@@ -1036,7 +1036,7 @@ final class DocumentTextView: NSTextView {
         for grid in tableGrids where !grid.isHidden {
             if grid.frame.contains(point) {
                 grid.hover(at: convert(point, to: grid))
-            } else if !grid.frame.insetBy(dx: -44, dy: -24).contains(point) {
+            } else if !grid.frame.insetBy(dx: -54, dy: -28).contains(point) {
                 grid.hover(at: nil)
             }
         }
