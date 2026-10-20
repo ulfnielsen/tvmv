@@ -126,31 +126,46 @@ enum DocumentStyler {
             }
         }
         // Quotes and lists: the prefix and marker hide; the line indents (the
-        // view draws the rule, bullet, number or checkbox in the space).
+        // view draws the rule, bullet, number or checkbox in the space). When
+        // the markup shows, it takes that space instead, so the text stays put.
         let em = theme.body.pointSize
-        func indent(line: NSRange, by amount: CGFloat) {
-            guard let r = clip(line) else { return }
-            let current = (storage.attribute(.paragraphStyle, at: r.location, effectiveRange: nil) as? NSParagraphStyle)
-                ?? theme.paragraphStyle
-            let p = current.mutableCopy() as! NSMutableParagraphStyle
-            p.firstLineHeadIndent = amount
-            p.headIndent = amount
-            storage.addAttribute(.paragraphStyle, value: p, range: r)
+        func width(_ r: NSRange) -> CGFloat {
+            (tableText.substring(with: r) as NSString).size(withAttributes: [.font: theme.body]).width
         }
-        let quoteLevelByLine = Dictionary(layout.quoteLines.map {
-            (tableText.lineRange(for: NSRange(location: $0.prefix.location, length: 0)).location, $0.level)
-        }, uniquingKeysWith: max)
+        var indents: [Int: (amount: CGFloat, shown: CGFloat)] = [:]   // by line start
         for quote in layout.quoteLines {
             let line = tableText.lineRange(for: NSRange(location: quote.prefix.location, length: 0))
-            if !isRevealed(quote.prefix), let r = clip(quote.prefix) { storage.addAttribute(.tvmvHidden, value: true, range: r) }
             if let r = clip(line) { storage.addAttribute(.foregroundColor, value: theme.inkSoft, range: r) }
-            indent(line: line, by: quoteIndent(level: quote.level, em: em))
+            var entry = indents[line.location] ?? (0, 0)
+            entry.amount += quoteIndent(level: quote.level, em: em)
+            if isRevealed(quote.prefix) { entry.shown += width(quote.prefix) }
+            else if let r = clip(quote.prefix) { storage.addAttribute(.tvmvHidden, value: true, range: r) }
+            indents[line.location] = entry
         }
         for item in layout.listItems {
             let line = tableText.lineRange(for: NSRange(location: item.marker.location, length: 0))
-            if !isRevealed(item.marker), let r = clip(item.marker) { storage.addAttribute(.tvmvHidden, value: true, range: r) }
-            let quoted = quoteIndent(level: quoteLevelByLine[line.location] ?? 0, em: em)
-            indent(line: line, by: quoted + listIndent(level: item.level, em: em))
+            var entry = indents[line.location] ?? (0, 0)
+            // The gutter fits the marker as typed ("- [ ] ", "10. "), so it can
+            // take the bullet's place without moving the text.
+            let gutterStart = listIndent(level: item.level, em: em) - 1.6 * em
+            let markerWidth = width(item.marker)
+            // Checked and open boxes share one gutter, so a task list lines up.
+            let gutterWidth = item.task == nil ? markerWidth
+                : ((tableText.substring(with: item.marker).replacingOccurrences(of: "[ ]", with: "[x]")) as NSString)
+                    .size(withAttributes: [.font: theme.body]).width
+            entry.amount += max(listIndent(level: item.level, em: em), gutterStart + gutterWidth)
+            if isRevealed(item.marker) { entry.shown += markerWidth }
+            else if let r = clip(item.marker) { storage.addAttribute(.tvmvHidden, value: true, range: r) }
+            indents[line.location] = entry
+        }
+        for (start, entry) in indents {
+            guard let r = clip(tableText.lineRange(for: NSRange(location: start, length: 0))) else { continue }
+            let current = (storage.attribute(.paragraphStyle, at: r.location, effectiveRange: nil) as? NSParagraphStyle)
+                ?? theme.paragraphStyle
+            let p = current.mutableCopy() as! NSMutableParagraphStyle
+            p.firstLineHeadIndent = max(0, entry.amount - entry.shown)
+            p.headIndent = entry.amount
+            storage.addAttribute(.paragraphStyle, value: p, range: r)
         }
         for exempt in layout.spellExempt {
             if let r = clip(exempt) { storage.addAttribute(.tvmvNoSpell, value: true, range: r) }

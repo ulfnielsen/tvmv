@@ -387,13 +387,24 @@ final class DocumentTextView: NSTextView {
     private func listItemGeometry(_ item: MarkdownLayout.ListItem) -> (fragment: NSRect, baseline: CGFloat, textX: CGFloat)? {
         guard let lm = layoutManager, let tc = textContainer, let storage = textStorage,
               NSMaxRange(item.marker) <= storage.length else { return nil }
-        let content = min(NSMaxRange(item.marker), max(0, storage.length - 1))
+        // Anchor on the first visible character of the line: hidden glyphs at
+        // a line's start (an italic first word's "*") sit on the line before.
+        let text = storage.string as NSString
+        let line = text.lineRange(for: NSRange(location: item.marker.location, length: 0))
+        var content = min(NSMaxRange(item.marker), max(0, storage.length - 1))
+        while content < NSMaxRange(line) - 1, isHidden(content) { content += 1 }
         let glyph = lm.glyphIndexForCharacter(at: content)
         let fragment = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
         let style = storage.attribute(.paragraphStyle, at: content, effectiveRange: nil) as? NSParagraphStyle
         let textX = textContainerOrigin.x + tc.lineFragmentPadding + (style?.firstLineHeadIndent ?? 0)
         let baseline = fragment.minY + textContainerOrigin.y + lm.location(forGlyphAt: glyph).y
         return (fragment, baseline, textX)
+    }
+
+    /// Where a list item's bullet is anchored: the x its text starts at and
+    /// its first line's baseline, in view coordinates.
+    func bulletAnchor(for item: MarkdownLayout.ListItem) -> NSPoint? {
+        listItemGeometry(item).map { NSPoint(x: $0.textX, y: $0.baseline) }
     }
 
     /// The clickable checkbox of a task item, in view coordinates.

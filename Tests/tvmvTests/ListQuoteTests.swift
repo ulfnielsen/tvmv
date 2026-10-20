@@ -103,4 +103,47 @@ final class ListQuoteTests: XCTestCase {
         pump()
         XCTAssertEqual(view.string, "- a\n\n")
     }
+
+    /// x of the character at `index`, in view coordinates.
+    private func x(_ index: Int) -> CGFloat {
+        let lm = view.layoutManager!
+        lm.ensureLayout(for: view.textContainer!)
+        let glyph = lm.glyphIndexForCharacter(at: index)
+        let fragment = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        return fragment.minX + lm.location(forGlyphAt: glyph).x
+    }
+
+    func testShowingMarkdownDoesNotMoveListOrQuoteText() {
+        // Reported: bullets/text moved just by showing the Markdown. The
+        // revealed marker takes the bullet's place; the text stays put.
+        view.load("- one\n  - nested\n3) third\n- [ ] task\n> quoted\n")
+        let words = ["one", "nested", "third", "task", "quoted"].map { ns.range(of: $0).location }
+        let hidden = words.map(x)
+        view.showAllMarkup = true
+        let shown = words.map(x)
+        for (i, word) in ["one", "nested", "third", "task", "quoted"].enumerated() {
+            XCTAssertEqual(shown[i], hidden[i], accuracy: 0.5, "«\(word)» moved")
+        }
+        view.showAllMarkup = false
+        XCTAssertEqual(words.map(x), hidden, "and back")
+    }
+
+    func testEveryItemGetsItsOwnBulletWhenItsTextStartsWithMarkup() {
+        // Reported: a three-item list whose items start with an italic word
+        // showed two bullets. Hidden glyphs at a line's start sit on the line
+        // before, so the bullet was drawn there.
+        for text in ["- *one* a\n- *two* b\n- **three** c\n", "1. _one_\n2. _two_\n3. _three_\n",
+                     "Intro.\n\n* *one* a\n* *two* b\n* *three* c\n"] {
+            view.load(text)
+            let rows = view.layout.listItems.compactMap { view.bulletAnchor(for: $0)?.y }
+            XCTAssertEqual(rows.count, 3)
+            XCTAssertEqual(Set(rows.map { Int($0) }).count, 3, "three distinct lines in «\(text)»: \(rows)")
+            XCTAssertEqual(rows, rows.sorted())
+        }
+    }
+
+    func testCheckedAndOpenTasksLineUp() {
+        view.load("- [x] done\n- [ ] open\n")
+        XCTAssertEqual(x(ns.range(of: "done").location), x(ns.range(of: "open").location), accuracy: 0.5)
+    }
 }

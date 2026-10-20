@@ -195,4 +195,27 @@ final class DocumentImageTests: XCTestCase {
         XCTAssertEqual(loadAndWait("![h](huge.svg)\n", "huge.svg"), .failed)
         XCTAssertEqual(loadAndWait("![j](junk.png)\n", "junk.png"), .failed)
     }
+
+    func testTransparentSVGBackgroundsShowThePage() throws {
+        // An SVG without a background: only its shapes cover the page.
+        let svg = "<svg xmlns='http://www.w3.org/2000/svg' width='200' height='100'><rect width='20' height='20' fill='black'/></svg>"
+        try svg.write(to: folder.appendingPathComponent("clear.svg"), atomically: true, encoding: .utf8)
+        view.load("![c](clear.svg)\n")
+        pump { view.imageState(for: "clear.svg") == .loaded }
+        let lm = view.layoutManager!
+        lm.ensureLayout(for: view.textContainer!)
+        let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds)!
+        view.cacheDisplay(in: view.bounds, to: rep)
+        let scale = CGFloat(rep.pixelsWide) / view.bounds.width
+        let fragment = lm.lineFragmentRect(forGlyphAt: 0, effectiveRange: nil)
+        let left = view.textContainerOrigin.x + view.textContainer!.lineFragmentPadding
+        let top = fragment.minY + view.textContainerOrigin.y + view.theme.body.pointSize / 2
+        func pixel(_ x: CGFloat, _ y: CGFloat) -> NSColor { rep.colorAt(x: Int(x * scale), y: Int(y * scale))! }
+        let page = pixel(4, 4)
+        let insideShape = pixel(left + 10, top + 10)
+        let insideImageOutsideShape = pixel(left + 150, top + 60)
+        XCTAssertLessThan(insideShape.brightnessComponent, 0.2, "the black square is drawn")
+        XCTAssertEqual(insideImageOutsideShape.brightnessComponent, page.brightnessComponent, accuracy: 0.01,
+                       "transparent areas show the page")
+    }
 }
