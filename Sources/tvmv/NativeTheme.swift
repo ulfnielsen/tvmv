@@ -11,6 +11,8 @@ extension NSAttributedString.Key {
     /// A soft line break inside a paragraph: laid out as a space, so the
     /// paragraph reflows like the web reader's.
     static let tvmvSoftBreak = NSAttributedString.Key("tvmvSoftBreak")
+    /// The review thread id of an anchor's text (or a point comment's carrier).
+    static let tvmvReview = NSAttributedString.Key("tvmvReview")
 }
 
 /// Fonts, colors and measure for the native view: the paper & ink palette
@@ -24,6 +26,10 @@ struct NativeTheme: Equatable {
     var accent: NSColor
     var paper: NSColor
     var paperDeep: NSColor
+    /// Review markup: a commented range's background, inserted and deleted text.
+    var reviewHighlight: NSColor
+    var reviewInsert: NSColor
+    var reviewDelete: NSColor
     /// Text column width in points; nil means full width.
     var columnWidth: CGFloat?
     /// Minimum horizontal padding either side of the column (app.css --tvmv-pad).
@@ -43,9 +49,13 @@ struct NativeTheme: Equatable {
         if dark {
             paper = hex(0x181410); paperDeep = hex(0x221C16); ink = hex(0xECE3D3)
             inkSoft = hex(0xCBB89B); muted = hex(0x9C876A); accent = hex(0xE2693B)
+            reviewHighlight = hex(0x8A6D10).withAlphaComponent(0.55)
+            reviewInsert = hex(0x7FC48A); reviewDelete = hex(0xEF8A80)
         } else {
             paper = hex(0xFBF8F2); paperDeep = hex(0xF4EFE3); ink = hex(0x2A1810)
             inkSoft = hex(0x5A3D2A); muted = hex(0x8A7359); accent = hex(0xB83F12)
+            reviewHighlight = hex(0xFFE27A).withAlphaComponent(0.6)
+            reviewInsert = hex(0x2E7D32); reviewDelete = hex(0xB3261E)
         }
         let zero = ("0" as NSString).size(withAttributes: [.font: body]).width
         columnWidth = fullWidth ? nil : CGFloat(measure) * zero

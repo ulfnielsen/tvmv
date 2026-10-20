@@ -53,8 +53,32 @@ enum DocumentStyler {
                                        .underlineStyle: NSUnderlineStyle.single.rawValue], range: r)
             case .html, .image:
                 storage.addAttributes([.font: theme.mono, .foregroundColor: theme.muted], range: r)
-            case .review:
-                break
+            case .review(let role, let id):
+                storage.addAttribute(.tvmvReview, value: id, range: r)
+                let line = NSUnderlineStyle.single.rawValue
+                switch role {
+                case .highlight:
+                    storage.addAttribute(.backgroundColor, value: theme.reviewHighlight, range: r)
+                case .insertion, .substitutionNew:
+                    storage.addAttributes([.foregroundColor: theme.reviewInsert, .underlineStyle: line], range: r)
+                case .deletion:
+                    storage.addAttributes([.foregroundColor: theme.reviewDelete, .strikethroughStyle: line], range: r)
+                case .substitutionOld:
+                    storage.addAttributes([.foregroundColor: theme.reviewDelete, .strikethroughStyle: line], range: r)
+                    // A thin gap before the new text (the "~>" between them hides).
+                    let last = NSRange(location: NSMaxRange(run.range) - 1, length: 1)
+                    if let k = clip(last) { storage.addAttribute(.kern, value: theme.body.pointSize * 0.3, range: k) }
+                case .pointMarker:
+                    // A clear "[" holding the room the view draws the marker in;
+                    // revealed, it is just text again.
+                    let unit = layout.markers.first { $0.unit.location == run.range.location }?.unit ?? run.range
+                    if !isRevealed(unit) {
+                        storage.addAttributes([.foregroundColor: NSColor.clear,
+                                               .kern: theme.body.pointSize * 0.25], range: r)
+                    }
+                case .delimiter, .ref, .definition:
+                    break
+                }
             }
         }
         // Blank lines (outside code) are the gap between blocks.

@@ -46,3 +46,4 @@
 
 ## Ledger
 - Task 1: complete — ReviewLayoutTests 8/8 (RED: no .review style), property test with review tokens (coverage checked), perf gates pass; suite 81 app / 188 core.
+- Task 2: complete — ReviewViewTests 5/5 (RED: missing theme/attr; marker pixel test RED then GREEN; tolerance loosened for color-profile shift); suite 86 app / 188 core.

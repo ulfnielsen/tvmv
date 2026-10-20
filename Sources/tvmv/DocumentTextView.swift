@@ -1043,6 +1043,27 @@ final class DocumentTextView: NSTextView {
         }
         drawImages(visible: visible)
         drawListsAndQuotes(visible: visible)
+        drawPointMarkers(visible: visible)
+    }
+
+    /// A point comment: a small accent bubble, superscript, in the room its
+    /// clear "[" carrier keeps (not while its source is revealed).
+    private func drawPointMarkers(visible: NSRange) {
+        guard let lm = layoutManager, let storage = textStorage else { return }
+        let em = theme.body.pointSize
+        theme.accent.setFill()
+        for run in layout.styles where NSLocationInRange(run.range.location, visible) && run.range.location < storage.length {
+            guard case .review(.pointMarker, _) = run.style,
+                  storage.attribute(.foregroundColor, at: run.range.location, effectiveRange: nil) as? NSColor == .clear
+            else { continue }
+            let glyph = lm.glyphIndexForCharacter(at: run.range.location)
+            let fragment = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+            let x = lm.location(forGlyphAt: glyph).x + fragment.minX + textContainerOrigin.x
+            let baseline = fragment.minY + lm.location(forGlyphAt: glyph).y + textContainerOrigin.y
+            let side = em * 0.5
+            let bubble = NSRect(x: x + em * 0.05, y: baseline - theme.body.ascender * 0.95, width: side, height: side * 0.8)
+            NSBezierPath(roundedRect: bubble, xRadius: side * 0.3, yRadius: side * 0.3).fill()
+        }
     }
 
     // MARK: Delegates
