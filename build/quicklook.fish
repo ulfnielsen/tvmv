@@ -54,7 +54,9 @@ set -l ql_src \
     quicklook/PreviewViewController.swift \
     Sources/TVMVCore/AssetSchemeHandler.swift \
     Sources/TVMVCore/MarkdownRenderer.swift \
-    Sources/TVMVCore/MarkdownText.swift
+    Sources/TVMVCore/MarkdownText.swift \
+    Sources/TVMVCore/ReviewMarkup.swift \
+    Sources/TVMVCore/ReviewRendering.swift
 
 set -l build_dir .build/quicklook
 rm -rf $build_dir
