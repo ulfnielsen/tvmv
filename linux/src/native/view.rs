@@ -1,4 +1,7 @@
-//! `TvmvView`: the GtkTextView subclass that is the native reader/editor.
+//! `TvmvView`: the GtkSourceView subclass that is the native reader/editor.
+//! GtkSourceView is here for libspelling, which needs its buffer; its own
+//! features (highlighting, bracket matching, indenting) are all off, and
+//! TVMV's tags do the styling.
 //!
 //! It centres a column of the theme's measure, and draws what the styler
 //! leaves room for, in the layer below the text: code-block backgrounds,
@@ -13,6 +16,8 @@ use std::rc::Rc;
 use gtk4::prelude::*;
 use gtk4::subclass::prelude::*;
 use gtk4::{gdk, glib, graphene, gsk, pango};
+use sourceview5::prelude::*;
+use sourceview5::subclass::prelude::*;
 
 use crate::layout::{ListItem, Style};
 use crate::review_spans::SpanRole;
@@ -40,7 +45,7 @@ mod imp {
     impl ObjectSubclass for TvmvView {
         const NAME: &'static str = "TvmvNativeView";
         type Type = super::TvmvView;
-        type ParentType = gtk4::TextView;
+        type ParentType = sourceview5::View;
     }
 
     impl ObjectImpl for TvmvView {}
@@ -51,6 +56,8 @@ mod imp {
             self.parent_size_allocate(width, height, baseline);
         }
     }
+
+    impl ViewImpl for TvmvView {}
 
     impl TextViewImpl for TvmvView {
         fn snapshot_layer(&self, layer: gtk4::TextViewLayer, snapshot: gtk4::Snapshot) {
@@ -67,7 +74,7 @@ mod imp {
 
 glib::wrapper! {
     pub struct TvmvView(ObjectSubclass<imp::TvmvView>)
-        @extends gtk4::TextView, gtk4::Widget,
+        @extends sourceview5::View, gtk4::TextView, gtk4::Widget,
         @implements gtk4::Accessible, gtk4::Buildable, gtk4::ConstraintTarget, gtk4::Scrollable;
 }
 
@@ -99,6 +106,18 @@ fn rounded_fill(snapshot: &gtk4::Snapshot, r: &graphene::Rect, radius: f32, colo
 impl TvmvView {
     pub fn new() -> Self {
         let view: TvmvView = glib::Object::new();
+        view.set_highlight_current_line(false);
+        view.set_show_line_numbers(false);
+        view.set_auto_indent(false);
+        view.set_indent_on_tab(false);
+        view.set_smart_backspace(false);
+        view.set_smart_home_end(sourceview5::SmartHomeEndType::Disabled);
+        if let Ok(buffer) = view.buffer().downcast::<sourceview5::Buffer>() {
+            buffer.set_highlight_syntax(false);
+            buffer.set_highlight_matching_brackets(false);
+            // No style scheme: it would set the text's colors over the theme's.
+            buffer.set_style_scheme(None);
+        }
         view.add_css_class("tvmv-native");
         view.set_wrap_mode(gtk4::WrapMode::WordChar);
         view.set_top_margin(36);

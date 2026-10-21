@@ -31,10 +31,9 @@ source, styled as code, and external changes keep today's banner.
      comment and **Ctrl+Shift+E** suggests an edit.
    - Ctrl+E no longer opens a pane. In a `--peek` window it still promotes
      to a real window, now with editing on.
-2. **Text stack: GtkTextView now, GtkSourceView 5 with spelling.**
-   `TvmvView` subclasses `gtk::TextView`. Step 3 switches the parent to
+2. **Text stack: GtkSourceView 5, for spelling.** `TvmvView` subclasses
    `sourceview5::View` over a `sourceview5::Buffer`, which libspelling
-   requires; neither library is installed on the development machine yet.
+   requires (since step 3; step 1 and 2 used `gtk::TextView`).
    There is no language definition and no syntax highlighting: TVMV's tags
    do all the styling.
 3. **Hiding uses tags with `invisible = true`.** GTK drops invisible text from
@@ -264,11 +263,18 @@ covers.
 
 - Spelling uses **libspelling** (`SpellingTextBufferAdapter` on the source
   buffer), with the language from the locale and a menu to change it.
-- **Exempt ranges:** code, URLs, review ids and labels, and revealed markup.
-  libspelling skips text covered by the source buffer's `no-spell-check`
-  context class. Whether a plain `TextTag` can do the same is not yet
-  known. If it can't, TVMV registers a minimal language definition that only
-  emits that class over the exempt ranges.
+- **Exempt ranges:** the layout's `spell_exempt` (code, URLs, HTML, review
+  ids and labels). Markers are punctuation and need no exemption. A plain
+  `TextTag` named `gtksourceview:context-classes:no-spell-check` does it, no
+  language definition needed: libspelling 0.2 adopts that tag when it is
+  *added* to the tag table, so the adapter must exist before the styler
+  creates its tags, and it re-checks a range whenever the tag is applied
+  or removed there.
+- **When:** misspellings show while reading too, as on macOS. Corrections
+  change the text, so the right-click menu offers them only while editing.
+  Settings → Check spelling (on by default) turns it off.
+- **Cost** (GNOME Wayland, background only; opening, typing and scrolling
+  unchanged): fully styled 478 → 619 ms at 1 MB, 2.3 → 2.8 s at 5 MB.
 - There is no grammar checking. GTK has no system grammar service.
 
 ## Table grid
@@ -430,9 +436,10 @@ priority idle, which waits behind the lazy styler.
    checkboxes came with step 1. **Images done 2026-10-21:** block images
    local, remote and `data:`, within the macOS byte and pixel caps, scaled
    to the column, revealed as source, and pasted from the clipboard into an
-   `images` folder. **Spelling waits** for `libgtksourceview-5-dev` and
-   `libspelling-1-dev` (Ubuntu 24.04 ships 5.12 and 0.2.0; the `sourceview5`
-   0.11 and `libspelling` 0.5 crates build against them).
+   `images` folder. **Spelling done 2026-10-21:** `TvmvView` is a
+   `sourceview5::View` with its own features off, and libspelling checks
+   the buffer (needs `libgtksourceview-5-dev` and `libspelling-1-dev`;
+   Ubuntu 24.04 ships 5.12 and 0.2.0).
 4. `TableGrid`.
 5. The review core port, then cards and commands.
 

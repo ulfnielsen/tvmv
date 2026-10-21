@@ -158,6 +158,9 @@ pub struct DocumentView {
     /// What one image may cost: bytes read, pixels decoded.
     pub max_image_bytes: Cell<usize>,
     pub max_image_pixels: Cell<u64>,
+    /// Spell checking (libspelling), on the source buffer. It skips text
+    /// tagged no-spell-check by the styler.
+    pub spelling: libspelling::TextBufferAdapter,
 }
 
 /// Where the first-screen parse of a large document stops: the first blank
@@ -202,6 +205,14 @@ impl DocumentView {
         let view = TvmvView::new();
         let buffer = view.buffer();
         buffer.set_enable_undo(false);
+        // Before the styler: libspelling finds the no-spell-check tag when it
+        // is added to the tag table, not one that is already there. It then
+        // re-checks a range whenever that tag is applied or removed.
+        libspelling::init();
+        let source_buffer = buffer.clone().downcast::<sourceview5::Buffer>().expect("a GtkSourceView buffer");
+        let spelling = libspelling::TextBufferAdapter::new(&source_buffer, &libspelling::Checker::default());
+        spelling.set_enabled(true);
+        view.insert_action_group("spelling", Some(&spelling));
         let styler = Styler::new(&buffer, &theme);
         // Added after the styler's tags, so a match shows over any style.
         let find_tag = gtk4::TextTag::new(Some("find"));
@@ -262,6 +273,7 @@ impl DocumentView {
             document_path: RefCell::new(None),
             max_image_bytes: Cell::new(images::MAX_BYTES),
             max_image_pixels: Cell::new(images::MAX_PIXELS),
+            spelling,
         });
         doc.color_find_tags();
         doc.apply_css();
@@ -294,6 +306,22 @@ impl DocumentView {
     pub fn set_editable(&self, editable: bool) {
         self.view.set_editable(editable);
         self.view.set_cursor_visible(editable);
+        self.update_spelling_menu();
+    }
+
+    /// Turn spell checking on or off (Settings → Check spelling).
+    pub fn set_spelling(&self, on: bool) {
+        if self.spelling.is_enabled() != on {
+            self.spelling.set_enabled(on);
+        }
+        self.update_spelling_menu();
+    }
+
+    /// Misspellings show while reading too, as on macOS; the corrections
+    /// change the text, so they are offered only while editing.
+    fn update_spelling_menu(&self) {
+        let offer = self.view.is_editable() && self.spelling.is_enabled();
+        self.view.set_extra_menu(offer.then(|| self.spelling.menu_model()).as_ref());
     }
 
     pub fn is_loaded(&self) -> bool {

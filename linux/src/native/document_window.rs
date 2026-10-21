@@ -70,6 +70,7 @@ impl DocumentWindow {
         })));
         let doc = DocumentView::new(theme_for(settings));
         doc.set_document_path(Some(path.to_path_buf()));
+        doc.set_spelling(settings.check_spelling);
         doc.load(document.borrow().text().to_string());
         let saved = reading::load(path);
         let state = Rc::new(Cell::new(saved));
@@ -520,6 +521,7 @@ impl DocumentWindow {
     /// Push changed settings into this window, live.
     pub fn apply_settings(&self, settings: &Settings) {
         self.doc.set_theme(theme_for(settings));
+        self.doc.set_spelling(settings.check_spelling);
         (self.tint)();
         // `show_outline` is the default for new windows; toggling it in
         // settings shows at once in the windows already open.

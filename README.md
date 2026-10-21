@@ -19,8 +19,8 @@ and Save as PDF render all three.
 
 On **Linux** the document is a native GTK text view too, built the same way:
 read-only on open, `Ctrl+E` to edit in place, markup hidden, images shown (and
-pasted from the clipboard). Table grids and spelling are still to come there;
-until then tables show as their source.
+pasted from the clipboard), spelling checked. Table grids are still to come
+there; until then tables show as their source.
 
 On **iOS** a web layer (`Sources/TVMVCore/Resources/web/`, shared verbatim)
 renders the document with syntax highlighting, KaTeX math and Mermaid diagrams,
@@ -144,7 +144,8 @@ Needs Rust 1.85 or newer (the crate is edition 2024), a C compiler for cmark, an
 `fish` to run the install script:
 
 ```sh
-sudo apt install libgtk-4-dev libwebkitgtk-6.0-dev pkg-config fish build-essential   # Ubuntu 24.04
+sudo apt install libgtk-4-dev libwebkitgtk-6.0-dev libgtksourceview-5-dev libspelling-1-dev \
+    pkg-config fish build-essential   # Ubuntu 24.04
 fish build/linux.fish                # build + install to /usr/local
 PREFIX=$HOME/.local fish build/linux.fish     # or per-user, no root
 fish build/linux.fish uninstall

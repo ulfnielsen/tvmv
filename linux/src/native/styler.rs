@@ -52,7 +52,13 @@ pub struct Tags {
     pub point_carrier: TextTag,
     /// The '>' of "~>": the gap between old and new.
     pub gap: TextTag,
+    /// Not spell-checked: code, URLs, HTML, review ids. libspelling skips
+    /// text under GtkSourceView's "no-spell-check" context class, which is
+    /// a tag by this name.
+    pub no_spell: TextTag,
 }
+
+pub const NO_SPELL_TAG: &str = "gtksourceview:context-classes:no-spell-check";
 
 impl Tags {
     fn new(buffer: &TextBuffer) -> Tags {
@@ -84,6 +90,7 @@ impl Tags {
             point_carrier: add("point-carrier"),
             gap: add("gap"),
             hidden: add("hidden"),
+            no_spell: add(NO_SPELL_TAG),
         }
     }
 
@@ -206,6 +213,7 @@ pub struct Prepared {
     pub styles: SpanIndex,
     pub hideables: Vec<Hideable>,
     pub hidden_index: SpanIndex,
+    pub spell_exempt: SpanIndex,
 }
 
 impl Prepared {
@@ -221,7 +229,8 @@ impl Prepared {
             .filter(|h| !h.range.is_empty())
             .collect();
         let hidden_index = SpanIndex::new(hideables.iter().map(|h| &h.range));
-        Prepared { layout, styles, hideables, hidden_index }
+        let spell_exempt = SpanIndex::new(layout.spell_exempt.iter());
+        Prepared { layout, styles, hideables, hidden_index, spell_exempt }
     }
 
     pub fn parse(text: &str) -> Prepared {
@@ -432,6 +441,11 @@ impl Styler {
             if !revealed(&hideable.unit) {
                 tag(&tags.hidden, &hideable.range);
             }
+        }
+        // Markers are punctuation, never words; what in markup could read
+        // as a word (URLs, review ids) is in `spell_exempt`.
+        for exempt in prepared.spell_exempt.query(&range).map(|i| &layout.spell_exempt[i]) {
+            tag(&tags.no_spell, exempt);
         }
 
         // Block images: the source hides; once the picture is loaded its line

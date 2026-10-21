@@ -75,6 +75,9 @@ pub struct Settings {
     pub editor_font: String,
     /// Editor-pane font size in points. 0 means "same as the base size".
     pub editor_font_size: f64,
+    /// Mark misspellings in the native view (Linux only; macOS uses the
+    /// system's setting).
+    pub check_spelling: bool,
 }
 
 impl Default for Settings {
@@ -91,6 +94,7 @@ impl Default for Settings {
             editor_pane_width: 0.0,
             editor_font: String::new(),
             editor_font_size: 0.0,
+            check_spelling: true,
         }
     }
 }

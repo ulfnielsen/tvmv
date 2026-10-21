@@ -534,6 +534,53 @@ fn image_checks(r: &mut Report) {
     window.close();
 }
 
+fn spelling_checks(r: &mut Report) {
+    println!("\nG. spelling");
+    let text = "A wrold here.\n\nSome `wrold` code, [a link](https://wrold.example/wrold) and <https://wrold.example>.\n\n```\nwrold\n```\n";
+    let (doc, window) = open(text, false);
+    if let Some(checker) = doc.spelling.checker() {
+        checker.set_language("en_US");
+    }
+    doc.spelling.invalidate_all();
+    let misspelled = |doc: &DocumentView, at: usize| {
+        let Some(tag) = doc.spelling.tag() else { return false };
+        let offset = doc.model.borrow().source.to_buffer(at);
+        doc.buffer.iter_at_offset(offset).has_tag(&tag)
+    };
+    let first = text.find("wrold").unwrap();
+    let marked = until(Duration::from_secs(3), || misspelled(&doc, first + 1));
+    settle();
+    let exempt: Vec<usize> = text.match_indices("wrold").skip(1).map(|(i, _)| i).collect();
+    let flagged: Vec<usize> = exempt.iter().copied().filter(|&i| misspelled(&doc, i + 1)).collect();
+    r.check("G1 a misspelling is marked, read-only too", marked, format!("language {:?}", doc.spelling.language()));
+    r.check(
+        "G2 code, code blocks and URLs are not spell-checked",
+        marked && flagged.is_empty(),
+        format!("flagged at {flagged:?} of {exempt:?}"),
+    );
+    r.check("G3 corrections are offered only while editing", doc.view.extra_menu().is_none(), "");
+    doc.set_editable(true);
+    let end = doc.text().find(" here").unwrap() + " here".len();
+    doc.set_caret(end);
+    type_text(&doc, " teh");
+    type_text(&doc, " ");
+    let at = end + 1;
+    let typed = until(Duration::from_secs(3), || misspelled(&doc, at + 1));
+    r.check(
+        "G4 a word typed while editing is checked, and the menu offers corrections",
+        typed && doc.view.extra_menu().is_some(),
+        format!("{:?}", &doc.text()[..at + 4]),
+    );
+    doc.set_spelling(false);
+    settle();
+    r.check(
+        "G5 turning spelling off clears the marks and the corrections menu",
+        !misspelled(&doc, first + 1) && !misspelled(&doc, at + 1) && doc.view.extra_menu().is_none(),
+        "",
+    );
+    window.close();
+}
+
 fn perf_checks(r: &mut Report, size: usize) {
     println!("\nD. performance at {} KB", size / 1024);
     let text = big_document(size);
@@ -778,6 +825,7 @@ pub fn run() -> glib::ExitCode {
     editing_checks(&mut r);
     reader_checks(&mut r);
     image_checks(&mut r);
+    spelling_checks(&mut r);
     for size in [64 * 1024, 1024 * 1024, 5 * 1024 * 1024] {
         perf_checks(&mut r, size);
     }

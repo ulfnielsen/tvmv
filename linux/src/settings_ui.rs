@@ -162,6 +162,19 @@ pub fn present(parent: &impl IsA<Window>, settings: Rc<RefCell<Settings>>, on_ch
     }
     list.append(&row("Show outline", "Sidebar of headings in new windows", &outline));
 
+    let spelling = Switch::new();
+    spelling.set_active(settings.borrow().check_spelling);
+    spelling.set_valign(gtk4::Align::Center);
+    {
+        let settings = Rc::clone(&settings);
+        let commit = Rc::clone(&commit);
+        spelling.connect_active_notify(move |sw| {
+            settings.borrow_mut().check_spelling = sw.is_active();
+            commit();
+        });
+    }
+    list.append(&row("Check spelling", "Underline misspelled words; code and links are skipped", &spelling));
+
     // --- custom CSS -------------------------------------------------------
 
     let css_label = Label::new(None);
