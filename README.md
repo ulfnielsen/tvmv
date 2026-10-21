@@ -13,15 +13,16 @@ Save-as-PDF, and font/size/measure/theme settings. Fully offline — all assets
 are vendored.
 
 On **macOS** the document is a native text view: you read and edit in the same
-place, the Markdown renders as you type, and tables edit as grids. Code blocks
-show as plain monospace, and math and Mermaid diagrams as their source; print
-and Save as PDF render all three.
+place, the Markdown renders as you type, and tables edit as grids.
 
 On **Linux** the document is a native GTK text view too, built the same way:
 read-only on open, `Ctrl+E` to edit in place, markup hidden, images shown (and
-pasted from the clipboard), spelling checked, and tables edited as grids
-(Tab between cells; row, column and alignment commands on a cell's
-right-click menu).
+pasted from the clipboard), spelling checked, and tables edited as grids (Tab
+between cells; a row of buttons below a focused table, shortcuts, and a cell's
+right-click menu insert, delete and align rows and columns).
+
+In both native views code blocks show as plain monospace, and math and Mermaid
+diagrams as their source; print and Save as PDF render all three.
 
 On **iOS** a web layer (`Sources/TVMVCore/Resources/web/`, shared verbatim)
 renders the document with syntax highlighting, KaTeX math and Mermaid diagrams,
@@ -173,6 +174,9 @@ nothing is installed beside it and no stale copy on disk can be served instead;
 | `Ctrl+E` | edit in place (documents open read-only) |
 | `Ctrl+'` / `Ctrl+Alt+M` | show the markup under the caret / all markup |
 | `Ctrl+B` / `Ctrl+I` | bold / italic |
+| `Alt+Shift+arrows` | in a table cell: insert a row or column |
+| `Alt+Shift+Backspace` / `Delete` | in a table cell: delete the row / column |
+| `Alt+Shift+L` / `C` / `R` | in a table cell: align the column |
 | Toolbar bookmark buttons | save this place / return to it (right-click to clear) |
 | `Ctrl+S` | save |
 | `Ctrl+F` | find, with match count |
