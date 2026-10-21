@@ -400,6 +400,38 @@ impl Drop for ImageFolder {
     }
 }
 
+/// Dark pixels in `widget` as the window draws it now (a caret is dark).
+fn rendered_ink(window: &gtk4::Window, widget: &gtk4::Widget) -> usize {
+    // A fresh frame: the paintable shows the last one drawn.
+    window.queue_draw();
+    widget.queue_draw();
+    settle();
+    until(Duration::from_millis(300), || false);
+    let paintable = gtk4::WidgetPaintable::new(Some(widget));
+    let snapshot = gtk4::Snapshot::new();
+    let (w, h) = (widget.width(), widget.height());
+    paintable.snapshot(&snapshot, w as f64, h as f64);
+    let (Some(node), Some(renderer)) = (snapshot.to_node(), window.renderer()) else { return usize::MAX };
+    let texture = renderer.render_texture(&node, None);
+    let mut data = vec![0u8; (texture.width() * texture.height() * 4) as usize];
+    texture.download(&mut data, (texture.width() * 4) as usize);
+    // Skip a 2-pixel frame: the cell's rules.
+    let tw = texture.width() as usize;
+    let th = texture.height() as usize;
+    let mut dark = 0;
+    for y in 2..th.saturating_sub(2) {
+        for x in 2..tw.saturating_sub(2) {
+            let p = &data[(y * tw + x) * 4..(y * tw + x) * 4 + 4];
+            // BGRA premultiplied; dark and opaque.
+            let lum = (p[0] as u32 + p[1] as u32 + p[2] as u32) / 3;
+            if p[3] > 128 && lum < 120 {
+                dark += 1;
+            }
+        }
+    }
+    dark
+}
+
 fn line_height(doc: &DocumentView, at: usize) -> i32 {
     let offset = doc.model.borrow().source.to_buffer(at);
     doc.view.line_yrange(&doc.buffer.iter_at_offset(offset)).1
@@ -726,16 +758,32 @@ fn table_checks(r: &mut Report) {
     settle();
     until(Duration::from_millis(400), || grid.tools_shown());
     r.check("H7b the table's buttons show while one of its cells has focus", grid.tools_shown(), "");
-    grid.press(1, 0, CellKey::Next);
+    // Only the focused cell shows a caret, also after moving around and in
+    // cells a command just made: count dark pixels (a caret) in an empty
+    // cell that does not have focus.
+    grid.perform(Command::InsertRowBelow, 1, 0);
     settle();
-    grid.press(1, 1, CellKey::Previous);
+    let grid = Rc::clone(&doc.table_grids()[0]);
+    grid.press(1, 0, CellKey::Down);
     settle();
-    let carets: Vec<bool> = (0..3).flat_map(|r| (0..2).map(move |c| (r, c))).filter_map(|(r, c)| grid.cell(r, c)).map(|c| c.view.is_cursor_visible()).collect();
+    grid.press(2, 0, CellKey::Next);
+    settle();
+    grid.press(2, 1, CellKey::Previous);
+    settle();
+    grid.press(2, 0, CellKey::Down);
+    settle();
+    let ink = |cell: &DocumentView| rendered_ink(&window, cell.view.upcast_ref());
+    let (empty_a, empty_b) = (grid.cell(2, 1).map(|c| ink(&c)), grid.cell(2, 0).map(|c| ink(&c)));
     r.check(
-        "H7d only the focused cell shows a caret, not the document nor the other cells",
-        !doc.view.is_cursor_visible() && carets.iter().filter(|&&v| v).count() == 1 && grid.focused() == Some((1, 0)),
-        format!("document {}, cells {carets:?}", doc.view.is_cursor_visible()),
+        "H7d unfocused cells show no caret, after moving through them",
+        grid.focused() == Some((3, 0)) && empty_a == Some(0) && empty_b == Some(0),
+        format!("focused {:?}, dark pixels in the empty cells {empty_a:?} {empty_b:?}", grid.focused()),
     );
+    doc.undo();
+    settle();
+    let grid = Rc::clone(&doc.table_grids()[0]);
+    grid.cell(1, 0).unwrap().view.grab_focus();
+    settle();
     // A shortcut runs its command; the menu shows the shortcuts.
     grid.press(1, 0, CellKey::Command(Command::InsertColumnRight));
     settle();

@@ -387,11 +387,12 @@ impl DocumentView {
         }
     }
 
-    /// The caret shows while editing, in the view with the focus only. GTK
-    /// draws it in an unfocused view too: with a table cell or a reply field
-    /// focused, the document's caret would stay on show beside it.
+    /// The caret shows while editing. GTK shows it in the view with the
+    /// focus only, by hiding it as focus leaves; it hides it only if the
+    /// caret is on at that moment (and turning it off without focus changes
+    /// nothing drawn), so it must stay on, not follow the focus.
     fn update_cursor(&self) {
-        self.view.set_cursor_visible(self.view.is_editable() && self.view.has_focus());
+        self.view.set_cursor_visible(self.view.is_editable());
     }
 
     /// Turn spell checking on or off (Settings → Check spelling).
@@ -694,12 +695,6 @@ impl DocumentView {
     // MARK: Signals
 
     fn connect(&self) {
-        let me = self.me.clone();
-        self.view.connect_has_focus_notify(move |_| {
-            if let Some(doc) = me.upgrade() {
-                doc.update_cursor();
-            }
-        });
         // An image on the clipboard with no text pastes as a picture.
         let me = self.me.clone();
         self.view.connect_paste_clipboard(move |view| {
