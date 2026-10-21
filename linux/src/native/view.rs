@@ -122,6 +122,18 @@ impl TvmvView {
         view.set_indent_on_tab(false);
         view.set_smart_backspace(false);
         view.set_smart_home_end(sourceview5::SmartHomeEndType::Disabled);
+        // GtkSourceView handles keys in the capture phase: on a view that
+        // holds other views (table cells, a card's reply field) it would see
+        // their keys first, feed them to its own input method and turn Tab
+        // into a tab in the document. In the bubble phase it sees only what
+        // its own view and those inside didn't handle.
+        for controller in view.observe_controllers().iter::<glib::Object>().flatten() {
+            if let Ok(key) = controller.downcast::<gtk4::EventControllerKey>()
+                && key.propagation_phase() == gtk4::PropagationPhase::Capture
+            {
+                key.set_propagation_phase(gtk4::PropagationPhase::Bubble);
+            }
+        }
         if let Ok(buffer) = view.buffer().downcast::<sourceview5::Buffer>() {
             buffer.set_highlight_syntax(false);
             buffer.set_highlight_matching_brackets(false);

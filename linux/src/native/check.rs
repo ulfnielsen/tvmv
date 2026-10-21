@@ -1058,6 +1058,67 @@ fn review_checks(r: &mut Report) {
     window.close();
 }
 
+/// Keys and clicks inside the view: the document's view holds other views
+/// (table cells), and whatever sees an event first in the capture phase on
+/// the outer one sees the inner ones' events too. GTK 4 can't synthesize
+/// input, so these check the arrangement that keeps events where they belong.
+fn input_checks(r: &mut Report) {
+    use crate::native::document_view::{CellKey, TVMV_KEYS};
+    println!("\nK. input inside the view");
+    let text = "A {==comment==}[^rv-aaaa] here.\n\n| A | B |\n|---|---|\n| one | two |\n\nAfter.\n\n[^rv-aaaa]: @x 2026-10-13: Hm.\n";
+    let (doc, window) = open(text, true);
+    settle();
+    until(Duration::from_millis(300), || false);
+    settle();
+    let grid = doc.table_grids()[0].clone();
+    let mut views: Vec<gtk4::Widget> = vec![doc.view.clone().upcast()];
+    for r in 0..2 {
+        for c in 0..2 {
+            if let Some(cell) = grid.cell(r, c) {
+                views.push(cell.view.clone().upcast());
+            }
+        }
+    }
+    let stray: Vec<String> = views
+        .iter()
+        .flat_map(|v| v.observe_controllers().iter::<glib::Object>().flatten().collect::<Vec<_>>())
+        .filter_map(|c| c.downcast::<gtk4::EventControllerKey>().ok())
+        .filter(|k| k.propagation_phase() == gtk4::PropagationPhase::Capture && k.name().as_deref() != Some(TVMV_KEYS))
+        .map(|k| format!("{:?}", k.name()))
+        .collect();
+    r.check(
+        "K1 no key handler but ours sees keys in the capture phase (it would get a cell's keys first)",
+        stray.is_empty() && views.len() == 5,
+        format!("{} views, stray {stray:?}", views.len()),
+    );
+    // The document's own handler leaves a focused cell's keys alone.
+    let cell = grid.cell(1, 0).unwrap();
+    cell.view.grab_focus();
+    settle();
+    let ours = doc
+        .view
+        .observe_controllers()
+        .iter::<glib::Object>()
+        .flatten()
+        .filter_map(|c| c.downcast::<gtk4::EventControllerKey>().ok())
+        .find(|k| k.name().as_deref() == Some(TVMV_KEYS));
+    let before = doc.text();
+    let stopped = ours.map(|k| {
+        k.emit_by_name::<bool>("key-pressed", &[&glib::translate::IntoGlib::into_glib(gtk4::gdk::Key::Return), &0u32, &gtk4::gdk::ModifierType::empty()])
+    });
+    r.check(
+        "K2 with a cell focused, the document's key handler lets its keys through",
+        stopped == Some(false) && doc.text() == before,
+        format!("{stopped:?}"),
+    );
+    // A cell left behind keeps no selection (it would look like a second cursor).
+    cell.select(0..cell.text().len());
+    grid.press(1, 0, CellKey::Next);
+    settle();
+    r.check("K3 a cell left behind keeps no selection", !cell.buffer.has_selection(), "");
+    window.close();
+}
+
 fn perf_checks(r: &mut Report, size: usize) {
     println!("\nD. performance at {} KB", size / 1024);
     let text = big_document(size);
@@ -1459,6 +1520,7 @@ pub fn run() -> glib::ExitCode {
     spelling_checks(&mut r);
     table_checks(&mut r);
     review_checks(&mut r);
+    input_checks(&mut r);
     for size in [64 * 1024, 1024 * 1024, 5 * 1024 * 1024] {
         perf_checks(&mut r, size);
     }

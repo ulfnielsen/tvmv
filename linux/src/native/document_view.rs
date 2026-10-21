@@ -41,6 +41,10 @@ use super::theme::NativeTheme;
 use super::undo::{Change, UndoStack};
 use super::view::TvmvView;
 
+/// The name of this module's key controller (it, alone, sees keys in the
+/// capture phase: self-check K1).
+pub const TVMV_KEYS: &str = "tvmv-keys";
+
 /// Documents up to this size re-parse on the main thread after each edit.
 pub const SYNC_PARSE_LIMIT: usize = 64 * 1024;
 /// On open, this much is styled before the first paint; the rest follows in
@@ -2179,6 +2183,7 @@ impl DocumentView {
 
     fn connect_keys(&self) {
         let keys = gtk4::EventControllerKey::new();
+        keys.set_name(Some(TVMV_KEYS));
         keys.set_propagation_phase(gtk4::PropagationPhase::Capture);
         let me = self.me.clone();
         keys.connect_key_pressed(move |_, key, _, state| {

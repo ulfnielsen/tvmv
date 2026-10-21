@@ -278,6 +278,17 @@ impl TableGrid {
                 }
             });
         }
+        // A cell left behind keeps no selection: unfocused views still draw
+        // theirs, which looks like a second cursor.
+        {
+            let buffer = cell.buffer.clone();
+            focus.connect_leave(move |_| {
+                if buffer.has_selection() {
+                    let at = buffer.iter_at_mark(&buffer.get_insert());
+                    buffer.place_cursor(&at);
+                }
+            });
+        }
         cell.view.add_controller(focus);
         let (grid, edit_grid) = (self.me.clone(), self.me.clone());
         let weak_cell = Rc::downgrade(cell);
