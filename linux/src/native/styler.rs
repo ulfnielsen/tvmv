@@ -448,16 +448,29 @@ impl Styler {
             tag(&tags.no_spell, exempt);
         }
 
-        // Tables: the source hides, the newline ending its last row too, so
-        // none of its lines take room; the grid on the anchor before its
-        // first character shows instead.
+        // Tables: the source hides, so none of its lines take room; the grid
+        // shows instead, on its anchor (`table_source::anchor_offset`). With
+        // the anchor on the blank line above, every line of the table goes,
+        // newlines too, like a code fence. A table with no blank line above
+        // has its anchor on its first line, which keeps its newline: a line
+        // with visible content and an invisible newline is laid out with the
+        // next, and a hit test there aborts GTK 4.14.
         let first = layout.tables.partition_point(|t| t.range.end < range.start);
         for table in layout.tables[first..].iter().take_while(|t| t.range.start < range.end) {
             if revealed(&table.range) {
                 continue;
             }
             let end = if text.as_bytes().get(table.range.end) == Some(&b'\n') { table.range.end + 1 } else { table.range.end };
-            tag(&tags.hidden, &(table.range.start..end));
+            let anchor_above = crate::table_source::anchor_offset(text, table) < table.range.start;
+            let first_newline = text[table.range.clone()].find('\n').map(|i| table.range.start + i);
+            match first_newline {
+                _ if anchor_above => tag(&tags.hidden, &(table.range.start..end)),
+                Some(nl) => {
+                    tag(&tags.hidden, &(table.range.start..nl));
+                    tag(&tags.hidden, &(nl + 1..end));
+                }
+                None => tag(&tags.hidden, &(table.range.start..table.range.end)),
+            }
         }
 
         // Block images: the source hides; once the picture is loaded its line

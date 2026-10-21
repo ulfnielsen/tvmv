@@ -11,6 +11,20 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::layout::{Alignment, Table};
 
+/// The source offset the table's grid anchor sits before: the blank line
+/// above the table when there is one, so the anchor has a line to itself,
+/// else the table's first character.
+///
+/// GTK 4.14 aborts ("byte index off the end of the line") on a hit test of
+/// a line holding both a child anchor and invisible text; on its own line,
+/// the table's lines can all be invisible, newlines too, like a code fence.
+pub fn anchor_offset(text: &str, table: &Table) -> usize {
+    let start = table.range.start;
+    let b = text.as_bytes();
+    let blank_above = start >= 1 && b[start - 1] == b'\n' && (start == 1 || b[start - 2] == b'\n');
+    if blank_above { start - 1 } else { start }
+}
+
 /// A replacement of `range` in the document with `insert`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Edit {

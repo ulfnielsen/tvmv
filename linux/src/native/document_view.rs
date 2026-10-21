@@ -1355,6 +1355,8 @@ impl DocumentView {
             (wanted, len)
         };
         let _ = len;
+        let anchor_text = self.model.borrow().source.text().to_string();
+        let anchor_at = |t: &crate::layout::Table| crate::table_source::anchor_offset(&anchor_text, t);
         // Drop the grids whose anchor an edit removed, or whose table went.
         let mut keep: Vec<(gtk4::TextChildAnchor, Rc<TableGrid>, usize)> = Vec::new();
         for (anchor, grid) in self.grids.borrow_mut().drain(..) {
@@ -1363,7 +1365,7 @@ impl DocumentView {
             }
             let offset = self.buffer.iter_at_child_anchor(&anchor).offset();
             let at = self.model.borrow().source.to_source(offset);
-            if wanted.iter().any(|t| t.range.start == at) && !keep.iter().any(|k| k.2 == at) {
+            if wanted.iter().any(|t| anchor_at(t) == at) && !keep.iter().any(|k| k.2 == at) {
                 keep.push((anchor, grid, at));
             } else {
                 self.syncing.set(true);
@@ -1377,11 +1379,11 @@ impl DocumentView {
         let me = self.me.upgrade().expect("a live view");
         let mut inserted = false;
         for table in &wanted {
-            if keep.iter().any(|k| k.2 == table.range.start) {
+            if keep.iter().any(|k| k.2 == anchor_at(table)) {
                 continue;
             }
             inserted = true;
-            let start = table.range.start;
+            let start = anchor_at(table);
             self.syncing.set(true);
             let mut iter = self.buffer.iter_at_offset(self.model.borrow().source.to_buffer(start));
             let anchor = self.buffer.create_child_anchor(&mut iter);
@@ -1408,7 +1410,7 @@ impl DocumentView {
             let model = self.model.borrow();
             let (text, theme, width) = (model.source.text(), &model.theme, model.column_width);
             for (_, grid, at) in &keep {
-                if let Some(table) = wanted.iter().find(|t| t.range.start == *at) {
+                if let Some(table) = wanted.iter().find(|t| anchor_at(t) == *at) {
                     grid.update(table, text, theme, width, editable, row_height);
                 }
             }
@@ -1762,11 +1764,11 @@ impl DocumentView {
             return None;
         };
         let start = model.source.to_source(anchor);
-        let table = model.prepared.layout.tables.iter().find(|t| t.range.start == start)?;
+        let text = model.source.text();
+        let table = model.prepared.layout.tables.iter().find(|t| crate::table_source::anchor_offset(text, t) == start)?;
         if !forward {
             return Some((anchor - 1).max(0));
         }
-        let text = model.source.text();
         let end = if text.as_bytes().get(table.range.end) == Some(&b'\n') { table.range.end + 1 } else { table.range.end };
         Some(model.source.to_buffer(end))
     }

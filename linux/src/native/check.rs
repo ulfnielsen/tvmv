@@ -721,6 +721,21 @@ fn table_checks(r: &mut Report) {
     settle();
     r.check("H11 a hidden table's source draws no code pills", hidden == 1 && pills(&doc) == 2, format!("{hidden}, revealed {}", pills(&doc)));
     window.close();
+
+    // Hit-testing every point (as the pointer does) once aborted GTK when a
+    // table's anchor shared its line with the hidden source.
+    let text = "## Tables\n\n| Feature  | Reading | Editing |\n|:---------|:-------:|--------:|\n| Outline  | yes     | yes     |\n\nClick a cell while editing and type; Tab moves to the next one. Right-click a cell for row and column commands.\n\n| A |\n|---|\n| b |\n";
+    let (doc, window) = open(text, false);
+    settle();
+    let (w, h) = (doc.view.width(), doc.view.height());
+    for y in (0..h).step_by(3) {
+        for x in (0..w).step_by(5) {
+            let (bx, by) = doc.view.window_to_buffer_coords(gtk4::TextWindowType::Widget, x, y);
+            let _ = doc.view.iter_at_location(bx, by);
+        }
+    }
+    r.check("H12 the pointer can go anywhere over tables", doc.table_grids().len() == 2, "");
+    window.close();
 }
 
 fn review_checks(r: &mut Report) {
@@ -861,6 +876,26 @@ fn review_checks(r: &mut Report) {
     let id = doc.text().split("[^").nth(1).and_then(|s| s.split(']').next()).unwrap_or("").to_string();
     doc.card_action(&id, Action::Resolve);
     settle();
+    let shown = |doc: &DocumentView| {
+        let mut n = 0;
+        let mut c = doc.view.first_child();
+        while let Some(w) = c {
+            let mut stack = vec![w.clone()];
+            while let Some(x) = stack.pop() {
+                if x.has_css_class("tvmv-card") && x.is_visible() && x.parent().is_some_and(|p| p.is_visible()) {
+                    n += 1;
+                }
+                let mut k = x.first_child();
+                while let Some(ch) = k {
+                    k = ch.next_sibling();
+                    stack.push(ch);
+                }
+            }
+            c = w.next_sibling();
+        }
+        n
+    };
+    r.check("I13 a resolved card leaves the screen", shown(&doc) == 0, format!("{} cards shown", shown(&doc)));
     r.check(
         "I11 the column goes when the last comment does",
         doc.text() == text && doc.model.borrow().review_reserve == 0,
@@ -1108,7 +1143,65 @@ pub fn save_png(window: &gtk4::Window, output: &str) -> glib::ExitCode {
     }
 }
 
+/// Hover every point of the view after review edits (diagnostic:
+/// `TVMV_TRACE_HOVER=FILE tvmv --self-check`).
+fn trace_hover(path: &str) {
+    let text = std::fs::read_to_string(path).unwrap();
+    let (doc, window) = open(&text, false);
+    window.set_default_size(1300, 950);
+    settle();
+    until(Duration::from_millis(800), || false);
+    let sweep = |label: &str| {
+        settle();
+        eprintln!("sweep after {label}");
+        let (w, h) = (doc.view.width(), doc.view.height());
+        for y in (0..h).step_by(3) {
+            for x in (0..w).step_by(7) {
+                let (bx, by) = doc.view.window_to_buffer_coords(gtk4::TextWindowType::Widget, x, y);
+                if std::env::var_os("TVMV_TRACE_HOVER_POINTS").is_some() {
+                    let (line, _) = doc.view.line_at_y(by);
+                    let mut end = line;
+                    end.forward_to_line_end();
+                    eprintln!("at {bx},{by}: line {} {:?}", line.line(), doc.buffer.text(&line, &end, true));
+                }
+                let _ = doc.view.iter_at_location(bx, by);
+            }
+        }
+    };
+    sweep("load");
+    let Some(at) = text.find("cache") else {
+        eprintln!("no crash");
+        return;
+    };
+    doc.select(at..at + 5);
+    doc.set_caret(text.find("lazily").or(text.find("cold")).unwrap() + 1);
+    sweep("focus a card");
+    doc.card_action("rv-p2x7", crate::native::review_cards::Action::Accept);
+    sweep("accept");
+    doc.undo();
+    sweep("undo");
+    let t = doc.text();
+    let w = t.find("Select some").unwrap();
+    doc.select(w..w + 6);
+    doc.add_comment("Hi", "ulf", "2026-10-21");
+    sweep("comment");
+    doc.set_editable(true);
+    doc.set_caret(t.find("Press").unwrap());
+    type_text(&doc, "Now ");
+    sweep("typing");
+    doc.card_action("rv-k3f9", crate::native::review_cards::Action::Resolve);
+    sweep("resolve");
+    eprintln!("resolved: {}", !doc.text().contains("rv-k3f9"));
+    eprintln!("no crash");
+    window.close();
+}
+
 pub fn run() -> glib::ExitCode {
+    if let Ok(path) = std::env::var("TVMV_TRACE_HOVER") {
+        let _ = gtk4::init();
+        trace_hover(&path);
+        return glib::ExitCode::SUCCESS;
+    }
     if std::env::var_os("TVMV_TRACE_HIDDEN").is_some() {
         let _ = gtk4::init();
         trace_hidden();

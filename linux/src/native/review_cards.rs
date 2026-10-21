@@ -300,13 +300,23 @@ impl Composer {
     }
 }
 
+/// An overlay of the text view holding a card or the composer, or nothing.
+struct Slot {
+    frame: gtk4::Box,
+    content: Option<gtk4::Widget>,
+    at: Option<(i32, i32)>,
+}
+
 pub struct ReviewColumn {
     host: Weak<DocumentView>,
     pub cards: RefCell<Vec<Rc<Card>>>,
     pub composer: RefCell<Option<Rc<Composer>>>,
     focused: RefCell<Option<String>>,
-    /// Where each card sits, so a layout moves only those that changed.
-    placed: RefCell<Vec<(gtk4::Widget, i32, i32)>>,
+    /// The overlays cards and the composer sit in, each with what it holds
+    /// and where it is. GTK 4.14's `TextView::remove` does not remove an
+    /// overlay (it warns "not a child"), so an overlay is never removed: a
+    /// card that goes empties its slot, and the next card reuses it.
+    slots: RefCell<Vec<Slot>>,
     pending: Cell<bool>,
     me: Weak<ReviewColumn>,
 }
@@ -318,7 +328,7 @@ impl ReviewColumn {
             cards: RefCell::default(),
             composer: RefCell::default(),
             focused: RefCell::default(),
-            placed: RefCell::default(),
+            slots: RefCell::default(),
             pending: Cell::new(false),
             me: me.clone(),
         })
@@ -348,13 +358,12 @@ impl ReviewColumn {
                 cards.push(card);
             } else {
                 let card = Card::new(model, &me);
-                host.view.add_overlay(&card.widget, 0, 0);
+                self.attach(&host, card.widget.upcast_ref());
                 cards.push(card);
             }
         }
         for card in old {
-            host.view.remove(&card.widget);
-            self.placed.borrow_mut().retain(|(w, _, _)| w != card.widget.upcast_ref::<gtk4::Widget>());
+            self.detach(card.widget.upcast_ref());
         }
         let focused = self.focused.borrow().clone();
         for card in &cards {
@@ -388,7 +397,7 @@ impl ReviewColumn {
         self.close_composer();
         let me = self.me.upgrade().expect("a live column");
         let composer = Composer::new(suggestion, anchor, &me, submit);
-        host.view.add_overlay(&composer.widget, 0, 0);
+        self.attach(&host, composer.widget.upcast_ref());
         let focus = composer.replacement.clone().unwrap_or_else(|| composer.body.clone());
         *self.composer.borrow_mut() = Some(composer);
         host.review_column_changed();
@@ -402,12 +411,41 @@ impl ReviewColumn {
         let Some(composer) = self.composer.borrow_mut().take() else { return };
         let Some(host) = self.host.upgrade() else { return };
         let had_focus = composer.widget.focus_child().is_some();
-        host.view.remove(&composer.widget);
-        self.placed.borrow_mut().retain(|(w, _, _)| w != composer.widget.upcast_ref::<gtk4::Widget>());
+        self.detach(composer.widget.upcast_ref());
         host.review_column_changed();
         self.queue_layout();
         if had_focus {
             host.view.grab_focus();
+        }
+    }
+
+    /// Put `content` in a free slot (a new overlay if none is free).
+    fn attach(&self, host: &DocumentView, content: &gtk4::Widget) {
+        let mut slots = self.slots.borrow_mut();
+        let i = match slots.iter().position(|s| s.content.is_none()) {
+            Some(i) => i,
+            None => {
+                let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+                host.view.add_overlay(&frame, 0, 0);
+                slots.push(Slot { frame, content: None, at: None });
+                slots.len() - 1
+            }
+        };
+        let slot = &mut slots[i];
+        slot.frame.append(content);
+        slot.frame.set_visible(true);
+        slot.content = Some(content.clone());
+        slot.at = None;
+    }
+
+    /// Take `content` out of its slot, which hides until reused.
+    fn detach(&self, content: &gtk4::Widget) {
+        for slot in self.slots.borrow_mut().iter_mut() {
+            if slot.content.as_ref() == Some(content) {
+                slot.frame.remove(content);
+                slot.frame.set_visible(false);
+                slot.content = None;
+            }
         }
     }
 
@@ -451,24 +489,18 @@ impl ReviewColumn {
             .position(|i| Some(&i.1) == composer.as_ref())
             .or_else(|| items.iter().position(|i| i.2));
         let tops = crate::review_ops::stack(&measured, pinned, STACK_GAP, view.top_margin());
-        let mut placed = self.placed.borrow_mut();
+        let mut slots = self.slots.borrow_mut();
         let mut bottom = 0;
         for ((_, widget, _), (&y, &(_, h))) in items.iter().zip(tops.iter().zip(measured.iter())) {
             bottom = bottom.max(y + h);
-            match placed.iter_mut().find(|(w, _, _)| w == widget) {
-                Some(entry) if entry.1 == x && entry.2 == y => {}
-                Some(entry) => {
-                    view.move_overlay(widget, x, y);
-                    entry.1 = x;
-                    entry.2 = y;
-                }
-                None => {
-                    view.move_overlay(widget, x, y);
-                    placed.push((widget.clone(), x, y));
-                }
+            if let Some(slot) = slots.iter_mut().find(|s| s.content.as_ref() == Some(widget))
+                && slot.at != Some((x, y))
+            {
+                view.move_overlay(&slot.frame, x, y);
+                slot.at = Some((x, y));
             }
         }
-        drop(placed);
+        drop(slots);
         host.reserve_bottom(bottom);
     }
 }
