@@ -147,7 +147,7 @@ Needs Rust 1.85 or newer (the crate is edition 2024), a C compiler for cmark, an
 
 ```sh
 sudo apt install libgtk-4-dev libwebkitgtk-6.0-dev libgtksourceview-5-dev libspelling-1-dev \
-    pkg-config fish build-essential   # Ubuntu 24.04
+    pkg-config fish build-essential   # Ubuntu 24.04 and 26.04
 fish build/linux.fish                # build + install to /usr/local
 PREFIX=$HOME/.local fish build/linux.fish     # or per-user, no root
 fish build/linux.fish uninstall

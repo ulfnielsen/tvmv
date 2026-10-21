@@ -192,8 +192,9 @@ pub struct DocumentView {
     pub max_image_bytes: Cell<usize>,
     pub max_image_pixels: Cell<u64>,
     /// Spell checking (libspelling), on the source buffer. It skips text
-    /// tagged no-spell-check by the styler.
-    pub spelling: libspelling::TextBufferAdapter,
+    /// tagged no-spell-check by the styler. Replaced when anchors go in
+    /// (`reset_spelling`).
+    spelling: RefCell<libspelling::TextBufferAdapter>,
     /// Table grids, in source order, each on its anchor.
     grids: RefCell<Vec<(gtk4::TextChildAnchor, Rc<TableGrid>)>>,
     /// The anchor's line: half an em above and below the grid.
@@ -323,7 +324,7 @@ impl DocumentView {
             document_path: RefCell::new(None),
             max_image_bytes: Cell::new(images::MAX_BYTES),
             max_image_pixels: Cell::new(images::MAX_PIXELS),
-            spelling,
+            spelling: RefCell::new(spelling),
             grids: RefCell::default(),
             table_line,
             cell: RefCell::new(None),
@@ -376,8 +377,9 @@ impl DocumentView {
 
     /// Turn spell checking on or off (Settings → Check spelling).
     pub fn set_spelling(&self, on: bool) {
-        if self.spelling.is_enabled() != on {
-            self.spelling.set_enabled(on);
+        let spelling = self.spelling();
+        if spelling.is_enabled() != on {
+            spelling.set_enabled(on);
         }
         self.update_spelling_menu();
     }
@@ -387,8 +389,9 @@ impl DocumentView {
     fn update_spelling_menu(&self) {
         let editable = self.view.is_editable();
         let menu = gtk4::gio::Menu::new();
-        if editable && self.spelling.is_enabled() {
-            menu.append_section(None, &self.spelling.menu_model());
+        let spelling = self.spelling();
+        if editable && spelling.is_enabled() {
+            menu.append_section(None, &spelling.menu_model());
         }
         if let Some(extra) = self.extra_menu.borrow().as_ref().filter(|_| editable) {
             menu.append_section(None, extra);
@@ -1265,6 +1268,49 @@ impl DocumentView {
         self.table_line.set_pixels_below_lines(half);
     }
 
+    /// The spell checker's adapter on this buffer.
+    pub fn spelling(&self) -> libspelling::TextBufferAdapter {
+        self.spelling.borrow().clone()
+    }
+
+    /// A fresh spelling adapter, after child anchors went in. libspelling
+    /// follows the buffer's length through its inserts and deletes, and an
+    /// anchor is neither (on GTK 4.22 it fires no commit notify, and
+    /// libspelling 0.2 heard only insert-text and delete-range): the adapter
+    /// ends up an anchor short, and a later delete over the end fails its
+    /// assertion and aborts. A new adapter reads the length afresh. It adopts
+    /// the no-spell-check tag only when that is added to the tag table, so
+    /// the tag goes out and back in, and is applied again.
+    fn reset_spelling(&self) {
+        let Ok(source_buffer) = self.buffer.clone().downcast::<sourceview5::Buffer>() else { return };
+        let old = self.spelling();
+        let enabled = old.is_enabled();
+        let checker = old.checker().unwrap_or_else(libspelling::Checker::default);
+        old.set_enabled(false);
+        let table = self.buffer.tag_table();
+        if let Some(tag) = old.tag() {
+            table.remove(&tag);
+        }
+        let fresh = libspelling::TextBufferAdapter::new(&source_buffer, &checker);
+        fresh.set_enabled(enabled);
+        self.view.insert_action_group("spelling", Some(&fresh));
+        *self.spelling.borrow_mut() = fresh;
+        drop(old);
+        let no_spell = self.styler.tags.no_spell.clone();
+        table.remove(&no_spell);
+        table.add(&no_spell);
+        let model = self.model.borrow();
+        for r in &model.prepared.layout.spell_exempt {
+            if r.end <= model.source.text().len() {
+                let a = self.buffer.iter_at_offset(model.source.to_buffer(r.start));
+                let b = self.buffer.iter_at_offset(model.source.to_buffer(r.end));
+                self.buffer.apply_tag(&no_spell, &a, &b);
+            }
+        }
+        drop(model);
+        self.update_spelling_menu();
+    }
+
     /// Make this view a table cell: its edits go to `hooks` and it keeps no
     /// undo of its own (the document's covers them).
     pub fn set_cell_hooks(&self, hooks: CellHooks) {
@@ -1416,13 +1462,8 @@ impl DocumentView {
             keep.push((anchor, grid, start));
         }
         keep.sort_by_key(|k| k.2);
-        // libspelling 0.2 follows the buffer's length through insert-text and
-        // delete-range only, so an anchor leaves it one short, and a later
-        // delete near the end fails its assertion and aborts. Turning it off
-        // and on re-reads the length (one long, which is harmless).
-        if inserted && self.spelling.is_enabled() {
-            self.spelling.set_enabled(false);
-            self.spelling.set_enabled(true);
+        if inserted {
+            self.reset_spelling();
         }
         let editable = self.is_editable();
         let row_height = self.table_row_height.get();

@@ -538,12 +538,12 @@ fn spelling_checks(r: &mut Report) {
     println!("\nG. spelling");
     let text = "A wrold here.\n\nSome `wrold` code, [a link](https://wrold.example/wrold) and <https://wrold.example>.\n\n```\nwrold\n```\n";
     let (doc, window) = open(text, false);
-    if let Some(checker) = doc.spelling.checker() {
+    if let Some(checker) = doc.spelling().checker() {
         checker.set_language("en_US");
     }
-    doc.spelling.invalidate_all();
+    doc.spelling().invalidate_all();
     let misspelled = |doc: &DocumentView, at: usize| {
-        let Some(tag) = doc.spelling.tag() else { return false };
+        let Some(tag) = doc.spelling().tag() else { return false };
         let offset = doc.model.borrow().source.to_buffer(at);
         doc.buffer.iter_at_offset(offset).has_tag(&tag)
     };
@@ -552,7 +552,7 @@ fn spelling_checks(r: &mut Report) {
     settle();
     let exempt: Vec<usize> = text.match_indices("wrold").skip(1).map(|(i, _)| i).collect();
     let flagged: Vec<usize> = exempt.iter().copied().filter(|&i| misspelled(&doc, i + 1)).collect();
-    r.check("G1 a misspelling is marked, read-only too", marked, format!("language {:?}", doc.spelling.language()));
+    r.check("G1 a misspelling is marked, read-only too", marked, format!("language {:?}", doc.spelling().language()));
     r.check(
         "G2 code, code blocks and URLs are not spell-checked",
         marked && flagged.is_empty(),
@@ -579,6 +579,25 @@ fn spelling_checks(r: &mut Report) {
         "G5 turning spelling off clears the marks and the corrections menu",
         !misspelled(&doc, first + 1) && !misspelled(&doc, at + 1) && sections(&doc) == 1,
         "",
+    );
+    window.close();
+
+    // A table's anchor replaces the adapter; exemptions must survive that.
+    let text = "A wrold here.\n\n| A | B |\n|---|---|\n| x | y |\n\nSome `wrold` code.\n";
+    let (doc, window) = open(text, false);
+    settle();
+    if let Some(checker) = doc.spelling().checker() {
+        checker.set_language("en_US");
+    }
+    doc.spelling().invalidate_all();
+    let first = text.find("wrold").unwrap();
+    let marked = until(Duration::from_secs(3), || misspelled(&doc, first + 1));
+    settle();
+    let code = text.rfind("wrold").unwrap();
+    r.check(
+        "G6 with a table in the document, prose is checked and code is not",
+        doc.table_grids().len() == 1 && marked && !misspelled(&doc, code + 1),
+        format!("marked {marked}, code flagged {}", misspelled(&doc, code + 1)),
     );
     window.close();
 }
