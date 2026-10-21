@@ -26,7 +26,13 @@ pub const CELL_INSET: (i32, i32) = (7, 5);
 pub const MIN_COLUMN_WIDTH: i32 = 48;
 
 pub struct TableGrid {
-    pub widget: gtk4::Grid,
+    /// On the anchor: the cells, and below them the table's buttons.
+    pub widget: gtk4::Box,
+    cells_grid: gtk4::Grid,
+    /// The buttons, shown while a cell of this table has focus in edit mode.
+    tools: gtk4::Revealer,
+    /// The cell the buttons act on: the last to have focus.
+    last_cell: Cell<Option<(usize, usize)>>,
     host: Weak<DocumentView>,
     /// The table's start in the host's source, as of the last update.
     pub start: Cell<usize>,
@@ -47,8 +53,15 @@ pub struct TableGrid {
 
 impl TableGrid {
     pub fn new(host: &Rc<DocumentView>) -> Rc<TableGrid> {
-        let widget = gtk4::Grid::new();
+        let widget = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
         widget.add_css_class("tvmv-table");
+        let cells_grid = gtk4::Grid::new();
+        cells_grid.add_css_class("tvmv-table-grid");
+        cells_grid.set_halign(gtk4::Align::Start);
+        widget.append(&cells_grid);
+        let tools = gtk4::Revealer::new();
+        tools.set_transition_type(gtk4::RevealerTransitionType::SlideDown);
+        widget.append(&tools);
         // Clicks in the grid are its cells': passed on, the document's text
         // view would take the focus back and move its own caret there.
         let clicks = gtk4::EventControllerLegacy::new();
@@ -61,8 +74,11 @@ impl TableGrid {
         });
         widget.add_controller(clicks);
         widget.set_halign(gtk4::Align::Start);
-        Rc::new_cyclic(|me| TableGrid {
+        let grid = Rc::new_cyclic(|me| TableGrid {
             widget,
+            cells_grid,
+            tools,
+            last_cell: Cell::new(None),
             host: Rc::downgrade(host),
             start: Cell::new(0),
             cells: RefCell::default(),
@@ -72,7 +88,68 @@ impl TableGrid {
             built: Cell::new(false),
             table: RefCell::new(None),
             me: me.clone(),
-        })
+        });
+        grid.build_tools();
+        // The buttons show while focus is in this table, in edit mode. A
+        // button click keeps the focus inside, so they stay.
+        let focus = gtk4::EventControllerFocus::new();
+        {
+            let me = grid.me.clone();
+            focus.connect_enter(move |_| {
+                if let Some(grid) = me.upgrade() {
+                    grid.show_tools();
+                }
+            });
+        }
+        {
+            let me = grid.me.clone();
+            focus.connect_leave(move |_| {
+                if let Some(grid) = me.upgrade() {
+                    grid.tools.set_reveal_child(false);
+                }
+            });
+        }
+        grid.widget.add_controller(focus);
+        grid
+    }
+
+    /// The row of buttons below the cells, one per table command.
+    fn build_tools(&self) {
+        let row = gtk4::Box::new(gtk4::Orientation::Horizontal, 4);
+        row.add_css_class("tvmv-table-tools");
+        for (i, command) in Command::ALL.into_iter().enumerate() {
+            if i == 4 || i == 6 {
+                row.append(&gtk4::Separator::new(gtk4::Orientation::Vertical));
+            }
+            let button = match command {
+                Command::AlignLeft => gtk4::Button::from_icon_name("format-justify-left-symbolic"),
+                Command::AlignCenter => gtk4::Button::from_icon_name("format-justify-center-symbolic"),
+                Command::AlignRight => gtk4::Button::from_icon_name("format-justify-right-symbolic"),
+                _ => gtk4::Button::with_label(command.label()),
+            };
+            button.add_css_class("flat");
+            button.set_tooltip_text(Some(&format!("{} ({})", command.title(), command.shortcut())));
+            button.set_focus_on_click(false);
+            let me = self.me.clone();
+            button.connect_clicked(move |_| {
+                let Some(grid) = me.upgrade() else { return };
+                if let Some((r, c)) = grid.last_cell.get() {
+                    grid.perform(command, r, c);
+                }
+            });
+            row.append(&button);
+        }
+        self.tools.set_child(Some(&row));
+    }
+
+    fn show_tools(&self) {
+        let editable = self.host.upgrade().is_some_and(|h| h.is_editable());
+        self.tools.set_reveal_child(editable && self.built.get());
+    }
+
+    /// The button row (tests).
+    pub fn tools_shown(&self) -> bool {
+        self.tools.reveals_child()
     }
 
     /// The cells' texts, header row first.
@@ -149,9 +226,9 @@ impl TableGrid {
     }
 
     fn rebuild(&self, texts: &[Vec<String>], alignments: &[Alignment], theme: &NativeTheme, editable: bool) {
-        let focus = self.focused();
-        while let Some(child) = self.widget.first_child() {
-            self.widget.remove(&child);
+        let focus = self.focused().or(self.tools.focus_child().and(self.last_cell.get()));
+        while let Some(child) = self.cells_grid.first_child() {
+            self.cells_grid.remove(&child);
         }
         let mut cell_theme = theme.clone();
         cell_theme.full_width = true;
@@ -175,7 +252,7 @@ impl TableGrid {
                         self.hook(&cell, r, c);
                         cell.load(value.clone());
                         cell.set_editable(editable);
-                        self.widget.attach(&cell.view, c as i32, r as i32, 1, 1);
+                        self.cells_grid.attach(&cell.view, c as i32, r as i32, 1, 1);
                         cell
                     })
                     .collect()
@@ -192,6 +269,16 @@ impl TableGrid {
     /// Wire cell (`row`, `column`) to the grid: its edits, keys, links and
     /// the table commands in its menu.
     fn hook(&self, cell: &Rc<DocumentView>, row: usize, column: usize) {
+        let focus = gtk4::EventControllerFocus::new();
+        {
+            let me = self.me.clone();
+            focus.connect_enter(move |_| {
+                if let Some(grid) = me.upgrade() {
+                    grid.last_cell.set(Some((row, column)));
+                }
+            });
+        }
+        cell.view.add_controller(focus);
         let (grid, edit_grid) = (self.me.clone(), self.me.clone());
         let weak_cell = Rc::downgrade(cell);
         cell.set_cell_hooks(CellHooks {
@@ -216,7 +303,9 @@ impl TableGrid {
         let section = |commands: &[Command]| {
             let part = gio::Menu::new();
             for &command in commands {
-                part.append(Some(command.title()), Some(&format!("table.{}", command.action())));
+                let item = gio::MenuItem::new(Some(command.title()), Some(&format!("table.{}", command.action())));
+                item.set_attribute_value("accel", Some(&command.accel().to_variant()));
+                part.append_item(&item);
             }
             part
         };
@@ -277,9 +366,10 @@ impl TableGrid {
         if !self.built.get() || self.focused().is_some() {
             return false;
         }
-        while let Some(child) = self.widget.first_child() {
-            self.widget.remove(&child);
+        while let Some(child) = self.cells_grid.first_child() {
+            self.cells_grid.remove(&child);
         }
+        self.tools.set_reveal_child(false);
         self.cells.borrow_mut().clear();
         self.texts.borrow_mut().clear();
         *self.theme.borrow_mut() = None;
@@ -297,12 +387,17 @@ impl TableGrid {
     /// Height of a row, measured (for placeholders).
     pub fn row_height(&self) -> Option<i32> {
         let rows = self.cells.borrow().len() as i32;
-        (self.built.get() && rows > 0 && self.widget.height() > 0).then(|| (self.widget.height() - 1) / rows)
+        (self.built.get() && rows > 0 && self.cells_grid.height() > 0).then(|| (self.cells_grid.height() - 1) / rows)
     }
 
     pub fn set_editable(&self, editable: bool) {
         for cell in self.cells.borrow().iter().flatten() {
             cell.set_editable(editable);
+        }
+        if !editable {
+            self.tools.set_reveal_child(false);
+        } else if self.focused().is_some() {
+            self.show_tools();
         }
     }
 
@@ -363,6 +458,7 @@ impl TableGrid {
             CellKey::Undo => host.undo(),
             CellKey::Redo => host.redo(),
             CellKey::Reveal => host.reveal_table(self.start.get()),
+            CellKey::Command(command) => self.perform(command, row, column),
         }
         true
     }

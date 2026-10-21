@@ -504,8 +504,12 @@ priority idle, which waits behind the lazy styler.
    the document's edit path with "|" escaped, one undo stack, Tab /
    Shift+Tab / Return between cells, Ctrl+' from a cell reveals the source,
    and the row, column and alignment commands in a cell's right-click menu
-   (`table_source.rs`, ported with its tests). Not ported: the macOS hover
-   handles on the grid's borders, and keyboard shortcuts for the commands.
+   (`table_source.rs`, ported with its tests). Instead of the macOS hover
+   handles, a row of buttons shows below a table while one of its cells has
+   focus in edit mode (below, so the clicked cell doesn't move). Shortcuts in
+   a cell: Alt+Shift+arrows insert a row or column, Alt+Shift+Backspace /
+   Delete delete the row / column, Alt+Shift+L / C / R align (the macOS
+   ⌃⌘ ones are GNOME's workspace switching).
 5. The review core port, then cards and commands. **Done 2026-10-21.**
 
 ## Risks

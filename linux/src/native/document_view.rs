@@ -121,6 +121,8 @@ pub enum CellKey {
     Undo,
     Redo,
     Reveal,
+    /// A table command's shortcut.
+    Command(crate::table_source::Command),
 }
 
 /// A cell edit waiting for the layout it was made against.
@@ -2190,6 +2192,9 @@ impl DocumentView {
                     (gdk::Key::z, m) if m == ctrl | shift => Some(CellKey::Redo),
                     (gdk::Key::y, m) if m == ctrl => Some(CellKey::Redo),
                     (gdk::Key::apostrophe, m) if m == ctrl => Some(CellKey::Reveal),
+                    (k, m) if m == alt | shift => {
+                        k.name().and_then(|n| crate::table_source::Command::for_key(&n, true)).map(CellKey::Command)
+                    }
                     _ => None,
                 };
                 if let Some(cell_key) = cell_key {

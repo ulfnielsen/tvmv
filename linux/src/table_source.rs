@@ -139,6 +139,60 @@ impl Command {
         }
     }
 
+    /// The keyboard shortcut in a cell, in GTK's accelerator syntax. The
+    /// macOS ones (⌃⌘ arrows) would be GNOME's workspace switching here.
+    pub fn accel(self) -> &'static str {
+        match self {
+            Command::InsertRowAbove => "<Alt><Shift>Up",
+            Command::InsertRowBelow => "<Alt><Shift>Down",
+            Command::InsertColumnLeft => "<Alt><Shift>Left",
+            Command::InsertColumnRight => "<Alt><Shift>Right",
+            Command::DeleteRow => "<Alt><Shift>BackSpace",
+            Command::DeleteColumn => "<Alt><Shift>Delete",
+            Command::AlignLeft => "<Alt><Shift>l",
+            Command::AlignCenter => "<Alt><Shift>c",
+            Command::AlignRight => "<Alt><Shift>r",
+        }
+    }
+
+    /// The shortcut as people read it.
+    pub fn shortcut(self) -> &'static str {
+        match self {
+            Command::InsertRowAbove => "Alt+Shift+↑",
+            Command::InsertRowBelow => "Alt+Shift+↓",
+            Command::InsertColumnLeft => "Alt+Shift+←",
+            Command::InsertColumnRight => "Alt+Shift+→",
+            Command::DeleteRow => "Alt+Shift+Backspace",
+            Command::DeleteColumn => "Alt+Shift+Delete",
+            Command::AlignLeft => "Alt+Shift+L",
+            Command::AlignCenter => "Alt+Shift+C",
+            Command::AlignRight => "Alt+Shift+R",
+        }
+    }
+
+    /// A short label for the table's button row.
+    pub fn label(self) -> &'static str {
+        match self {
+            Command::InsertRowAbove => "Row Above",
+            Command::InsertRowBelow => "Row Below",
+            Command::InsertColumnLeft => "Column Left",
+            Command::InsertColumnRight => "Column Right",
+            Command::DeleteRow => "Delete Row",
+            Command::DeleteColumn => "Delete Column",
+            Command::AlignLeft => "Left",
+            Command::AlignCenter => "Center",
+            Command::AlignRight => "Right",
+        }
+    }
+
+    /// The command for a key in a cell (`accel`), if any.
+    pub fn for_key(key: &str, alt_shift: bool) -> Option<Command> {
+        if !alt_shift {
+            return None;
+        }
+        Command::ALL.into_iter().find(|c| c.accel().strip_prefix("<Alt><Shift>").is_some_and(|k| k.eq_ignore_ascii_case(key)))
+    }
+
     /// The action name, under the "table." group.
     pub fn action(self) -> &'static str {
         match self {

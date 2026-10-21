@@ -133,7 +133,9 @@ impl NativeTheme {
              textview.tvmv-native text {{ background-color: {paper}; color: {ink}; caret-color: {ink}; }}\n\
              textview.tvmv-native border {{ background-color: {paper}; }}\n\
              textview.tvmv-native text selection {{ background-color: {selection}; color: {ink}; }}\n\
-             grid.tvmv-table {{ border-top: 1px solid {rule}; border-left: 1px solid {rule}; }}\n\
+             grid.tvmv-table-grid {{ border-top: 1px solid {rule}; border-left: 1px solid {rule}; }}\n\
+             .tvmv-table-tools {{ margin-top: 6px; }}\n\
+             .tvmv-table-tools button {{ font-family: sans-serif; font-size: 11px; min-height: 22px; padding: 0 6px; }}\n\
              textview.tvmv-native.tvmv-cell {{ line-height: 1.3; background-color: transparent; \
                border-right: 1px solid {rule}; border-bottom: 1px solid {rule}; }}\n\
              textview.tvmv-native.tvmv-cell text {{ background-color: transparent; }}\n\

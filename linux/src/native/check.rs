@@ -721,6 +721,44 @@ fn table_checks(r: &mut Report) {
         a == Some((1, 1)) && b == Some((2, 0)) && c == Some((1, 1)) && d == Some((2, 1)) && doc.text() == before,
         format!("{a:?} {b:?} {c:?} {d:?}"),
     );
+    // The table's buttons show while a cell has focus, in edit mode.
+    grid.cell(1, 0).unwrap().view.grab_focus();
+    settle();
+    until(Duration::from_millis(400), || grid.tools_shown());
+    r.check("H7b the table's buttons show while one of its cells has focus", grid.tools_shown(), "");
+    // A shortcut runs its command; the menu shows the shortcuts.
+    grid.press(1, 0, CellKey::Command(Command::InsertColumnRight));
+    settle();
+    let widened = doc.table_grids()[0].cell_texts().iter().all(|r| r.len() == 3);
+    doc.undo();
+    settle();
+    let grid = Rc::clone(&doc.table_grids()[0]);
+    let menu_accels = grid.cell(1, 0).and_then(|c| c.view.extra_menu()).is_some_and(|menu| {
+        // The cell's menu: spelling, then the table commands' two sections.
+        let mut accels = 0;
+        for i in 0..menu.n_items() {
+            if let Some(section) = menu.item_link(i, "section") {
+                for j in 0..section.n_items() {
+                    if let Some(inner) = section.item_link(j, "section") {
+                        for k in 0..inner.n_items() {
+                            if inner.item_attribute_value(k, "accel", None).is_some() {
+                                accels += 1;
+                            }
+                        }
+                    }
+                    if section.item_attribute_value(j, "accel", None).is_some() {
+                        accels += 1;
+                    }
+                }
+            }
+        }
+        accels >= Command::ALL.len()
+    });
+    r.check(
+        "H7c a table shortcut runs its command, and the menu shows the shortcuts",
+        widened && menu_accels,
+        format!("widened {widened}, menu shortcuts {menu_accels}"),
+    );
     grid.perform(Command::InsertRowBelow, 1, 0);
     settle();
     let grid = Rc::clone(&doc.table_grids()[0]);
@@ -1340,6 +1378,22 @@ fn trace_pick() {
         }
         w = widget.parent();
     }
+    eprintln!("cell editable {}, extra menu items {:?}", cell.is_editable(), cell.view.extra_menu().map(|m| m.n_items()));
+    let popped = cell.view.activate_action("menu.popup", None);
+    settle();
+    let mut found = vec![];
+    let mut stack = vec![cell.view.clone().upcast::<gtk4::Widget>()];
+    while let Some(x) = stack.pop() {
+        if x.type_().name().contains("Popover") {
+            found.push(format!("{} visible {}", x.type_().name(), x.is_visible()));
+        }
+        let mut c = x.first_child();
+        while let Some(ch) = c {
+            c = ch.next_sibling();
+            stack.push(ch);
+        }
+    }
+    eprintln!("menu.popup: {popped:?}, popovers {found:?}");
     window.close();
 }
 
