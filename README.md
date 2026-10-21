@@ -81,7 +81,9 @@ hides the markup and shows each thread as a card in a column beside the text.
 Select text and right-click → **Comment…** or **Suggest Edit…** (⌘⇧M / ⌘⇧E);
 cards take replies, resolve, and accept or reject suggestions. The **Review**
 menu steps between threads (⌥⌘↓ / ⌥⌘↑) and accepts or rejects all suggestions.
-Comments are signed with your git `user.name`.
+Comments are signed with your git `user.name`. On iOS and Linux the reader
+renders review markup — highlights, insertions and deletions in color, threads
+as footnotes — but does not yet have the cards or the commands.
 
 To remove a saved bookmark, use **View → Clear Bookmark** or right-click the
 bookmark button.
@@ -159,7 +161,7 @@ nothing is installed beside it and no stale copy on disk can be served instead;
 | | |
 |---|---|
 | `Ctrl+E` | editor pane |
-| Toolbar bookmark buttons | save this place / return to it |
+| Toolbar bookmark buttons | save this place / return to it (right-click to clear) |
 | `Ctrl+S` | save |
 | `Ctrl+F` | find, with match count |
 | `F9` | outline sidebar |

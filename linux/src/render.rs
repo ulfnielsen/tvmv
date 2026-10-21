@@ -1,8 +1,9 @@
 //! GitHub-Flavored Markdown -> HTML, mirroring `Sources/TVMVCore/MarkdownRenderer.swift`.
 //!
 //! Both shells call the same cmark-gfm C library at the same pinned revision
-//! with the same options and the same four extensions, in the same order, so
-//! their output is byte-identical. Any change here needs the matching change in
+//! with the same options and the same four extensions, in the same order, and
+//! run the same review-markup pass (`review.rs`), so their output is
+//! byte-identical. Any change here needs the matching change in
 //! the Swift renderer, and `tests/golden.rs` is the gate.
 
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
@@ -25,11 +26,17 @@ unsafe extern "C" {
 const CMARK_OPT_DEFAULT: c_int = 0;
 /// Adds `data-sourcepos="line:col-line:col"` to block elements.
 const CMARK_OPT_SOURCEPOS: c_int = 1 << 1;
+/// Renders `[^id]` refs and definitions as GFM footnotes, which is how review
+/// threads appear in the reader and in print.
+const CMARK_OPT_FOOTNOTES: c_int = 1 << 13;
 
 /// The GFM core extensions, in the order the Swift renderer attaches them.
 const EXTENSIONS: [&str; 4] = ["table", "strikethrough", "autolink", "tasklist"];
 
 /// Parse GitHub-Flavored Markdown and render it to an HTML string.
+///
+/// Footnotes are on. Review markup renders as `<mark>`, `<ins>` and `<del>`
+/// with a `data-rv` id, and its `rv-` threads as footnotes.
 ///
 /// When `source_pos` is true, block elements carry `data-sourcepos` attributes —
 /// the anchor the editor/preview sync maps through. False keeps the output
@@ -39,7 +46,14 @@ pub fn render_html(markdown: &str, source_pos: bool) -> String {
     // global registry `cmark_find_syntax_extension` queries. Idempotent.
     unsafe { cmark_gfm_core_extensions_ensure_registered() };
 
-    let options = if source_pos { CMARK_OPT_SOURCEPOS } else { CMARK_OPT_DEFAULT };
+    let options =
+        (if source_pos { CMARK_OPT_SOURCEPOS } else { CMARK_OPT_DEFAULT }) | CMARK_OPT_FOOTNOTES;
+
+    // Review anchors become sentinels here and tags after rendering (cmark
+    // strips raw HTML, so the tags cannot go in first). None: no review
+    // markup, and the source renders exactly as written.
+    let review = crate::review::sentinel_encoded(markdown);
+    let source = review.as_deref().unwrap_or(markdown);
 
     let parser = unsafe { cmark_parser_new(options) };
     if parser.is_null() {
@@ -58,7 +72,7 @@ pub fn render_html(markdown: &str, source_pos: bool) -> String {
 
     // Feed the raw bytes. Unlike the Swift side's `withCString`, this passes the
     // length explicitly, so an embedded NUL truncates nothing.
-    unsafe { cmark_parser_feed(parser, markdown.as_ptr() as *const c_char, markdown.len()) };
+    unsafe { cmark_parser_feed(parser, source.as_ptr() as *const c_char, source.len()) };
 
     let document = unsafe { cmark_parser_finish(parser) };
     if document.is_null() {
@@ -77,7 +91,7 @@ pub fn render_html(markdown: &str, source_pos: bool) -> String {
 
     let out = unsafe { CStr::from_ptr(html) }.to_string_lossy().into_owned();
     unsafe { free(html as *mut c_void) };
-    out
+    if review.is_some() { crate::review::sentinel_decoded(&out) } else { out }
 }
 
 struct ParserGuard(*mut c_void);

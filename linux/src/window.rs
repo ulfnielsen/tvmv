@@ -348,7 +348,7 @@ impl DocumentWindow {
         save_bookmark.set_tooltip_text(Some("Bookmark current place"));
         save_bookmark.add_css_class("flat");
         let go_bookmark = Button::from_icon_name("go-jump-symbolic");
-        go_bookmark.set_tooltip_text(Some("Go to bookmark"));
+        go_bookmark.set_tooltip_text(Some("Go to bookmark (right-click to clear)"));
         go_bookmark.add_css_class("flat");
         go_bookmark.set_sensitive(saved_reading.bookmark.is_some());
 
@@ -446,6 +446,34 @@ impl DocumentWindow {
                     preview.eval(&format!("window.tvmv.setScrollRatio({ratio});"));
                 }
             });
+        }
+        // Right-click "Go to bookmark" to clear it, as on macOS. The button is
+        // insensitive without a bookmark, so the menu only appears with one.
+        {
+            let clear = gtk4::gio::SimpleAction::new("clear-bookmark", None);
+            let bookmark = Rc::clone(&bookmark);
+            let button = go_bookmark.clone();
+            let path = path.to_path_buf();
+            let reading_position = Rc::clone(&reading_position);
+            clear.connect_activate(move |_, _| {
+                bookmark.set(None);
+                button.set_sensitive(false);
+                reading::save(&path, ReadingState { position: reading_position.get(), bookmark: None });
+            });
+            window.add_action(&clear);
+
+            let menu = gtk4::gio::Menu::new();
+            menu.append(Some("Clear Bookmark"), Some("win.clear-bookmark"));
+            let popover = gtk4::PopoverMenu::from_model(Some(&menu));
+            popover.set_parent(&go_bookmark);
+            let gesture = gtk4::GestureClick::new();
+            gesture.set_button(gtk4::gdk::BUTTON_SECONDARY);
+            {
+                let popover = popover.clone();
+                gesture.connect_pressed(move |_, _, _, _| popover.popup());
+            }
+            go_bookmark.add_controller(gesture);
+            go_bookmark.connect_destroy(move |_| popover.unparent());
         }
 
         // Toggling the pane on loads editor.html the first time — CodeMirror is

@@ -21,6 +21,7 @@ pub mod preview;
 pub mod reading;
 pub mod print;
 pub mod render;
+pub mod review;
 pub mod startup;
 pub mod resources;
 pub mod settings;

@@ -24,6 +24,11 @@
   --accent-3:    #1F5F6E;   /* teal — structural */
   --accent-4:    #A07D14;   /* mustard — numerics */
 
+  /* Review markup, the same colors as the macOS native view (NativeTheme). */
+  --review-highlight: rgba(255, 226, 122, 0.6);
+  --review-insert:    #2E7D32;
+  --review-delete:    #B3261E;
+
   /* User-tunable knobs (applyStyle rewrites these on :root at runtime). */
   --tvmv-body-font: "Source Serif 4", Georgia, "Times New Roman", serif;
   --tvmv-mono-font: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -48,6 +53,9 @@ html[data-theme="dark"] {
   --accent-2:    #DB8A93;
   --accent-3:    #5FB6C6;
   --accent-4:    #C9A227;
+  --review-highlight: rgba(138, 109, 16, 0.55);
+  --review-insert:    #7FC48A;
+  --review-delete:    #EF8A80;
   color-scheme: dark;
 }
 
@@ -127,6 +135,30 @@ html[data-measure="full"] #content.markdown-body { max-width: none; }
 }
 #content.markdown-body em { font-style: italic; }
 #content.markdown-body del { color: var(--muted); }
+
+/* ---- Review markup (anchors carry data-rv; threads are rv- footnotes) -- */
+#content.markdown-body mark[data-rv] {
+  background: var(--review-highlight); color: inherit;
+  border-radius: 2px; padding: 0 1px;
+}
+#content.markdown-body ins[data-rv] {
+  color: var(--review-insert);
+  text-decoration: underline; text-underline-offset: 2px;
+}
+#content.markdown-body del[data-rv] {
+  color: var(--review-delete); text-decoration: line-through;
+}
+/* A substitution: old struck, then new underlined, with a thin gap. */
+#content.markdown-body del[data-rv] + ins[data-rv] { margin-left: 0.2em; }
+
+/* ---- Footnotes -------------------------------------------------------- */
+#content.markdown-body sup.footnote-ref { font-size: 0.75em; line-height: 0; }
+#content.markdown-body section.footnotes {
+  margin-top: 2.5em; padding-top: 0.8em;
+  border-top: 1px solid var(--rule-soft);
+  font-size: 0.9em; color: var(--ink-soft);
+}
+#content.markdown-body a.footnote-backref { margin-left: 0.2em; }
 #content.markdown-body hr {
   border: 0; height: 1px; background: var(--rule-soft); margin: 2em 0;
 }
