@@ -69,6 +69,7 @@ impl DocumentWindow {
             Document::empty(path)
         })));
         let doc = DocumentView::new(theme_for(settings));
+        doc.set_document_path(Some(path.to_path_buf()));
         doc.load(document.borrow().text().to_string());
         let saved = reading::load(path);
         let state = Rc::new(Cell::new(saved));

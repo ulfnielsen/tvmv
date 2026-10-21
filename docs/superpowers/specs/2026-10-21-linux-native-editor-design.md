@@ -50,9 +50,12 @@ source, styled as code, and external changes keep today's banner.
 5. **Opening is lazy.** The first screen is tagged synchronously. The rest is
    tagged in idle chunks outward from the viewport. This is the main change
    from macOS, forced by GTK's tag cost (see Evidence).
-6. **Tables and images are child anchors** in the buffer: a grid widget for
-   tables, a paintable for images. An offset map converts between buffer
-   offsets and source offsets (see Offsets).
+6. **Tables are child anchors** in the buffer, holding a grid widget. An
+   offset map converts between buffer offsets and source offsets (see
+   Offsets). **Images are not** (changed in step 3, following macOS): the
+   `![alt](url)` source hides, its line reserves the picture's height plus
+   half an em above and below, and the view draws the picture in that room.
+   Nothing enters the buffer, so image lines need no offset mapping.
 7. **Custom CSS is dropped from the main window.** Settings keeps it for
    print and `--html`, which still use the web pipeline. Peek and thumbnails
    are unchanged.
@@ -167,6 +170,24 @@ Measured by `tvmv --self-check` (headless, Broadway):
   1 MB that was the probe's own delay; diagnostics that watch the frame
   clock attach at high priority.
 
+## Findings from step 3 (2026-10-21)
+
+- **GTK's line height multiplies the font's natural height,** not its size
+  (Pango's line-height factor). A body line at 16 px is 37 px tall, not
+  1.7 × 16; macOS's `lineHeightMultiple` differs. Tests compare against a
+  measured text line, not a formula.
+- **A picture's line** keeps its newline visible, set in a 1 pt font with
+  line height 1.0, so the line exists to hold the reserved room
+  (`pixels_above_lines` = height + ½ em, `pixels_below_lines` = ½ em). A
+  wholly invisible line would take no height at all.
+- **GdkPixbuf decodes the first frame only,** so the first frame's size, which
+  the loader reports before decoding, is the whole pixel cost; an image over
+  the cap is cut to a 1×1 render and discarded. `Pixbuf` is not `Send`:
+  the worker thread hands back the pixels as `glib::Bytes` for a
+  `gdk::MemoryTexture`.
+- **Remote images** go through GIO, which needs gvfs's http backend
+  (installed on GNOME and KDE desktops).
+
 ## Offsets
 
 There are three coordinate systems:
@@ -192,7 +213,7 @@ The same as the base spec's table, except for these rows:
 |---|---|---|
 | Bullets, numbers, checkboxes, quote rules, thematic breaks, code-block backgrounds | Drawn in `TvmvView::snapshot_layer` (below text) | Visible lines only |
 | Fence lines | Invisible, so they take no height | Caret rule below |
-| Images | `insert_paintable` with a `gdk::Texture` from the local file | Counted in `SourceText` |
+| Block images | Drawn in `snapshot_layer` in the room their line reserves; a failed one shows "▨ alt" | Loaded off the main thread (`images.rs`) |
 | Tables | `TableGrid` on a child anchor | Below |
 | Math, Mermaid, HTML blocks, front matter | Source, in the code style | Embedded rendering deferred |
 | Review cards | `TvmvView::add_overlay` in the right margin | Below |
@@ -405,7 +426,13 @@ priority idle, which waits behind the lazy styler.
    print. Then remove the CodeMirror pane. **Done 2026-10-21:** the native
    view is the document window; `--native` is gone. It still needs the
    manual pass on a desktop (IME, Orca, HiDPI, KDE).
-3. Lists, quotes, checkboxes, images and spelling.
+3. Lists, quotes, checkboxes, images and spelling. Lists, quotes and
+   checkboxes came with step 1. **Images done 2026-10-21:** block images
+   local, remote and `data:`, within the macOS byte and pixel caps, scaled
+   to the column, revealed as source, and pasted from the clipboard into an
+   `images` folder. **Spelling waits** for `libgtksourceview-5-dev` and
+   `libspelling-1-dev` (Ubuntu 24.04 ships 5.12 and 0.2.0; the `sourceview5`
+   0.11 and `libspelling` 0.5 crates build against them).
 4. `TableGrid`.
 5. The review core port, then cards and commands.
 

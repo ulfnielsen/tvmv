@@ -18,9 +18,9 @@ show as plain monospace, and math and Mermaid diagrams as their source; print
 and Save as PDF render all three.
 
 On **Linux** the document is a native GTK text view too, built the same way:
-read-only on open, `Ctrl+E` to edit in place, markup hidden. Tables, images and
-spelling are still to come there; until then tables and images show as their
-source.
+read-only on open, `Ctrl+E` to edit in place, markup hidden, images shown (and
+pasted from the clipboard). Table grids and spelling are still to come there;
+until then tables show as their source.
 
 On **iOS** a web layer (`Sources/TVMVCore/Resources/web/`, shared verbatim)
 renders the document with syntax highlighting, KaTeX math and Mermaid diagrams,

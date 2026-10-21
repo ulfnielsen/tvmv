@@ -374,6 +374,166 @@ fn reader_checks(r: &mut Report) {
     window.close();
 }
 
+/// A folder of test images, removed afterwards.
+struct ImageFolder(std::path::PathBuf);
+
+impl ImageFolder {
+    fn new() -> ImageFolder {
+        let p = std::env::temp_dir().join(format!("tvmv-check-images-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&p);
+        std::fs::create_dir_all(p.join("img")).unwrap();
+        ImageFolder(p)
+    }
+    fn png(&self, name: &str, w: i32, h: i32) {
+        let pixbuf = gtk4::gdk_pixbuf::Pixbuf::new(gtk4::gdk_pixbuf::Colorspace::Rgb, true, 8, w, h).unwrap();
+        pixbuf.fill(0xff0000ff);
+        pixbuf.savev(self.0.join(name), "png", &[]).unwrap();
+    }
+    fn doc(&self) -> std::path::PathBuf {
+        self.0.join("doc.md")
+    }
+}
+
+impl Drop for ImageFolder {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn line_height(doc: &DocumentView, at: usize) -> i32 {
+    let offset = doc.model.borrow().source.to_buffer(at);
+    doc.view.line_yrange(&doc.buffer.iter_at_offset(offset)).1
+}
+
+fn open_with_images(folder: &ImageFolder, text: &str, editable: bool) -> (Rc<DocumentView>, gtk4::Window) {
+    let doc = DocumentView::new(theme());
+    doc.set_document_path(Some(folder.doc()));
+    doc.load(text.to_string());
+    doc.set_editable(editable);
+    let window = gtk4::Window::new();
+    window.set_default_size(800, 700);
+    let scroller = gtk4::ScrolledWindow::new();
+    scroller.set_child(Some(&doc.view));
+    window.set_child(Some(&scroller));
+    window.present();
+    settle();
+    (doc, window)
+}
+
+fn settled(doc: &DocumentView, address: &str) -> Option<crate::native::document_view::ImageState> {
+    use crate::native::document_view::ImageState;
+    until(Duration::from_secs(5), || matches!(doc.image_state(address), Some(ImageState::Loaded | ImageState::Failed)));
+    settle();
+    doc.image_state(address)
+}
+
+fn image_checks(r: &mut Report) {
+    use crate::native::document_view::ImageState;
+    println!("\nF. images");
+    let folder = ImageFolder::new();
+    folder.png("img/chart.png", 200, 100);
+    folder.png("wide.png", 4000, 400);
+    let em = theme().em() as i32;
+
+    let text = "Intro.\n\n![A chart](img/chart.png)\n\nAfter.\n";
+    let (doc, window) = open_with_images(&folder, text, false);
+    let at = text.find("![").unwrap();
+    let state = settled(&doc, "img/chart.png");
+    let height = line_height(&doc, at);
+    r.check(
+        "F1 a block image hides its source and its line takes the picture's height plus an em",
+        state == Some(ImageState::Loaded)
+            && doc.hidden_at(at)
+            && doc.hidden_at(at + "![A chart](img/chart.png)".len() - 1)
+            && (height - (100 + em)).abs() <= 4,
+        format!("{state:?}, line {height}, want {}", 100 + em),
+    );
+    window.close();
+
+    let (doc, window) = open_with_images(&folder, "![wide](wide.png)\n", false);
+    settled(&doc, "wide.png");
+    let column = doc.model.borrow().column_width;
+    let height = line_height(&doc, 0);
+    let want = (400.0 * column as f64 / 4000.0).round() as i32 + em;
+    r.check("F2 a wide image scales down to the column", (height - want).abs() <= 4, format!("line {height}, want {want} (column {column})"));
+    window.close();
+
+    let (doc, window) = open_with_images(&folder, "![A chart](img/chart.png)\n", true);
+    settled(&doc, "img/chart.png");
+    doc.set_caret(4);
+    doc.reveal(true);
+    settle();
+    let height = line_height(&doc, 0);
+    r.check(
+        "F3 revealing shows the source instead of the picture",
+        !doc.hidden_at(0) && height < 100,
+        format!("line {height}"),
+    );
+    // Mid-edit the line stops being an image; the source stays until the
+    // caret leaves (reported on macOS: it flipped back and forth).
+    let close = doc.text().find(')').unwrap();
+    doc.set_caret(close + 1);
+    doc.view.emit_by_name::<()>("backspace", &[]);
+    settle();
+    let mid = !doc.hidden_at(0);
+    type_text(&doc, ")");
+    settle();
+    r.check(
+        "F4 a revealed image stays revealed while its source is edited",
+        mid && !doc.hidden_at(0) && doc.text() == "![A chart](img/chart.png)\n" && doc.is_revealing(),
+        format!("{:?}, revealing {}", doc.text(), doc.is_revealing()),
+    );
+    window.close();
+
+    let text = "![Missing chart](nope.png)\n\nText.\n";
+    let (doc, window) = open_with_images(&folder, text, false);
+    let state = settled(&doc, "nope.png");
+    let height = line_height(&doc, 0);
+    let body_line = line_height(&doc, text.find("Text").unwrap());
+    r.check(
+        "F5 a missing image keeps its source hidden on a normal line (the alt text is drawn)",
+        state == Some(ImageState::Failed) && doc.hidden_at(0) && height == body_line,
+        format!("{state:?}, line {height}, a text line {body_line}"),
+    );
+    window.close();
+
+    let doc = DocumentView::new(theme());
+    doc.max_image_pixels.set(10_000);
+    doc.set_document_path(Some(folder.doc()));
+    doc.load("![c](img/chart.png)\n".into());
+    let state = settled(&doc, "img/chart.png");
+    r.check("F6 an image over the pixel limit is not decoded", state == Some(ImageState::Failed), format!("{state:?}"));
+
+    let (doc, window) = open_with_images(&folder, "Before.\n", true);
+    let texture: gtk4::gdk::Texture = gtk4::gdk::MemoryTexture::new(
+        40,
+        20,
+        gtk4::gdk::MemoryFormat::R8g8b8a8,
+        &glib::Bytes::from_owned(vec![255u8; 40 * 20 * 4]),
+        40 * 4,
+    )
+    .upcast();
+    doc.set_caret(7);
+    let pasted = doc.paste_image(&texture);
+    let files: Vec<String> = std::fs::read_dir(folder.0.join("images"))
+        .map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    let name = files.first().cloned().unwrap_or_default();
+    let state = settled(&doc, &format!("images/{name}"));
+    r.check(
+        "F7 pasting an image saves it beside the document and links it on its own paragraph",
+        pasted
+            && files.len() == 1
+            && name.starts_with("doc-")
+            && doc.text() == format!("Before.\n\n![](images/{name})\n")
+            && state == Some(ImageState::Loaded),
+        format!("{files:?} {:?} {state:?}", doc.text()),
+    );
+    doc.set_editable(false);
+    r.check("F8 a read-only document never writes a pasted image", !doc.paste_image(&texture), "");
+    window.close();
+}
+
 fn perf_checks(r: &mut Report, size: usize) {
     println!("\nD. performance at {} KB", size / 1024);
     let text = big_document(size);
@@ -529,6 +689,7 @@ pub fn screenshot(input: &std::path::Path, output: &str, size: (i32, i32)) -> gl
     };
     let dark = std::env::var_os("TVMV_DARK").is_some();
     let doc = DocumentView::new(NativeTheme::new("Source Serif 4", "DejaVu Sans Mono", 16.0, 80.0, false, dark));
+    doc.set_document_path(input.canonicalize().ok());
     doc.load(text);
     let window = gtk4::Window::new();
     window.set_default_size(size.0, size.1);
@@ -616,6 +777,7 @@ pub fn run() -> glib::ExitCode {
     soft_break_checks(&mut r);
     editing_checks(&mut r);
     reader_checks(&mut r);
+    image_checks(&mut r);
     for size in [64 * 1024, 1024 * 1024, 5 * 1024 * 1024] {
         perf_checks(&mut r, size);
     }

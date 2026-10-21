@@ -17,13 +17,13 @@ use gtk4::{gdk, glib, graphene, gsk, pango};
 use crate::layout::{ListItem, Style};
 use crate::review_spans::SpanRole;
 
-use super::document_view::Model;
+use super::document_view::{ImageState, Model};
 use super::styler::quote_indent;
 use super::theme::NativeTheme;
 
 /// Font metrics by (family, size bits): ascent and descent in pixels.
 type MetricsCache = Vec<((String, u64), (f64, f64))>;
-type ColumnCallback = Box<dyn Fn(i32)>;
+type ColumnCallback = Box<dyn Fn(i32, i32)>;
 
 mod imp {
     use super::*;
@@ -110,7 +110,8 @@ impl TvmvView {
         *self.imp().model.borrow_mut() = Some(model);
     }
 
-    pub fn set_on_column(&self, f: impl Fn(i32) + 'static) {
+    /// `f(x, width)`: where the text column starts, and how wide it is.
+    pub fn set_on_column(&self, f: impl Fn(i32, i32) + 'static) {
         *self.imp().on_column.borrow_mut() = Some(Box::new(f));
     }
 
@@ -144,7 +145,7 @@ impl TvmvView {
             self.set_right_margin(right);
         }
         if let Some(f) = self.imp().on_column.borrow().as_ref() {
-            f(x);
+            f(x, column.round() as i32);
         }
     }
 
@@ -241,6 +242,44 @@ impl TvmvView {
         let em = theme.em();
         let column_x = self.left_margin() as f64;
         let column_w = (self.width() - self.left_margin() - self.right_margin()) as f64;
+
+        // Block images, in the room their line reserves; a failed one shows
+        // its alt text instead.
+        let half = (em / 2.0).round();
+        let scale = self.scale_factor() as f64;
+        let on_pixels = |v: f64| (v * scale).round() / scale;
+        for image in visible_slice(&layout.block_images, &visible, |i| i.range.start) {
+            if model.is_revealed(&image.range) || image.range.end > text.len() {
+                continue;
+            }
+            let state = model.images.get(&image.url);
+            let at = self.buffer().iter_at_offset(model.source.to_buffer(image.range.start));
+            if let (Some((w, h)), Some(texture)) = (model.image_size(image), state.and_then(|s| s.texture.as_ref())) {
+                let (y, _) = self.line_yrange(&at);
+                // On whole device pixels: the lines above can leave the line
+                // at a fractional position, smearing every edge.
+                let r = rect(on_pixels(column_x), on_pixels(y as f64 + half), w as f64, h as f64);
+                snapshot.append_texture(texture, &r);
+            } else if state.is_some_and(|s| s.state == ImageState::Failed) {
+                let label = if image.alt.is_empty() { &image.url } else { &image.alt };
+                let pango = self.create_pango_layout(Some(&format!("▨ {label}")));
+                let mut font = pango::FontDescription::new();
+                // The same fallback as the body text's CSS.
+                font.set_family(&format!("{}, serif", theme.body_family));
+                font.set_absolute_size(em * pango::SCALE as f64);
+                font.set_style(pango::Style::Italic);
+                pango.set_font_description(Some(&font));
+                let line = self.location(&at);
+                let (_, logical) = pango.pixel_extents();
+                snapshot.save();
+                snapshot.translate(&graphene::Point::new(
+                    column_x as f32,
+                    (line.y() as f64 + (line.height() - logical.height()) as f64 / 2.0) as f32,
+                ));
+                snapshot.append_layout(&pango, &theme.muted);
+                snapshot.restore();
+            }
+        }
 
         // Code blocks: a rounded paper-deep panel behind the body lines.
         let first_block = layout.code_blocks.partition_point(|b| b.range.end <= visible.start);

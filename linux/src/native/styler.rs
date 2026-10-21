@@ -14,7 +14,7 @@ use std::ops::Range;
 use gtk4::prelude::*;
 use gtk4::{TextBuffer, TextTag, pango};
 
-use crate::layout::{Layout, Style};
+use crate::layout::{BlockImage, Layout, Style};
 use crate::offsets::SourceText;
 use crate::review_spans::SpanRole;
 
@@ -139,7 +139,14 @@ pub struct Styler {
     /// Marker widths by text: markers repeat ("- ", "1. "), and measuring
     /// one builds a Pango layout.
     widths: RefCell<HashMap<String, i32>>,
+    /// Image line tags by picture height in pixels.
+    image_lines: RefCell<HashMap<i32, TextTag>>,
+    em: Cell<f64>,
 }
+
+/// The newline left on a picture's line is set this small, so the line is
+/// (almost) only the room reserved for the picture.
+const HAIRLINE_POINTS: f64 = 1.0;
 
 /// The line containing byte `at`, with its newline.
 fn line_range(text: &str, at: usize) -> Range<usize> {
@@ -240,12 +247,39 @@ impl Styler {
             indents: RefCell::new(HashMap::new()),
             column_x: Cell::new(0),
             widths: RefCell::new(HashMap::new()),
+            image_lines: RefCell::new(HashMap::new()),
+            em: Cell::new(theme.em()),
         }
     }
 
     pub fn set_theme(&self, theme: &NativeTheme) {
         self.tags.theme(theme);
         self.widths.borrow_mut().clear();
+        self.em.set(theme.em());
+        for (&height, tag) in self.image_lines.borrow().iter() {
+            self.shape_image_line(tag, height);
+        }
+    }
+
+    /// A picture `height` pixels tall, half an em above and below it, as on
+    /// macOS (the view draws it in that room).
+    fn shape_image_line(&self, tag: &TextTag, height: i32) {
+        let half = (self.em.get() / 2.0).round() as i32;
+        tag.set_pixels_above_lines(height + half);
+        tag.set_pixels_below_lines(half);
+        tag.set_size_points(HAIRLINE_POINTS);
+        tag.set_line_height(1.0);
+    }
+
+    fn image_line_tag(&self, height: i32) -> TextTag {
+        if let Some(tag) = self.image_lines.borrow().get(&height) {
+            return tag.clone();
+        }
+        let tag = TextTag::new(None);
+        self.buffer.tag_table().add(&tag);
+        self.shape_image_line(&tag, height);
+        self.image_lines.borrow_mut().insert(height, tag.clone());
+        tag
     }
 
     /// The column moved: indent tags follow it.
@@ -282,6 +316,8 @@ impl Styler {
     ///   in an unstyled stretch that search runs to the end of the buffer.
     /// - `revealed`: whether a reveal unit's markup is currently shown.
     /// - `width`: a string's width in the body font, in pixels.
+    /// - `image_height`: the height a block image is drawn at, once loaded
+    ///   (`None` while loading or after a failure: a normal text line).
     #[allow(clippy::too_many_arguments)]
     pub fn apply(
         &self,
@@ -292,6 +328,7 @@ impl Styler {
         theme: &NativeTheme,
         revealed: &dyn Fn(&Range<usize>) -> bool,
         width: &dyn Fn(&str) -> i32,
+        image_height: &dyn Fn(&BlockImage) -> Option<i32>,
     ) {
         let text = source.text();
         let range = range.start.min(text.len())..range.end.min(text.len());
@@ -394,6 +431,19 @@ impl Styler {
         for hideable in prepared.hidden_index.query(&range).map(|i| &prepared.hideables[i]) {
             if !revealed(&hideable.unit) {
                 tag(&tags.hidden, &hideable.range);
+            }
+        }
+
+        // Block images: the source hides; once the picture is loaded its line
+        // takes the picture's room. The newline stays visible, so the line
+        // exists to hold it.
+        for image in in_lines(&layout.block_images, &range, |i| i.range.start) {
+            if revealed(&image.range) {
+                continue;
+            }
+            tag(&tags.hidden, &image.range);
+            if let Some(height) = image_height(image) {
+                tag(&self.image_line_tag(height), &line_range(text, image.range.start));
             }
         }
 

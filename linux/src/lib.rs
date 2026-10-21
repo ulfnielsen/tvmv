@@ -18,6 +18,7 @@ pub mod chrome;
 pub mod cmark;
 pub mod document;
 pub mod edit_rules;
+pub mod images;
 pub mod find;
 pub mod js;
 pub mod native;

@@ -19,7 +19,9 @@
 //!   all markup.
 
 use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::rc::{Rc, Weak};
 use std::time::{Duration, Instant};
 
@@ -27,7 +29,8 @@ use gtk4::prelude::*;
 use gtk4::{gdk, glib, TextBuffer};
 
 use crate::edit_rules::{self, DeleteAction};
-use crate::layout::{Heading, Style, encloses};
+use crate::images;
+use crate::layout::{BlockImage, Heading, Style, encloses};
 use crate::offsets::SourceText;
 
 use super::styler::{Prepared, Styler};
@@ -48,6 +51,19 @@ const CHUNK_BUDGET: Duration = Duration::from_millis(3);
 /// would only be laid out again.
 const STYLE_PRIORITY: i32 = 123;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ImageState {
+    Loading,
+    Loaded,
+    Failed,
+}
+
+/// A block image by its address as written, loaded once.
+pub struct Image {
+    pub state: ImageState,
+    pub texture: Option<gdk::Texture>,
+}
+
 /// What the view draws from, shared with `TvmvView`.
 pub struct Model {
     pub source: SourceText,
@@ -59,11 +75,26 @@ pub struct Model {
     /// `prepared`, and the buffer, cover only the start of the text: a large
     /// document whose whole parse has not landed yet.
     pub partial: bool,
+    pub images: HashMap<String, Image>,
+    /// The text column's width, which pictures scale down to.
+    pub column_width: i32,
 }
 
 impl Model {
     pub fn is_revealed(&self, unit: &Range<usize>) -> bool {
         self.show_all || self.revealed.contains(unit)
+    }
+
+    /// The size a loaded block image is drawn at: its own, scaled down (never
+    /// up) to the column.
+    pub fn image_size(&self, image: &BlockImage) -> Option<(i32, i32)> {
+        let texture = self.images.get(&image.url)?.texture.as_ref()?;
+        let (w, h) = (texture.width(), texture.height());
+        if w <= 0 || h <= 0 {
+            return None;
+        }
+        let width = w.min(self.column_width.max(1));
+        Some((width, (h as f64 * width as f64 / w as f64).round().max(1.0) as i32))
     }
 }
 
@@ -122,6 +153,11 @@ pub struct DocumentView {
     find_current_tag: gtk4::TextTag,
     /// Where `scroll_to_offset` aims; scrolling to a mark waits for layout.
     scroll_mark: gtk4::TextMark,
+    /// The file, for relative image addresses and pasted images.
+    document_path: RefCell<Option<PathBuf>>,
+    /// What one image may cost: bytes read, pixels decoded.
+    pub max_image_bytes: Cell<usize>,
+    pub max_image_pixels: Cell<u64>,
 }
 
 /// Where the first-screen parse of a large document stops: the first blank
@@ -180,6 +216,8 @@ impl DocumentView {
             revealed: Vec::new(),
             show_all: false,
             partial: false,
+            images: HashMap::new(),
+            column_width: 0,
         }));
         view.set_model(Rc::clone(&model));
         let css = gtk4::CssProvider::new();
@@ -221,6 +259,9 @@ impl DocumentView {
             find_tag,
             find_current_tag,
             scroll_mark,
+            document_path: RefCell::new(None),
+            max_image_bytes: Cell::new(images::MAX_BYTES),
+            max_image_pixels: Cell::new(images::MAX_PIXELS),
         });
         doc.color_find_tags();
         doc.apply_css();
@@ -493,6 +534,23 @@ impl DocumentView {
     // MARK: Signals
 
     fn connect(&self) {
+        // An image on the clipboard with no text pastes as a picture.
+        let me = self.me.clone();
+        self.view.connect_paste_clipboard(move |view| {
+            let Some(doc) = me.upgrade() else { return };
+            let formats = view.clipboard().formats();
+            let text = formats.contain_mime_type("text/plain") || formats.contain_mime_type("text/plain;charset=utf-8");
+            if text || !formats.contains_type(gdk::Texture::static_type()) || !doc.is_editable() {
+                return;
+            }
+            view.stop_signal_emission_by_name("paste-clipboard");
+            let me = doc.me.clone();
+            view.clipboard().read_texture_async(gtk4::gio::Cancellable::NONE, move |result| {
+                if let (Some(doc), Ok(Some(texture))) = (me.upgrade(), result) {
+                    doc.paste_image(&texture);
+                }
+            });
+        });
         let me = self.me.clone();
         self.buffer.connect_insert_text(move |_, iter, text| {
             if let Some(doc) = me.upgrade() {
@@ -566,9 +624,10 @@ impl DocumentView {
         });
         let view = self.view.clone();
         let me = self.me.clone();
-        self.view.set_on_column(move |x| {
+        self.view.set_on_column(move |x, width| {
             if let Some(doc) = me.upgrade() {
                 doc.styler.set_column_x(x);
+                doc.column_changed(width);
             }
             view.queue_draw();
         });
@@ -698,6 +757,7 @@ impl DocumentView {
     }
 
     fn notify_layout(&self) {
+        self.request_images();
         self.view.queue_draw();
         if let Some(f) = self.on_layout.borrow().as_ref() {
             f();
@@ -757,10 +817,143 @@ impl DocumentView {
         let revealed = |unit: &Range<usize>| model.is_revealed(unit);
         let view = &self.view;
         let width = |s: &str| view.text_width(s);
-        self.styler.apply(&model.source, &model.prepared, range.clone(), fresh, &model.theme, &revealed, &width);
+        let image_height = |image: &BlockImage| model.image_size(image).map(|(_, h)| h);
+        self.styler.apply(
+            &model.source,
+            &model.prepared,
+            range.clone(),
+            fresh,
+            &model.theme,
+            &revealed,
+            &width,
+            &image_height,
+        );
         // Styling clears every tag in the range, find's too.
         self.tag_matches(&model, range);
         self.view.queue_draw();
+    }
+
+    // MARK: Images
+
+    /// The document's file: relative image addresses resolve against its
+    /// folder, and pasted images are saved beside it.
+    pub fn set_document_path(&self, path: Option<PathBuf>) {
+        *self.document_path.borrow_mut() = path;
+        self.model.borrow_mut().images.clear();
+        self.request_images();
+    }
+
+    pub fn image_state(&self, address: &str) -> Option<ImageState> {
+        self.model.borrow().images.get(address).map(|i| i.state)
+    }
+
+    /// Start loading every block image not yet requested, off the main
+    /// thread; each restyles its lines when it lands.
+    fn request_images(&self) {
+        let path = self.document_path.borrow().clone();
+        let wanted: Vec<(String, Option<images::ImageSource>)> = {
+            let mut model = self.model.borrow_mut();
+            let mut wanted = Vec::new();
+            let addresses: Vec<String> = model.prepared.layout.block_images.iter().map(|i| i.url.clone()).collect();
+            for address in addresses {
+                if model.images.contains_key(&address) {
+                    continue;
+                }
+                model.images.insert(address.clone(), Image { state: ImageState::Loading, texture: None });
+                let source = images::image_source(&address, path.as_deref());
+                wanted.push((address, source));
+            }
+            wanted
+        };
+        if wanted.is_empty() {
+            return;
+        }
+        let (bytes, pixels) = (self.max_image_bytes.get(), self.max_image_pixels.get());
+        let (sender, receiver) = async_channel::unbounded();
+        std::thread::spawn(move || {
+            for (address, source) in wanted {
+                let decoded = source.and_then(|s| images::load(&s, bytes, pixels));
+                if sender.send_blocking((address, decoded)).is_err() {
+                    return;
+                }
+            }
+        });
+        let me = self.me.clone();
+        glib::spawn_future_local(async move {
+            while let Ok((address, decoded)) = receiver.recv().await {
+                let Some(doc) = me.upgrade() else { return };
+                doc.image_loaded(&address, decoded);
+            }
+        });
+    }
+
+    fn image_loaded(&self, address: &str, decoded: Option<images::Decoded>) {
+        let texture = decoded.map(|d| d.texture());
+        let state = if texture.is_some() { ImageState::Loaded } else { ImageState::Failed };
+        self.model.borrow_mut().images.insert(address.to_string(), Image { state, texture });
+        self.restyle_images(|image| image.url == address);
+    }
+
+    fn restyle_images(&self, matches: impl Fn(&BlockImage) -> bool) {
+        let ranges: Vec<Range<usize>> = {
+            let model = self.model.borrow();
+            let len = model.source.text().len();
+            model
+                .prepared
+                .layout
+                .block_images
+                .iter()
+                .filter(|i| matches(i) && i.range.end <= len)
+                .map(|i| i.range.clone())
+                .collect()
+        };
+        for range in ranges {
+            self.restyle(range);
+        }
+    }
+
+    /// Paste an image (a screenshot, from an image viewer or a browser):
+    /// save it as a PNG in an "images" folder beside the document and link
+    /// it on its own paragraph. Returns false, writing nothing, when editing
+    /// is off or the document has no folder.
+    pub fn paste_image(&self, texture: &gdk::Texture) -> bool {
+        let Some(document) = self.document_path.borrow().clone() else { return false };
+        if !self.is_editable() || !self.is_loaded() {
+            return false;
+        }
+        let Some(folder) = document.parent().map(|p| p.join("images")) else { return false };
+        let stamp = glib::DateTime::now_local()
+            .and_then(|t| t.format("%Y%m%d-%H%M%S"))
+            .map_or_else(|_| "image".to_string(), |s| s.to_string());
+        let name = images::pasted_name(&document, &folder, &stamp);
+        if std::fs::create_dir_all(&folder).is_err() || texture.save_to_png(folder.join(&name)).is_err() {
+            self.view.error_bell();
+            return false;
+        }
+        let at = self.selection();
+        let (before, after) = images::paragraph_padding(self.model.borrow().source.text(), at.clone());
+        let link = format!("![](images/{name})");
+        self.replace(at.clone(), &format!("{before}{link}{after}"));
+        self.set_caret(at.start + before.len() + link.len());
+        true
+    }
+
+    /// The column changed width: pictures scale with it.
+    fn column_changed(&self, width: i32) {
+        if self.model.borrow().column_width == width {
+            return;
+        }
+        self.model.borrow_mut().column_width = width;
+        // Not from inside the allocation this comes from: restyling changes
+        // the layout being allocated.
+        let me = self.me.clone();
+        glib::idle_add_local_once(move || {
+            let Some(doc) = me.upgrade() else { return };
+            let model = Rc::clone(&doc.model);
+            doc.restyle_images(|image| {
+                model.borrow().images.get(&image.url).is_some_and(|i| i.state == ImageState::Loaded)
+            });
+        });
     }
 
     // MARK: Reader
