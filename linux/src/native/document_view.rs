@@ -1262,10 +1262,13 @@ impl DocumentView {
 
     // MARK: Tables
 
+    /// The anchor's line: the anchor sits on the blank line above its table
+    /// (`table_source::anchor_offset`), taking the gap that line made, so it
+    /// keeps that gap above as well as half an em each side.
     fn shape_table_line(&self) {
-        let half = (self.model.borrow().theme.em() / 2.0).round() as i32;
-        self.table_line.set_pixels_above_lines(half);
-        self.table_line.set_pixels_below_lines(half);
+        let em = self.model.borrow().theme.em();
+        self.table_line.set_pixels_above_lines((em * 1.5).round() as i32);
+        self.table_line.set_pixels_below_lines((em / 2.0).round() as i32);
     }
 
     /// The spell checker's adapter on this buffer.
@@ -1287,15 +1290,22 @@ impl DocumentView {
         let enabled = old.is_enabled();
         let checker = old.checker().unwrap_or_else(libspelling::Checker::default);
         old.set_enabled(false);
-        let table = self.buffer.tag_table();
-        if let Some(tag) = old.tag() {
-            table.remove(&tag);
-        }
+        let old_tag = old.tag();
         let fresh = libspelling::TextBufferAdapter::new(&source_buffer, &checker);
         fresh.set_enabled(enabled);
         self.view.insert_action_group("spelling", Some(&fresh));
         *self.spelling.borrow_mut() = fresh;
+        // Something in libspelling keeps the old adapter alive, still
+        // following the buffer and checking it: dispose it now, which stops
+        // both, before its tag goes (it would touch the freed tag).
+        // SAFETY: nothing of ours uses `old` after this; libspelling's own
+        // references are released by its dispose.
+        unsafe { old.run_dispose() };
         drop(old);
+        let table = self.buffer.tag_table();
+        if let Some(tag) = old_tag {
+            table.remove(&tag);
+        }
         let no_spell = self.styler.tags.no_spell.clone();
         table.remove(&no_spell);
         table.add(&no_spell);

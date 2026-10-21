@@ -620,17 +620,22 @@ fn table_checks(r: &mut Report) {
         format!("{} grids, {:?}", grids.len(), grids.first().map(|g| g.cell_texts())),
     );
     let grid = Rc::clone(&grids[0]);
-    let em = theme().em() as i32;
-    let anchor_line = {
-        let offset = doc.model.borrow().source.to_buffer(start) - 1;
-        doc.view.line_yrange(&doc.buffer.iter_at_offset(offset)).1
+    // The grid sits between the lines around it, and within the column.
+    let line_bottom = |at: usize| {
+        let offset = doc.model.borrow().source.to_buffer(at);
+        let (y, h) = doc.view.line_yrange(&doc.buffer.iter_at_offset(offset));
+        y + h
     };
+    let line_top = |at: usize| doc.line_top(at);
     let (gw, gh) = (grid.widget.width(), grid.widget.height());
+    let gy = grid.widget.compute_bounds(&doc.view).map_or(-1.0, |b| b.y()) as i32;
+    let gy = doc.view.window_to_buffer_coords(gtk4::TextWindowType::Widget, 0, gy).1;
+    let (above, below) = (line_bottom(text.find("Intro").unwrap()), line_top(text.find("After").unwrap()));
     let column = doc.model.borrow().column_width;
     r.check(
-        "H2 the grid's line holds the grid and half an em each side, within the column",
-        gh > 3 * em && (anchor_line - (gh + em)).abs() <= 6 && gw <= column,
-        format!("grid {gw}x{gh}, line {anchor_line}, column {column}"),
+        "H2 the grid sits between the lines around it, within the column",
+        gh > 60 && gy >= above && gy + gh <= below && gw <= column,
+        format!("grid {gw}x{gh} at {gy}, line above ends {above}, line below starts {below}, column {column}"),
     );
     // The caret passes the table as one block.
     let anchor = doc.model.borrow().source.to_buffer(start) - 1;
