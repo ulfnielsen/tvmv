@@ -200,10 +200,12 @@ Measured by `tvmv --self-check` (headless, Broadway):
   and drags are handled by the view, not GTK. Found by hovering; reproduced by
   sweeping every point of a document (`TVMV_TRACE_HOVER=FILE tvmv
   --self-check`), now self-check H12.
-- **`TextView::remove` does not remove overlays** (GTK 4.14), and **overlays
-  don't move on scroll** (4.14 and 4.22) until their container is allocated,
-  which scrolling doesn't do. Cards sit in reused slots, and each scroll
-  queues the view and the container.
+- **Cards are not overlays.** GTK's overlay container covers the whole text
+  area and is picked for every click that misses an overlay, so the cells of
+  a table under it never got a click. (Overlays also don't move on scroll
+  until their container is allocated, and `TextView::remove` doesn't remove
+  them, in 4.14.) Cards sit in the view's right gutter, a `gtk::Fixed`,
+  placed again on every scroll.
 - **A press on an overlay reaches the text view,** which moves its caret:
   card clicks stop at the card.
 - **Ubuntu 26.04** (GTK 4.22, libspelling 0.4.9): a child anchor fires no
@@ -348,8 +350,8 @@ the fold in `layout.rs` (`ReviewLayout.swift`) and `ReviewOperations`
 git author from `ReviewCardView.swift` and `DocumentTextView+Review.swift`).
 The UI (`native/review_cards.rs`) differs from macOS as follows:
 
-- **Cards** are `TextView::add_overlay` children placed in buffer
-  coordinates in a column right of the text. The text column narrows to make
+- **Cards** are in the view's right gutter (a `gtk::Fixed`), placed in
+  line with their anchors, in a column right of the text. The text column narrows to make
   room, as on macOS. They are stacked with `review_ops::stack` and placed
   again after each frame drawn, since GTK lays out the lines above them in
   the background; only those whose place changed move.

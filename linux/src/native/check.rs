@@ -661,6 +661,29 @@ fn table_checks(r: &mut Report) {
     let over_cell = centre.is_some_and(|(x, y)| doc.over_child(x as f64, y as f64));
     let over_text = doc.over_child(10.0, 10.0);
     r.check("H3b a point over a cell is the cell's, one over the text is not", over_cell && !over_text, format!("{centre:?}"));
+    {
+        // With comments in the document too: their column once covered the
+        // text, cells included, and took their clicks.
+        let text = "A {==comment==}[^rv-aaaa] here.\n\n| A | B |\n|---|---|\n| one | two |\n\nAfter.\n\n[^rv-aaaa]: @x 2026-10-13: Hm.\n";
+        let (doc, window) = open(text, false);
+        settle();
+        until(Duration::from_millis(300), || false);
+        settle();
+        let cell = doc.table_grids().first().and_then(|g| g.cell(1, 0));
+        let picked = cell.as_ref().and_then(|c| {
+            let b = c.view.compute_bounds(&doc.view)?;
+            let mut w = doc.view.pick((b.x() + b.width() / 2.0) as f64, (b.y() + b.height() / 2.0) as f64, gtk4::PickFlags::DEFAULT);
+            while let Some(x) = w {
+                if x == *c.view.upcast_ref::<gtk4::Widget>() {
+                    return Some(true);
+                }
+                w = x.parent();
+            }
+            Some(false)
+        });
+        r.check("H3c with comments beside the text, a click over a cell reaches the cell", picked == Some(true), format!("{picked:?}"));
+        window.close();
+    }
     let cell = grid.cell(1, 0).unwrap();
     r.check("H4 cells are read-only until editing is on", !cell.is_editable(), "");
     doc.set_editable(true);
@@ -801,7 +824,7 @@ fn review_checks(r: &mut Report) {
         .iter()
         .filter_map(|c| c.widget.compute_bounds(&doc.view).map(|b| (b.x(), b.y(), b.y() + b.height())))
         .collect();
-    let text_end = (doc.view.width() - doc.view.right_margin()) as f32;
+    let text_end = (doc.view.left_margin() + doc.model.borrow().column_width) as f32;
     let beside = bounds.iter().all(|b| b.0 > text_end);
     let apart = bounds.windows(2).all(|w| w[0].2 <= w[1].1);
     let line = doc.view.buffer_to_window_coords(gtk4::TextWindowType::Widget, 0, doc.line_top(doc_text.find("cache").unwrap())).1 as f32;
@@ -1297,7 +1320,35 @@ fn trace_hover(path: &str) {
     window.close();
 }
 
+/// What a click over a table cell lands on (diagnostic:
+/// `TVMV_TRACE_PICK=1 tvmv --self-check`).
+fn trace_pick() {
+    let text = "A {==comment==}[^rv-aaaa] here.\n\n| A | B |\n|---|---|\n| one | two |\n\nAfter.\n\n[^rv-aaaa]: @x 2026-10-13: Hm.\n";
+    let (doc, window) = open(text, true);
+    settle();
+    until(Duration::from_millis(500), || false);
+    settle();
+    let grid = doc.table_grids()[0].clone();
+    let cell = grid.cell(1, 0).unwrap();
+    let b = cell.view.compute_bounds(&doc.view).unwrap();
+    let (x, y) = (b.x() + b.width() / 2.0, b.y() + b.height() / 2.0);
+    let mut w = doc.view.pick(x as f64, y as f64, gtk4::PickFlags::DEFAULT);
+    while let Some(widget) = w {
+        eprintln!("picked: {} {:?}", widget.type_().name(), widget.css_classes());
+        if widget == *doc.view.upcast_ref::<gtk4::Widget>() {
+            break;
+        }
+        w = widget.parent();
+    }
+    window.close();
+}
+
 pub fn run() -> glib::ExitCode {
+    if std::env::var_os("TVMV_TRACE_PICK").is_some() {
+        let _ = gtk4::init();
+        trace_pick();
+        return glib::ExitCode::SUCCESS;
+    }
     if let Ok(path) = std::env::var("TVMV_TRACE_HOVER") {
         let _ = gtk4::init();
         trace_hover(&path);

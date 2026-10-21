@@ -1033,9 +1033,7 @@ impl DocumentView {
         }
         let column = ReviewColumn::new(&self.me.upgrade().expect("a live view"));
         *self.review.borrow_mut() = Some(Rc::clone(&column));
-        // GTK 4.14 moves overlays only when the view is allocated, and
-        // scrolling doesn't allocate it: without this the cards stay put
-        // while the text scrolls under them.
+        // The cards are in the gutter, which doesn't scroll: they follow.
         let follow = |view: &TvmvView, column: &Rc<ReviewColumn>| {
             if let Some(adj) = view.vadjustment() {
                 let column = Rc::downgrade(column);

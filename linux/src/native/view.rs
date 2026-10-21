@@ -170,7 +170,6 @@ impl TvmvView {
         };
         // The comment column, when the document has one, takes its room on
         // the right; the text centres in what is left.
-        let total = width;
         let width = (width - reserve).max(1);
         let zero = self.text_width("0") as f64;
         // A measured column keeps a readable minimum; a full-width one (a
@@ -178,7 +177,9 @@ impl TvmvView {
         let available = (width as f64 - 2.0 * padding).max(if full { 1.0 } else { 200.0 });
         let column = if full { available } else { (measure * zero).min(available) };
         let x = padding.max((width as f64 - column) / 2.0).round() as i32;
-        let right = (total - x - column.round() as i32).max(0);
+        // The comment column is the view's right gutter, outside the text
+        // window: the right margin is what is left inside it.
+        let right = (width - x - column.round() as i32).max(0);
         if self.left_margin() != x {
             self.set_left_margin(x);
         }

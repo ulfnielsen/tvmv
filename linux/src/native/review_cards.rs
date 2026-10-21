@@ -2,8 +2,11 @@
 //! composer for a new comment or suggestion. A port of `ReviewCardView.swift`
 //! and the side-column half of `DocumentTextView+Review.swift`.
 //!
-//! Cards are overlays of the text view, in buffer coordinates, stacked beside
-//! their anchors' lines without overlapping (`review_ops::stack`). Only the
+//! Cards sit in the text view's right gutter, a `gtk::Fixed` beside the
+//! text, stacked beside their anchors' lines without overlapping
+//! (`review_ops::stack`) and placed again as the text scrolls. Not overlays:
+//! GTK's overlay container covers the whole text area and takes the clicks
+//! meant for what lies under it (a table's cells). Only the
 //! focused card (the caret is in its anchor, or it was clicked) shows its
 //! buttons and reply field, so the others stay compact by their lines.
 
@@ -300,35 +303,43 @@ impl Composer {
     }
 }
 
-/// An overlay of the text view holding a card or the composer, or nothing.
-struct Slot {
-    frame: gtk4::Box,
-    content: Option<gtk4::Widget>,
-    at: Option<(i32, i32)>,
-}
-
 pub struct ReviewColumn {
     host: Weak<DocumentView>,
     pub cards: RefCell<Vec<Rc<Card>>>,
     pub composer: RefCell<Option<Rc<Composer>>>,
     focused: RefCell<Option<String>>,
-    /// The overlays cards and the composer sit in, each with what it holds
-    /// and where it is. GTK 4.14's `TextView::remove` does not remove an
-    /// overlay (it warns "not a child"), so an overlay is never removed: a
-    /// card that goes empties its slot, and the next card reuses it.
-    slots: RefCell<Vec<Slot>>,
+    /// The right gutter the cards and the composer sit in.
+    gutter: gtk4::Fixed,
+    /// Where each card is in the gutter, so a layout moves only those that
+    /// changed.
+    placed: RefCell<Vec<(gtk4::Widget, i32, i32)>>,
     pending: Cell<bool>,
     me: Weak<ReviewColumn>,
 }
 
 impl ReviewColumn {
     pub fn new(host: &Rc<DocumentView>) -> Rc<ReviewColumn> {
+        let gutter = gtk4::Fixed::new();
+        gutter.set_size_request(COLUMN_WIDTH, -1);
+        // Clicks in the column are the cards': passed on, the text view
+        // would move its caret, out of the focused card's anchor, hiding the
+        // button being pressed before the click completes.
+        let clicks = gtk4::EventControllerLegacy::new();
+        clicks.connect_event(|_, event| {
+            use gtk4::gdk::EventType::*;
+            match event.event_type() {
+                ButtonPress | ButtonRelease | TouchBegin | TouchUpdate | TouchEnd | TouchCancel => glib::Propagation::Stop,
+                _ => glib::Propagation::Proceed,
+            }
+        });
+        gutter.add_controller(clicks);
         Rc::new_cyclic(|me| ReviewColumn {
             host: Rc::downgrade(host),
             cards: RefCell::default(),
             composer: RefCell::default(),
             focused: RefCell::default(),
-            slots: RefCell::default(),
+            gutter,
+            placed: RefCell::default(),
             pending: Cell::new(false),
             me: me.clone(),
         })
@@ -370,7 +381,18 @@ impl ReviewColumn {
             card.set_focused(focused.as_deref() == Some(card.id().as_str()));
         }
         *self.cards.borrow_mut() = cards;
+        self.sync_gutter(&host);
         self.queue_layout();
+    }
+
+    /// The gutter is there while there is something to show in it.
+    fn sync_gutter(&self, host: &DocumentView) {
+        let attached = self.gutter.parent().is_some();
+        if self.shows() && !attached {
+            host.view.set_gutter(gtk4::TextWindowType::Right, Some(&self.gutter));
+        } else if !self.shows() && attached {
+            host.view.set_gutter(gtk4::TextWindowType::Right, None::<&gtk4::Widget>);
+        }
     }
 
     /// Focus the card for `id` (none for `None`); `clicked` when from a click.
@@ -400,6 +422,7 @@ impl ReviewColumn {
         self.attach(&host, composer.widget.upcast_ref());
         let focus = composer.replacement.clone().unwrap_or_else(|| composer.body.clone());
         *self.composer.borrow_mut() = Some(composer);
+        self.sync_gutter(&host);
         host.review_column_changed();
         self.queue_layout();
         glib::idle_add_local_once(move || {
@@ -412,6 +435,7 @@ impl ReviewColumn {
         let Some(host) = self.host.upgrade() else { return };
         let had_focus = composer.widget.focus_child().is_some();
         self.detach(composer.widget.upcast_ref());
+        self.sync_gutter(&host);
         host.review_column_changed();
         self.queue_layout();
         if had_focus {
@@ -419,63 +443,20 @@ impl ReviewColumn {
         }
     }
 
-    /// The text scrolled. GTK 4.14 moves overlays only when their container
-    /// is allocated, which scrolling doesn't do; and allocating the view
-    /// alone passes the container the same rectangle, so it is skipped.
+    /// The text scrolled: the cards follow.
     pub fn scrolled(&self) {
-        // The view passes its scroll offset to the container as it is
-        // allocated; the container then places the overlays with it.
-        if let Some(host) = self.host.upgrade() {
-            host.view.queue_allocate();
-        }
-        if let Some(parent) = self.slots.borrow().first().and_then(|s| s.frame.parent()) {
-            parent.queue_allocate();
-        }
+        self.queue_layout();
     }
 
-    /// Put `content` in a free slot (a new overlay if none is free).
-    fn attach(&self, host: &DocumentView, content: &gtk4::Widget) {
-        let mut slots = self.slots.borrow_mut();
-        let i = match slots.iter().position(|s| s.content.is_none()) {
-            Some(i) => i,
-            None => {
-                let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
-                // Clicks on a card are the card's: passed on, the text view
-                // would move its caret to the click, out of the card's
-                // anchor, unfocusing the card and hiding the button being
-                // pressed before the click completes. Scrolling passes on.
-                let clicks = gtk4::EventControllerLegacy::new();
-                clicks.connect_event(|_, event| {
-                    use gtk4::gdk::EventType::*;
-                    match event.event_type() {
-                        ButtonPress | ButtonRelease | TouchBegin | TouchUpdate | TouchEnd | TouchCancel => {
-                            glib::Propagation::Stop
-                        }
-                        _ => glib::Propagation::Proceed,
-                    }
-                });
-                frame.add_controller(clicks);
-                host.view.add_overlay(&frame, 0, 0);
-                slots.push(Slot { frame, content: None, at: None });
-                slots.len() - 1
-            }
-        };
-        let slot = &mut slots[i];
-        slot.frame.append(content);
-        slot.frame.set_visible(true);
-        slot.content = Some(content.clone());
-        slot.at = None;
+    fn attach(&self, _host: &DocumentView, content: &gtk4::Widget) {
+        self.gutter.put(content, 0.0, 0.0);
     }
 
-    /// Take `content` out of its slot, which hides until reused.
     fn detach(&self, content: &gtk4::Widget) {
-        for slot in self.slots.borrow_mut().iter_mut() {
-            if slot.content.as_ref() == Some(content) {
-                slot.frame.remove(content);
-                slot.frame.set_visible(false);
-                slot.content = None;
-            }
+        if content.parent().as_ref() == Some(self.gutter.upcast_ref()) {
+            self.gutter.remove(content);
         }
+        self.placed.borrow_mut().retain(|(w, _, _)| w != content);
     }
 
     pub fn queue_layout(&self) {
@@ -495,9 +476,7 @@ impl ReviewColumn {
     pub fn layout(&self) {
         let Some(host) = self.host.upgrade() else { return };
         let view = &host.view;
-        let column_end = view.width() - view.right_margin();
-        let x = column_end + GAP;
-        let width = (CARD_WIDTH + 20).min(view.width() - x - RIGHT_MARGIN).max(200);
+        let (x, width) = (GAP, CARD_WIDTH);
         let mut items: Vec<(usize, gtk4::Widget, bool)> =
             self.cards.borrow().iter().map(|c| (c.model.borrow().anchor, c.widget.clone().upcast(), c.is_focused())).collect();
         if let Some(c) = self.composer.borrow().as_ref() {
@@ -518,18 +497,26 @@ impl ReviewColumn {
             .position(|i| Some(&i.1) == composer.as_ref())
             .or_else(|| items.iter().position(|i| i.2));
         let tops = crate::review_ops::stack(&measured, pinned, STACK_GAP, view.top_margin());
-        let mut slots = self.slots.borrow_mut();
+        let mut placed = self.placed.borrow_mut();
         let mut bottom = 0;
         for ((_, widget, _), (&y, &(_, h))) in items.iter().zip(tops.iter().zip(measured.iter())) {
             bottom = bottom.max(y + h);
-            if let Some(slot) = slots.iter_mut().find(|s| s.content.as_ref() == Some(widget))
-                && slot.at != Some((x, y))
-            {
-                view.move_overlay(&slot.frame, x, y);
-                slot.at = Some((x, y));
+            // Buffer coordinates to the gutter's, which don't scroll.
+            let (_, gy) = view.buffer_to_window_coords(gtk4::TextWindowType::Right, 0, y);
+            match placed.iter_mut().find(|(w, _, _)| w == widget) {
+                Some(entry) if entry.1 == x && entry.2 == gy => {}
+                Some(entry) => {
+                    self.gutter.move_(widget, x as f64, gy as f64);
+                    entry.1 = x;
+                    entry.2 = gy;
+                }
+                None => {
+                    self.gutter.move_(widget, x as f64, gy as f64);
+                    placed.push((widget.clone(), x, gy));
+                }
             }
         }
-        drop(slots);
+        drop(placed);
         host.reserve_bottom(bottom);
     }
 }

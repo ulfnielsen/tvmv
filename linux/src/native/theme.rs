@@ -131,6 +131,7 @@ impl NativeTheme {
         format!(
             "textview.tvmv-native {{ font-family: \"{body}\", serif; font-size: {size}px; line-height: {lh}; color: {ink}; }}\n\
              textview.tvmv-native text {{ background-color: {paper}; color: {ink}; caret-color: {ink}; }}\n\
+             textview.tvmv-native border {{ background-color: {paper}; }}\n\
              textview.tvmv-native text selection {{ background-color: {selection}; color: {ink}; }}\n\
              grid.tvmv-table {{ border-top: 1px solid {rule}; border-left: 1px solid {rule}; }}\n\
              textview.tvmv-native.tvmv-cell {{ line-height: 1.3; background-color: transparent; \
