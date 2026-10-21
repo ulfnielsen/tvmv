@@ -2173,6 +2173,12 @@ impl DocumentView {
             if doc.preedit.get() {
                 return glib::Propagation::Proceed;
             }
+            // In the capture phase this sees the keys of whatever has focus
+            // inside the view too: a table cell, a card's reply field. Those
+            // are theirs.
+            if !doc.view.has_focus() {
+                return glib::Propagation::Proceed;
+            }
             let mods = state & (gdk::ModifierType::CONTROL_MASK | gdk::ModifierType::SHIFT_MASK | gdk::ModifierType::ALT_MASK);
             let ctrl = gdk::ModifierType::CONTROL_MASK;
             let shift = gdk::ModifierType::SHIFT_MASK;
@@ -2291,6 +2297,9 @@ impl DocumentView {
             let Some(point) = native.compute_point(&doc.view, &at) else {
                 return glib::Propagation::Proceed;
             };
+            if doc.over_child(point.x() as f64, point.y() as f64) {
+                return glib::Propagation::Proceed;
+            }
             let (_, by) = doc.view.window_to_buffer_coords(gtk4::TextWindowType::Widget, point.x() as i32, point.y() as i32);
             if !doc.below_risky_end(by) {
                 return glib::Propagation::Proceed;
@@ -2311,6 +2320,22 @@ impl DocumentView {
         self.view.add_controller(guard);
     }
 
+    /// Whether widget point (`x`, `y`) is over a table grid or a comment
+    /// card: their events are theirs, not the text's.
+    pub(crate) fn over_child(&self, x: f64, y: f64) -> bool {
+        let mut widget = self.view.pick(x, y, gtk4::PickFlags::DEFAULT);
+        while let Some(w) = widget {
+            if w == *self.view.upcast_ref::<gtk4::Widget>() {
+                return false;
+            }
+            if w.has_css_class("tvmv-table") || w.has_css_class("tvmv-card") {
+                return true;
+            }
+            widget = w.parent();
+        }
+        false
+    }
+
     fn connect_pointer(&self) {
         self.guard_below_end();
         let click = gtk4::GestureClick::new();
@@ -2319,6 +2344,9 @@ impl DocumentView {
         let me = self.me.clone();
         click.connect_pressed(move |gesture, n_press, x, y| {
             let Some(doc) = me.upgrade() else { return };
+            if doc.over_child(x, y) {
+                return;
+            }
             if n_press == 1 {
                 let Some((_, (bx, by))) = doc.source_at(x, y) else { return };
                 let task = {
@@ -2342,6 +2370,9 @@ impl DocumentView {
         let me = self.me.clone();
         click.connect_released(move |gesture, n_press, x, y| {
             let Some(doc) = me.upgrade() else { return };
+            if doc.over_child(x, y) {
+                return;
+            }
             let ctrl = gesture.current_event_state().contains(gdk::ModifierType::CONTROL_MASK);
             if n_press != 1 || doc.buffer.has_selection() || (doc.is_editable() && !ctrl) {
                 return;
@@ -2358,6 +2389,9 @@ impl DocumentView {
         let me = self.me.clone();
         motion.connect_motion(move |_, x, y| {
             let Some(doc) = me.upgrade() else { return };
+            if doc.over_child(x, y) {
+                return;
+            }
             let over_link = doc.source_at(x, y).and_then(|(at, _)| doc.link_at(at)).is_some();
             let name = if over_link && !doc.is_editable() { "pointer" } else { "text" };
             doc.view.set_cursor_from_name(Some(name));

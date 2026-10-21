@@ -656,6 +656,11 @@ fn table_checks(r: &mut Report) {
         (x - doc.view.left_margin() as f32).abs() <= 1.0,
         format!("grid at {x}, text at {}", doc.view.left_margin()),
     );
+    // Clicks and keys over a cell are the cell's, not the document's.
+    let centre = grid.cell(1, 0).and_then(|c| c.view.compute_bounds(&doc.view)).map(|b| (b.x() + b.width() / 2.0, b.y() + b.height() / 2.0));
+    let over_cell = centre.is_some_and(|(x, y)| doc.over_child(x as f64, y as f64));
+    let over_text = doc.over_child(10.0, 10.0);
+    r.check("H3b a point over a cell is the cell's, one over the text is not", over_cell && !over_text, format!("{centre:?}"));
     let cell = grid.cell(1, 0).unwrap();
     r.check("H4 cells are read-only until editing is on", !cell.is_editable(), "");
     doc.set_editable(true);

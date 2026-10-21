@@ -49,6 +49,17 @@ impl TableGrid {
     pub fn new(host: &Rc<DocumentView>) -> Rc<TableGrid> {
         let widget = gtk4::Grid::new();
         widget.add_css_class("tvmv-table");
+        // Clicks in the grid are its cells': passed on, the document's text
+        // view would take the focus back and move its own caret there.
+        let clicks = gtk4::EventControllerLegacy::new();
+        clicks.connect_event(|_, event| {
+            use gtk4::gdk::EventType::*;
+            match event.event_type() {
+                ButtonPress | ButtonRelease | TouchBegin | TouchUpdate | TouchEnd | TouchCancel => glib::Propagation::Stop,
+                _ => glib::Propagation::Proceed,
+            }
+        });
+        widget.add_controller(clicks);
         widget.set_halign(gtk4::Align::Start);
         Rc::new_cyclic(|me| TableGrid {
             widget,
