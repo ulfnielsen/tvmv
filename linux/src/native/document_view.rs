@@ -34,6 +34,7 @@ use crate::layout::{BlockImage, Heading, Style, encloses};
 use crate::offsets::SourceText;
 
 use super::styler::{Prepared, Styler};
+use super::table_grid::TableGrid;
 use super::theme::NativeTheme;
 use super::undo::{Change, UndoStack};
 use super::view::TvmvView;
@@ -98,6 +99,35 @@ impl Model {
     }
 }
 
+pub type EditCallback = Box<dyn Fn(Range<usize>, &str)>;
+
+/// How a table cell's view reaches its grid.
+pub struct CellHooks {
+    /// The cell's source `range` was replaced by `inserted`.
+    pub on_edit: EditCallback,
+    /// A key the grid handles; whether it did.
+    pub on_key: Box<dyn Fn(CellKey) -> bool>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CellKey {
+    Next,
+    Previous,
+    Down,
+    Undo,
+    Redo,
+    Reveal,
+}
+
+/// A cell edit waiting for the layout it was made against.
+struct CellEdit {
+    start: usize,
+    row: usize,
+    column: usize,
+    range: Range<usize>,
+    inserted: String,
+}
+
 type Callback = Box<dyn Fn()>;
 type LinkCallback = Box<dyn Fn(&str)>;
 
@@ -107,7 +137,6 @@ pub struct DocumentView {
     pub model: Rc<RefCell<Model>>,
     styler: Styler,
     undo: RefCell<UndoStack>,
-    css: gtk4::CssProvider,
     me: Weak<DocumentView>,
 
     /// Our own buffer swaps (soft breaks, loading): not mirrored, not recorded.
@@ -161,6 +190,20 @@ pub struct DocumentView {
     /// Spell checking (libspelling), on the source buffer. It skips text
     /// tagged no-spell-check by the styler.
     pub spelling: libspelling::TextBufferAdapter,
+    /// Table grids, in source order, each on its anchor.
+    grids: RefCell<Vec<(gtk4::TextChildAnchor, Rc<TableGrid>)>>,
+    /// The anchor's line: half an em above and below the grid.
+    table_line: gtk4::TextTag,
+    /// When this view is a table cell: how it reaches its grid.
+    cell: RefCell<Option<CellHooks>>,
+    /// Cell edits made while the layout was older than the text.
+    pending_cell_edits: RefCell<Vec<CellEdit>>,
+    /// More context-menu items (a cell's table commands).
+    extra_menu: RefCell<Option<gtk4::gio::MenuModel>>,
+    /// A grid row's height as last measured; placeholders use it.
+    table_row_height: Cell<i32>,
+    /// Building and dropping grids around the screen is queued.
+    grids_pending: Cell<bool>,
 }
 
 /// Where the first-screen parse of a large document stops: the first blank
@@ -214,12 +257,15 @@ impl DocumentView {
         spelling.set_enabled(true);
         view.insert_action_group("spelling", Some(&spelling));
         let styler = Styler::new(&buffer, &theme);
+        let theme_em = theme.em();
         // Added after the styler's tags, so a match shows over any style.
         let find_tag = gtk4::TextTag::new(Some("find"));
         let find_current_tag = gtk4::TextTag::new(Some("find-current"));
         buffer.tag_table().add(&find_tag);
         buffer.tag_table().add(&find_current_tag);
         let scroll_mark = buffer.create_mark(None, &buffer.start_iter(), true);
+        let table_line = gtk4::TextTag::new(None);
+        buffer.tag_table().add(&table_line);
         let model = Rc::new(RefCell::new(Model {
             source: SourceText::new(String::new()),
             prepared: Rc::new(Prepared::default()),
@@ -231,17 +277,12 @@ impl DocumentView {
             column_width: 0,
         }));
         view.set_model(Rc::clone(&model));
-        let css = gtk4::CssProvider::new();
-        if let Some(display) = gdk::Display::default() {
-            gtk4::style_context_add_provider_for_display(&display, &css, gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION);
-        }
         let doc = Rc::new_cyclic(|me| DocumentView {
             view,
             buffer,
             model,
             styler,
             undo: RefCell::new(UndoStack::default()),
-            css,
             me: me.clone(),
             syncing: Cell::new(false),
             replaying: Cell::new(false),
@@ -274,7 +315,15 @@ impl DocumentView {
             max_image_bytes: Cell::new(images::MAX_BYTES),
             max_image_pixels: Cell::new(images::MAX_PIXELS),
             spelling,
+            grids: RefCell::default(),
+            table_line,
+            cell: RefCell::new(None),
+            pending_cell_edits: RefCell::default(),
+            extra_menu: RefCell::new(None),
+            table_row_height: Cell::new((theme_em * 2.45).round() as i32),
+            grids_pending: Cell::new(false),
         });
+        doc.shape_table_line();
         doc.color_find_tags();
         doc.apply_css();
         doc.set_editable(false);
@@ -307,6 +356,9 @@ impl DocumentView {
         self.view.set_editable(editable);
         self.view.set_cursor_visible(editable);
         self.update_spelling_menu();
+        for (_, grid) in self.grids.borrow().iter() {
+            grid.set_editable(editable);
+        }
     }
 
     /// Turn spell checking on or off (Settings → Check spelling).
@@ -320,8 +372,21 @@ impl DocumentView {
     /// Misspellings show while reading too, as on macOS; the corrections
     /// change the text, so they are offered only while editing.
     fn update_spelling_menu(&self) {
-        let offer = self.view.is_editable() && self.spelling.is_enabled();
-        self.view.set_extra_menu(offer.then(|| self.spelling.menu_model()).as_ref());
+        let editable = self.view.is_editable();
+        let menu = gtk4::gio::Menu::new();
+        if editable && self.spelling.is_enabled() {
+            menu.append_section(None, &self.spelling.menu_model());
+        }
+        if let Some(extra) = self.extra_menu.borrow().as_ref().filter(|_| editable) {
+            menu.append_section(None, extra);
+        }
+        self.view.set_extra_menu((menu.n_items() > 0).then_some(menu).as_ref());
+    }
+
+    /// More context-menu items, shown while editing.
+    pub fn set_extra_menu(&self, menu: Option<gtk4::gio::MenuModel>) {
+        *self.extra_menu.borrow_mut() = menu;
+        self.update_spelling_menu();
     }
 
     pub fn is_loaded(&self) -> bool {
@@ -332,8 +397,30 @@ impl DocumentView {
         self.model.borrow().show_all
     }
 
+    /// The theme's stylesheet. One provider serves every view (a table's
+    /// cells are views too): providers are display-wide, and settings are
+    /// global, so all views share one theme.
     fn apply_css(&self) {
-        self.css.load_from_string(&self.model.borrow().theme.css());
+        thread_local! {
+            static CSS: (gtk4::CssProvider, RefCell<String>) = {
+                let provider = gtk4::CssProvider::new();
+                if let Some(display) = gdk::Display::default() {
+                    gtk4::style_context_add_provider_for_display(
+                        &display,
+                        &provider,
+                        gtk4::STYLE_PROVIDER_PRIORITY_APPLICATION,
+                    );
+                }
+                (provider, RefCell::new(String::new()))
+            };
+        }
+        let css = self.model.borrow().theme.css();
+        CSS.with(|(provider, loaded)| {
+            if *loaded.borrow() != css {
+                provider.load_from_string(&css);
+                *loaded.borrow_mut() = css;
+            }
+        });
     }
 
     pub fn set_theme(&self, theme: NativeTheme) {
@@ -343,6 +430,7 @@ impl DocumentView {
         self.styler.set_theme(&theme);
         self.model.borrow_mut().theme = theme;
         self.color_find_tags();
+        self.shape_table_line();
         self.apply_css();
         self.view.queue_resize();
         self.restyle_all();
@@ -407,6 +495,8 @@ impl DocumentView {
     }
 
     fn set_buffer_text(&self, display: &str) {
+        // Replacing the text removes every anchor, and its grid with it.
+        self.grids.borrow_mut().clear();
         self.syncing.set(true);
         self.buffer.set_text(display);
         self.buffer.place_cursor(&self.buffer.start_iter());
@@ -652,6 +742,12 @@ impl DocumentView {
         });
         let view = self.view.clone();
         let me = self.me.clone();
+        let me_drawn = self.me.clone();
+        self.view.set_on_drawn(move |visible| {
+            if let Some(doc) = me_drawn.upgrade() {
+                doc.grids_on_screen(visible);
+            }
+        });
         self.view.set_on_column(move |x, width| {
             if let Some(doc) = me.upgrade() {
                 doc.styler.set_column_x(x);
@@ -674,10 +770,14 @@ impl DocumentView {
             (model.source.insert(offset, text), old_len)
         };
         self.note_edit(at..at, old_len);
-        if !self.replaying.get() {
+        let is_cell = self.cell.borrow().is_some();
+        if !self.replaying.get() && !is_cell {
             let caret_before = self.model.borrow().source.to_source(caret.min(offset));
             let change = Change { range: at..at, removed: String::new(), inserted: text.to_string() };
             self.undo.borrow_mut().record(change, caret_before.min(at), at + text.len());
+        }
+        if let Some(hooks) = self.cell.borrow().as_ref() {
+            (hooks.on_edit)(at..at, text);
         }
         self.edited();
     }
@@ -696,7 +796,11 @@ impl DocumentView {
             (source_range, removed, old_len)
         };
         self.note_edit(source_range.clone(), old_len);
-        if !self.replaying.get() {
+        let is_cell = self.cell.borrow().is_some();
+        if let Some(hooks) = self.cell.borrow().as_ref() {
+            (hooks.on_edit)(source_range.clone(), "");
+        }
+        if !self.replaying.get() && !is_cell {
             let caret_before = if caret >= range.end { source_range.end } else { source_range.start };
             let start = source_range.start;
             self.undo.borrow_mut().record(Change { range: source_range, removed, inserted: String::new() }, caret_before, start);
@@ -785,6 +889,8 @@ impl DocumentView {
     }
 
     fn notify_layout(&self) {
+        self.flush_cell_edits();
+        self.sync_tables();
         self.request_images();
         self.view.queue_draw();
         if let Some(f) = self.on_layout.borrow().as_ref() {
@@ -856,9 +962,226 @@ impl DocumentView {
             &width,
             &image_height,
         );
+        // Restyling clears the anchors' line tag where it starts before them.
+        let anchors = model.source.anchors();
+        let from = anchors.partition_point(|&a| a < range.start);
+        for &at in anchors[from..].iter().take_while(|&&a| a <= range.end) {
+            let after = model.source.to_buffer(at);
+            self.buffer.apply_tag(&self.table_line, &self.buffer.iter_at_offset(after - 1), &self.buffer.iter_at_offset(after));
+        }
         // Styling clears every tag in the range, find's too.
         self.tag_matches(&model, range);
         self.view.queue_draw();
+    }
+
+    // MARK: Tables
+
+    fn shape_table_line(&self) {
+        let half = (self.model.borrow().theme.em() / 2.0).round() as i32;
+        self.table_line.set_pixels_above_lines(half);
+        self.table_line.set_pixels_below_lines(half);
+    }
+
+    /// Make this view a table cell: its edits go to `hooks` and it keeps no
+    /// undo of its own (the document's covers them).
+    pub fn set_cell_hooks(&self, hooks: CellHooks) {
+        *self.cell.borrow_mut() = Some(hooks);
+    }
+
+    /// Follow a link from the document, or from one of its cells.
+    pub fn follow_link(&self, url: &str) {
+        if let Some(f) = self.on_follow_link.borrow().as_ref() {
+            f(url);
+        }
+    }
+
+    /// The width the visible text takes on one line, in pixels.
+    pub fn natural_width(&self) -> i32 {
+        let (start, end) = self.buffer.bounds();
+        let shown = self.buffer.text(&start, &end, false);
+        shown.lines().map(|line| self.view.text_width(line)).max().unwrap_or(0)
+    }
+
+    /// The grids, in source order (diagnostics and tests).
+    pub fn table_grids(&self) -> Vec<Rc<TableGrid>> {
+        self.grids.borrow().iter().map(|(_, g)| Rc::clone(g)).collect()
+    }
+
+    /// The table starting at source offset `start`, if the layout is current.
+    fn table_at(&self, start: usize) -> Option<crate::layout::Table> {
+        let model = self.model.borrow();
+        if model.prepared.layout.length != model.source.text().len() {
+            return None;
+        }
+        model.prepared.layout.tables.iter().find(|t| t.range.start == start).cloned()
+    }
+
+    /// Apply an edit of cell (`row`, `column`) of the table at `start`: its
+    /// source `range` replaced by `inserted`. Waits for the layout when a
+    /// parse is still on its way, so the cell's range is the current one.
+    pub fn apply_cell_edit(&self, start: usize, row: usize, column: usize, range: Range<usize>, inserted: &str) {
+        let edit = CellEdit { start, row, column, range, inserted: inserted.to_string() };
+        if !self.pending_cell_edits.borrow().is_empty() || self.table_at(start).is_none() {
+            self.pending_cell_edits.borrow_mut().push(edit);
+            return;
+        }
+        self.apply_one_cell_edit(edit);
+    }
+
+    fn apply_one_cell_edit(&self, edit: CellEdit) -> bool {
+        let Some(table) = self.table_at(edit.start) else { return false };
+        if edit.row >= table.rows.len() || edit.column >= table.rows[edit.row].len() {
+            return true;
+        }
+        let e = crate::table_source::cell_edit(&table, edit.row, edit.column, edit.range, &edit.inserted);
+        self.replace(e.range, &e.insert);
+        true
+    }
+
+    /// Apply cell edits that waited for this layout, as far as it allows.
+    fn flush_cell_edits(&self) {
+        loop {
+            let Some(edit) = (!self.pending_cell_edits.borrow().is_empty()).then(|| self.pending_cell_edits.borrow_mut().remove(0))
+            else {
+                return;
+            };
+            // The first edit of a burst lands against the current layout; the
+            // rest wait for the parse it causes (a synchronous one runs inside
+            // `replace`, and comes back here).
+            let start = edit.start;
+            if self.table_at(start).is_none() {
+                self.pending_cell_edits.borrow_mut().insert(0, edit);
+                return;
+            }
+            self.apply_one_cell_edit(edit);
+        }
+    }
+
+    /// Run a table command from cell (`row`, `column`) of the table at
+    /// `start`. Whether it changed anything.
+    pub fn perform_table_command(&self, start: usize, command: crate::table_source::Command, row: usize, column: usize) -> bool {
+        let Some(table) = self.table_at(start) else { return false };
+        let Some(edit) = command.edit(&table, &self.text(), row, column) else { return false };
+        self.replace(edit.range, &edit.insert);
+        true
+    }
+
+    /// Show the source of the table at `start` (from one of its cells).
+    pub fn reveal_table(&self, start: usize) {
+        let Some(table) = self.table_at(start) else { return };
+        self.view.grab_focus();
+        self.set_caret(table.range.start);
+        self.set_revealed_units(vec![table.range], false);
+    }
+
+    /// Give every table not revealed a grid on an anchor before its first
+    /// character, and drop the grids of tables that went or are revealed.
+    fn sync_tables(&self) {
+        if !self.loaded.get() || self.cell.borrow().is_some() {
+            return;
+        }
+        let (wanted, len) = {
+            let model = self.model.borrow();
+            let len = model.source.text().len();
+            if model.prepared.layout.length != len {
+                return;
+            }
+            let wanted: Vec<crate::layout::Table> =
+                model.prepared.layout.tables.iter().filter(|t| !model.is_revealed(&t.range) && t.range.end <= len).cloned().collect();
+            (wanted, len)
+        };
+        let _ = len;
+        // Drop the grids whose anchor an edit removed, or whose table went.
+        let mut keep: Vec<(gtk4::TextChildAnchor, Rc<TableGrid>, usize)> = Vec::new();
+        for (anchor, grid) in self.grids.borrow_mut().drain(..) {
+            if anchor.is_deleted() {
+                continue;
+            }
+            let offset = self.buffer.iter_at_child_anchor(&anchor).offset();
+            let at = self.model.borrow().source.to_source(offset);
+            if wanted.iter().any(|t| t.range.start == at) && !keep.iter().any(|k| k.2 == at) {
+                keep.push((anchor, grid, at));
+            } else {
+                self.syncing.set(true);
+                let mut a = self.buffer.iter_at_offset(offset);
+                let mut b = self.buffer.iter_at_offset(offset + 1);
+                self.buffer.delete(&mut a, &mut b);
+                self.syncing.set(false);
+                self.model.borrow_mut().source.remove_anchor(at);
+            }
+        }
+        let me = self.me.upgrade().expect("a live view");
+        let mut inserted = false;
+        for table in &wanted {
+            if keep.iter().any(|k| k.2 == table.range.start) {
+                continue;
+            }
+            inserted = true;
+            let start = table.range.start;
+            self.syncing.set(true);
+            let mut iter = self.buffer.iter_at_offset(self.model.borrow().source.to_buffer(start));
+            let anchor = self.buffer.create_child_anchor(&mut iter);
+            self.syncing.set(false);
+            self.model.borrow_mut().source.add_anchor(start);
+            let after = self.model.borrow().source.to_buffer(start);
+            self.buffer.apply_tag(&self.table_line, &self.buffer.iter_at_offset(after - 1), &self.buffer.iter_at_offset(after));
+            let grid = TableGrid::new(&me);
+            self.view.add_child_at_anchor(&grid.widget, &anchor);
+            keep.push((anchor, grid, start));
+        }
+        keep.sort_by_key(|k| k.2);
+        // libspelling 0.2 follows the buffer's length through insert-text and
+        // delete-range only, so an anchor leaves it one short, and a later
+        // delete near the end fails its assertion and aborts. Turning it off
+        // and on re-reads the length (one long, which is harmless).
+        if inserted && self.spelling.is_enabled() {
+            self.spelling.set_enabled(false);
+            self.spelling.set_enabled(true);
+        }
+        let editable = self.is_editable();
+        let row_height = self.table_row_height.get();
+        {
+            let model = self.model.borrow();
+            let (text, theme, width) = (model.source.text(), &model.theme, model.column_width);
+            for (_, grid, at) in &keep {
+                if let Some(table) = wanted.iter().find(|t| t.range.start == *at) {
+                    grid.update(table, text, theme, width, editable, row_height);
+                }
+            }
+        }
+        *self.grids.borrow_mut() = keep.into_iter().map(|(a, g, _)| (a, g)).collect();
+        self.view.queue_draw();
+    }
+
+    /// Build the grids near the screen and drop those far from it, once the
+    /// frame that showed `visible` is done.
+    fn grids_on_screen(&self, visible: Range<usize>) {
+        if self.grids.borrow().is_empty() || self.grids_pending.replace(true) {
+            return;
+        }
+        let me = self.me.clone();
+        glib::idle_add_local_once(move || {
+            let Some(doc) = me.upgrade() else { return };
+            doc.grids_pending.set(false);
+            let span = visible.len().max(4096);
+            let near = visible.start.saturating_sub(span)..visible.end + span;
+            let far = visible.start.saturating_sub(4 * span)..visible.end + 4 * span;
+            let editable = doc.is_editable();
+            let grids = doc.table_grids();
+            let model = doc.model.borrow();
+            let (text, theme, width) = (model.source.text(), &model.theme, model.column_width);
+            for grid in grids {
+                let at = grid.start.get();
+                if near.contains(&at) {
+                    grid.build(text, theme, width, editable);
+                    if let Some(h) = grid.row_height() {
+                        doc.table_row_height.set(h);
+                    }
+                } else if !far.contains(&at) {
+                    grid.unbuild(doc.table_row_height.get(), width);
+                }
+            }
+        });
     }
 
     // MARK: Images
@@ -977,6 +1300,7 @@ impl DocumentView {
         let me = self.me.clone();
         glib::idle_add_local_once(move || {
             let Some(doc) = me.upgrade() else { return };
+            doc.sync_tables();
             let model = Rc::clone(&doc.model);
             doc.restyle_images(|image| {
                 model.borrow().images.get(&image.url).is_some_and(|i| i.state == ImageState::Loaded)
@@ -1139,9 +1463,14 @@ impl DocumentView {
         }
         let target = {
             let model = self.model.borrow();
-            let at = model.source.to_source(offset);
-            let snapped = edit_rules::snap_caret(at, forward, model.source.text(), |b| self.is_hidden(&model, b));
-            (snapped != at).then(|| model.source.to_buffer(snapped))
+            match self.past_grid(&model, offset, forward) {
+                Some(target) => Some(target),
+                None => {
+                    let at = model.source.to_source(offset);
+                    let snapped = edit_rules::snap_caret(at, forward, model.source.text(), |b| self.is_hidden(&model, b));
+                    (snapped != at).then(|| model.source.to_buffer(snapped))
+                }
+            }
         };
         let offset = match target {
             Some(target) => {
@@ -1154,6 +1483,27 @@ impl DocumentView {
         };
         self.prev_caret.set(offset);
         self.selection_changed();
+    }
+
+    /// A caret beside a grid's anchor would type into the table's hidden
+    /// source: it passes the table as one block instead, as on macOS. The
+    /// buffer offset to move to, if `offset` is there.
+    fn past_grid(&self, model: &Model, offset: i32, forward: bool) -> Option<i32> {
+        let anchor = if model.source.is_anchor(offset) {
+            offset
+        } else if offset > 0 && model.source.is_anchor(offset - 1) {
+            offset - 1
+        } else {
+            return None;
+        };
+        let start = model.source.to_source(anchor);
+        let table = model.prepared.layout.tables.iter().find(|t| t.range.start == start)?;
+        if !forward {
+            return Some((anchor - 1).max(0));
+        }
+        let text = model.source.text();
+        let end = if text.as_bytes().get(table.range.end) == Some(&b'\n') { table.range.end + 1 } else { table.range.end };
+        Some(model.source.to_buffer(end))
     }
 
     /// Backspace (`forward` false) or Delete over hidden markup: apply the
@@ -1234,6 +1584,7 @@ impl DocumentView {
             model.show_all = !model.show_all;
         }
         self.restyle_all();
+        self.sync_tables();
     }
 
     fn set_revealed_units(&self, units: Vec<Range<usize>>, keep_revealing: bool) {
@@ -1250,6 +1601,7 @@ impl DocumentView {
         if let Some(touched) = touched {
             self.restyle(touched);
         }
+        self.sync_tables();
     }
 
     /// Selection moved: a reveal ends once the selection leaves every revealed unit.
@@ -1470,6 +1822,21 @@ impl DocumentView {
             let ctrl = gdk::ModifierType::CONTROL_MASK;
             let shift = gdk::ModifierType::SHIFT_MASK;
             let alt = gdk::ModifierType::ALT_MASK;
+            if let Some(hooks) = doc.cell.borrow().as_ref() {
+                let cell_key = match (key.to_lower(), mods) {
+                    (gdk::Key::Tab, m) if m.is_empty() => Some(CellKey::Next),
+                    (gdk::Key::ISO_Left_Tab, _) | (gdk::Key::Tab, _) if mods == shift => Some(CellKey::Previous),
+                    (gdk::Key::Return | gdk::Key::KP_Enter, m) if m.is_empty() => Some(CellKey::Down),
+                    (gdk::Key::z, m) if m == ctrl => Some(CellKey::Undo),
+                    (gdk::Key::z, m) if m == ctrl | shift => Some(CellKey::Redo),
+                    (gdk::Key::y, m) if m == ctrl => Some(CellKey::Redo),
+                    (gdk::Key::apostrophe, m) if m == ctrl => Some(CellKey::Reveal),
+                    _ => None,
+                };
+                if let Some(cell_key) = cell_key {
+                    return if (hooks.on_key)(cell_key) { glib::Propagation::Stop } else { glib::Propagation::Proceed };
+                }
+            }
             let key = key.to_lower();
             let handled = match (key, mods) {
                 (gdk::Key::Return | gdk::Key::KP_Enter, m) if m.is_empty() => doc.insert_newline(),
@@ -1566,9 +1933,7 @@ impl DocumentView {
             }
             let Some((at, _)) = doc.source_at(x, y) else { return };
             if let Some(url) = doc.link_at(at) {
-                if let Some(f) = doc.on_follow_link.borrow().as_ref() {
-                    f(&url);
-                }
+                doc.follow_link(&url);
             }
         });
         self.view.add_controller(click);

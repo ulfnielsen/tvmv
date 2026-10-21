@@ -121,20 +121,30 @@ impl NativeTheme {
     /// Body line height (app.css 1.7).
     pub const LINE_HEIGHT: f32 = 1.7;
 
-    /// The view's stylesheet: base font, paper, ink, caret and selection.
+    /// The view's stylesheet: base font, paper, ink, caret and selection,
+    /// and a table grid's rules, header and cells.
     pub fn css(&self) -> String {
         let mut selection = self.accent;
         selection.set_alpha(0.18);
+        let mut rule = self.muted;
+        rule.set_alpha(0.35);
         format!(
             "textview.tvmv-native {{ font-family: \"{body}\", serif; font-size: {size}px; line-height: {lh}; color: {ink}; }}\n\
              textview.tvmv-native text {{ background-color: {paper}; color: {ink}; caret-color: {ink}; }}\n\
-             textview.tvmv-native text selection {{ background-color: {selection}; color: {ink}; }}\n",
+             textview.tvmv-native text selection {{ background-color: {selection}; color: {ink}; }}\n\
+             grid.tvmv-table {{ border-top: 1px solid {rule}; border-left: 1px solid {rule}; }}\n\
+             textview.tvmv-native.tvmv-cell {{ line-height: 1.3; background-color: transparent; \
+               border-right: 1px solid {rule}; border-bottom: 1px solid {rule}; }}\n\
+             textview.tvmv-native.tvmv-cell text {{ background-color: transparent; }}\n\
+             textview.tvmv-native.tvmv-cell-header {{ background-color: {deep}; font-weight: bold; }}\n",
             body = self.body_family.replace('"', ""),
             size = self.size,
             lh = Self::LINE_HEIGHT,
             paper = css_color(&self.paper),
             ink = css_color(&self.ink),
             selection = css_color(&selection),
+            rule = css_color(&rule),
+            deep = css_color(&self.paper_deep),
         )
     }
 }

@@ -119,6 +119,18 @@ impl SourceText {
         self.anchors.insert(i, byte);
     }
 
+    /// Forget the anchor before source offset `byte` (one the view removed
+    /// from the buffer itself). Whether there was one.
+    pub fn remove_anchor(&mut self, byte: usize) -> bool {
+        match self.anchors.binary_search(&byte) {
+            Ok(i) => {
+                self.anchors.remove(i);
+                true
+            }
+            Err(_) => false,
+        }
+    }
+
     /// Mirror text inserted at buffer offset `offset`. Returns the source offset.
     pub fn insert(&mut self, offset: i32, inserted: &str) -> usize {
         let anchors_before = self.anchors_before(offset.max(0) as usize);
@@ -222,6 +234,11 @@ mod tests {
         assert_eq!(source.to_source(5), 8);
         assert!(source.is_anchor(4));
         assert_eq!(source.to_buffer(8), 5);
+        // Removing one the view put there.
+        assert!(source.remove_anchor(8));
+        assert!(!source.remove_anchor(8));
+        assert_eq!(source.to_buffer(8), 4);
+        check(&source);
     }
 
     #[test]

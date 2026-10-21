@@ -448,6 +448,18 @@ impl Styler {
             tag(&tags.no_spell, exempt);
         }
 
+        // Tables: the source hides, the newline ending its last row too, so
+        // none of its lines take room; the grid on the anchor before its
+        // first character shows instead.
+        let first = layout.tables.partition_point(|t| t.range.end < range.start);
+        for table in layout.tables[first..].iter().take_while(|t| t.range.start < range.end) {
+            if revealed(&table.range) {
+                continue;
+            }
+            let end = if text.as_bytes().get(table.range.end) == Some(&b'\n') { table.range.end + 1 } else { table.range.end };
+            tag(&tags.hidden, &(table.range.start..end));
+        }
+
         // Block images: the source hides; once the picture is loaded its line
         // takes the picture's room. The newline stays visible, so the line
         // exists to hold it.

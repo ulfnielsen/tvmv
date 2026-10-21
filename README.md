@@ -19,8 +19,9 @@ and Save as PDF render all three.
 
 On **Linux** the document is a native GTK text view too, built the same way:
 read-only on open, `Ctrl+E` to edit in place, markup hidden, images shown (and
-pasted from the clipboard), spelling checked. Table grids are still to come
-there; until then tables show as their source.
+pasted from the clipboard), spelling checked, and tables edited as grids
+(Tab between cells; row, column and alignment commands on a cell's
+right-click menu).
 
 On **iOS** a web layer (`Sources/TVMVCore/Resources/web/`, shared verbatim)
 renders the document with syntax highlighting, KaTeX math and Mermaid diagrams,

@@ -29,6 +29,7 @@ use super::theme::NativeTheme;
 /// Font metrics by (family, size bits): ascent and descent in pixels.
 type MetricsCache = Vec<((String, u64), (f64, f64))>;
 type ColumnCallback = Box<dyn Fn(i32, i32)>;
+type DrawnCallback = Box<dyn Fn(Range<usize>)>;
 
 mod imp {
     use super::*;
@@ -39,6 +40,8 @@ mod imp {
         pub metrics: RefCell<MetricsCache>,
         /// Told the column's x whenever it moves (indent tags follow it).
         pub on_column: RefCell<Option<ColumnCallback>>,
+        /// Told the source range on screen after each frame is drawn.
+        pub on_drawn: RefCell<Option<DrawnCallback>>,
     }
 
     #[glib::object_subclass]
@@ -92,6 +95,13 @@ fn visible_slice<'a, T>(items: &'a [T], visible: &Range<usize>, start: impl Fn(&
     &items[from..to.max(from)]
 }
 
+/// Whether `range` is inside a table shown as a grid (its source hidden).
+pub fn in_hidden_table(model: &Model, range: &Range<usize>) -> bool {
+    let tables = &model.prepared.layout.tables;
+    let i = tables.partition_point(|t| t.range.end < range.start);
+    tables.get(i).is_some_and(|t| t.range.start <= range.start && range.end <= t.range.end && !model.is_revealed(&t.range))
+}
+
 fn rect(x: f64, y: f64, w: f64, h: f64) -> graphene::Rect {
     graphene::Rect::new(x as f32, y as f32, w as f32, h as f32)
 }
@@ -129,6 +139,11 @@ impl TvmvView {
         *self.imp().model.borrow_mut() = Some(model);
     }
 
+    /// `f(range)`: the source range drawn on screen, after each frame.
+    pub fn set_on_drawn(&self, f: impl Fn(Range<usize>) + 'static) {
+        *self.imp().on_drawn.borrow_mut() = Some(Box::new(f));
+    }
+
     /// `f(x, width)`: where the text column starts, and how wide it is.
     pub fn set_on_column(&self, f: impl Fn(i32, i32) + 'static) {
         *self.imp().on_column.borrow_mut() = Some(Box::new(f));
@@ -153,7 +168,9 @@ impl TvmvView {
             return;
         };
         let zero = self.text_width("0") as f64;
-        let available = (width as f64 - 2.0 * padding).max(200.0);
+        // A measured column keeps a readable minimum; a full-width one (a
+        // table cell) is exactly what is left inside its padding.
+        let available = (width as f64 - 2.0 * padding).max(if full { 1.0 } else { 200.0 });
         let column = if full { available } else { (measure * zero).min(available) };
         let x = padding.max((width as f64 - column) / 2.0).round() as i32;
         let right = (width - x - column.round() as i32).max(0);
@@ -257,6 +274,9 @@ impl TvmvView {
             return;
         }
         let visible = self.visible_source(model);
+        if let Some(f) = self.imp().on_drawn.borrow().as_ref() {
+            f(visible.clone());
+        }
         let meets = |r: &Range<usize>| r.start < visible.end && r.end > visible.start;
         let em = theme.em();
         let column_x = self.left_margin() as f64;
@@ -317,7 +337,7 @@ impl TvmvView {
         let pad = em * NativeTheme::MONO_SCALE * 0.14;
         let buffer = self.buffer();
         for run in model.prepared.styles.query(&visible).map(|i| &layout.styles[i]) {
-            if run.style != Style::Code || run.range.is_empty() {
+            if run.style != Style::Code || run.range.is_empty() || in_hidden_table(model, &run.range) {
                 continue;
             }
             let end = buffer.iter_at_offset(model.source.to_buffer(run.range.end));

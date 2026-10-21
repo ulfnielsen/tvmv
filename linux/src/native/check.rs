@@ -581,6 +581,146 @@ fn spelling_checks(r: &mut Report) {
     window.close();
 }
 
+fn table_checks(r: &mut Report) {
+    use crate::native::document_view::CellKey;
+    use crate::table_source::Command;
+    println!("\nH. tables");
+    let text = "Intro.\n\n| Name | Score |\n|:-----|------:|\n| Ada  | 10 |\n| Bob | 7 |\n\nAfter.\n";
+    let (doc, window) = open(text, false);
+    settle();
+    let grids = doc.table_grids();
+    let start = text.find("| Name").unwrap();
+    r.check(
+        "H1 a table shows as a grid over its hidden source",
+        grids.len() == 1
+            && grids[0].cell_texts() == [["Name", "Score"], ["Ada", "10"], ["Bob", "7"]]
+            && doc.hidden_at(start)
+            && doc.hidden_at(text.find("| Bob").unwrap()),
+        format!("{} grids, {:?}", grids.len(), grids.first().map(|g| g.cell_texts())),
+    );
+    let grid = Rc::clone(&grids[0]);
+    let em = theme().em() as i32;
+    let anchor_line = {
+        let offset = doc.model.borrow().source.to_buffer(start) - 1;
+        doc.view.line_yrange(&doc.buffer.iter_at_offset(offset)).1
+    };
+    let (gw, gh) = (grid.widget.width(), grid.widget.height());
+    let column = doc.model.borrow().column_width;
+    r.check(
+        "H2 the grid's line holds the grid and half an em each side, within the column",
+        gh > 3 * em && (anchor_line - (gh + em)).abs() <= 6 && gw <= column,
+        format!("grid {gw}x{gh}, line {anchor_line}, column {column}"),
+    );
+    // The caret passes the table as one block.
+    let anchor = doc.model.borrow().source.to_buffer(start) - 1;
+    doc.buffer.place_cursor(&doc.buffer.iter_at_offset(anchor));
+    let forward_to = doc.selection().start;
+    let after = text.find("\nAfter").unwrap();
+    doc.set_caret(after);
+    doc.buffer.place_cursor(&doc.buffer.iter_at_offset(anchor + 1));
+    let back_to = doc.selection().start;
+    r.check(
+        "H2b the caret never rests beside a grid: it passes the table",
+        forward_to == text.find("\n\nAfter").unwrap() + 1 && back_to == start - 1,
+        format!("forward to {forward_to}, back to {back_to}"),
+    );
+    let x = grid.widget.compute_bounds(&doc.view).map_or(-1.0, |b| b.x());
+    r.check(
+        "H3 the grid lines up with the text",
+        (x - doc.view.left_margin() as f32).abs() <= 1.0,
+        format!("grid at {x}, text at {}", doc.view.left_margin()),
+    );
+    let cell = grid.cell(1, 0).unwrap();
+    r.check("H4 cells are read-only until editing is on", !cell.is_editable(), "");
+    doc.set_editable(true);
+    let cell = grid.cell(1, 0).unwrap();
+    cell.set_caret(3);
+    type_text(&cell, "m");
+    settle();
+    let typed = doc.text().contains("| Adam  |") && grid.cell_texts()[1][0] == "Adam";
+    grid.press(1, 0, CellKey::Undo);
+    settle();
+    r.check(
+        "H5 typing in a cell edits the source, and undoes in one step",
+        cell.is_editable() && typed && doc.text() == text && grid.cell_texts()[1][0] == "Ada",
+        format!("typed {typed}, after undo {:?}", doc.text()),
+    );
+    let cell = grid.cell(2, 1).unwrap();
+    cell.set_caret(1);
+    type_text(&cell, "|");
+    settle();
+    r.check("H6 a typed pipe is escaped in the source", doc.text().contains("| 7\\| |"), format!("{:?}", doc.text()));
+    grid.press(2, 1, CellKey::Undo);
+    settle();
+    let before = doc.text();
+    grid.cell(1, 0).unwrap().view.grab_focus();
+    grid.press(1, 0, CellKey::Next);
+    let a = grid.focused();
+    grid.press(1, 1, CellKey::Next);
+    let b = grid.focused();
+    grid.press(2, 0, CellKey::Previous);
+    let c = grid.focused();
+    grid.press(1, 1, CellKey::Down);
+    let d = grid.focused();
+    r.check(
+        "H7 Tab, Shift+Tab and Return move between cells, and never edit",
+        a == Some((1, 1)) && b == Some((2, 0)) && c == Some((1, 1)) && d == Some((2, 1)) && doc.text() == before,
+        format!("{a:?} {b:?} {c:?} {d:?}"),
+    );
+    grid.perform(Command::InsertRowBelow, 1, 0);
+    settle();
+    let grid = Rc::clone(&doc.table_grids()[0]);
+    r.check(
+        "H8 adding a row rewrites the table",
+        doc.text().contains("| Ada  |    10 |\n|      |       |\n| Bob  |     7 |") && grid.cell_texts().len() == 4,
+        format!("{:?}", doc.text()),
+    );
+    doc.undo();
+    settle();
+    let grid = Rc::clone(&doc.table_grids()[0]);
+    grid.press(1, 0, CellKey::Reveal);
+    settle();
+    r.check(
+        "H9 revealing from a cell shows the raw source",
+        !doc.hidden_at(start) && doc.table_grids().is_empty() && doc.view.has_focus(),
+        format!("{} grids", doc.table_grids().len()),
+    );
+    // Deleting across the table with spelling on (libspelling once aborted).
+    doc.reveal(false);
+    settle();
+    let len = doc.text().len();
+    doc.select(0..len);
+    doc.buffer.begin_user_action();
+    doc.buffer.delete_selection(true, true);
+    doc.buffer.end_user_action();
+    settle();
+    doc.undo();
+    settle();
+    doc.load(text.to_string());
+    settle();
+    r.check("H10 deleting across a table, undoing it and reloading keep working", doc.text() == text && doc.table_grids().len() == 1, "");
+    window.close();
+
+    let text = "Text `outside`.\n\n| A |\n|---|\n| `inside` |\n\nAfter.\n";
+    let (doc, window) = open(text, false);
+    settle();
+    let pills = |doc: &DocumentView| {
+        let model = doc.model.borrow();
+        model
+            .prepared
+            .layout
+            .styles
+            .iter()
+            .filter(|s| s.style == crate::layout::Style::Code && !super::view::in_hidden_table(&model, &s.range))
+            .count()
+    };
+    let hidden = pills(&doc);
+    doc.reveal_table(text.find("| A").unwrap());
+    settle();
+    r.check("H11 a hidden table's source draws no code pills", hidden == 1 && pills(&doc) == 2, format!("{hidden}, revealed {}", pills(&doc)));
+    window.close();
+}
+
 fn perf_checks(r: &mut Report, size: usize) {
     println!("\nD. performance at {} KB", size / 1024);
     let text = big_document(size);
@@ -826,6 +966,7 @@ pub fn run() -> glib::ExitCode {
     reader_checks(&mut r);
     image_checks(&mut r);
     spelling_checks(&mut r);
+    table_checks(&mut r);
     for size in [64 * 1024, 1024 * 1024, 5 * 1024 * 1024] {
         perf_checks(&mut r, size);
     }

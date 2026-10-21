@@ -187,6 +187,21 @@ Measured by `tvmv --self-check` (headless, Broadway):
 - **Remote images** go through GIO, which needs gvfs's http backend
   (installed on GNOME and KDE desktops).
 
+## Findings from step 4 (2026-10-21)
+
+- **libspelling 0.2 and child anchors.** The adapter follows the buffer's
+  length through insert-text and delete-range only, so an anchor leaves it
+  one short; the next delete near the end fails an assertion in
+  `cjhtextregion.c` and aborts the process, and until then its update loop
+  stops the window repainting. Turning the adapter off and on after
+  inserting anchors re-reads the length (it comes out one long, which is
+  harmless).
+- **One CSS provider for every view.** Providers are display-wide; one per
+  view meant one per table cell. All views share one theme, so they share
+  one provider.
+- **A full-width column has no minimum width,** or a narrow cell loses its
+  right padding.
+
 ## Offsets
 
 There are three coordinate systems:
@@ -279,8 +294,19 @@ covers.
 
 ## Table grid
 
-- `TableGrid` is a `gtk::Grid` of small `sourceview5::View` cells on a child
-  anchor. The source table stays in the buffer and is hidden.
+- `TableGrid` (`native/table_grid.rs`) is a `gtk::Grid` of cells on a child
+  anchor before the table's first character. Each cell is a small
+  `DocumentView`, so inline markup renders as in the text. The source table
+  stays in the buffer, hidden, its final newline too; the caret passes the
+  table as one block.
+- **Built near the screen only.** Far from the viewport a grid is a
+  placeholder of about its height (rows × a measured row height); it gets
+  its cells within a screen of the viewport and loses them beyond four,
+  unless a cell has focus. Measured with 1,608 tables in 300 KB: building
+  every grid at load took 10.5 s and 1.9 GB; built near the screen, 1.1 s
+  and 193 MB, a keystroke 39 ms. A table every few lines still costs frames
+  while scrolling fast (51 fps, worst frame 164 ms): each grid takes about
+  5 ms to build plus its first layout.
 - Cell edits patch the hidden source through the main buffer's single edit
   path, as the spike did. Tab, Shift+Tab and Return move between cells. Row,
   column and alignment commands are the same as on macOS.
@@ -440,7 +466,12 @@ priority idle, which waits behind the lazy styler.
    `sourceview5::View` with its own features off, and libspelling checks
    the buffer (needs `libgtksourceview-5-dev` and `libspelling-1-dev`;
    Ubuntu 24.04 ships 5.12 and 0.2.0).
-4. `TableGrid`.
+4. `TableGrid`. **Done 2026-10-21:** grids on anchors, cell edits through
+   the document's edit path with "|" escaped, one undo stack, Tab /
+   Shift+Tab / Return between cells, Ctrl+' from a cell reveals the source,
+   and the row, column and alignment commands in a cell's right-click menu
+   (`table_source.rs`, ported with its tests). Not ported: the macOS hover
+   handles on the grid's borders, and keyboard shortcuts for the commands.
 5. The review core port, then cards and commands.
 
 ## Risks

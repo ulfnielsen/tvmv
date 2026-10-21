@@ -31,6 +31,7 @@ pub mod render;
 pub mod review;
 pub mod review_spans;
 pub mod startup;
+pub mod table_source;
 pub mod resources;
 pub mod settings;
 pub mod settings_ui;
