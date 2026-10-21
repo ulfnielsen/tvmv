@@ -34,7 +34,9 @@ use crate::layout::{BlockImage, Heading, Style, encloses};
 use crate::offsets::SourceText;
 
 use super::styler::{Prepared, Styler};
+use super::review_cards::{self, ReviewColumn};
 use super::table_grid::TableGrid;
+use crate::review_ops::{self, Edit as ReviewEdit};
 use super::theme::NativeTheme;
 use super::undo::{Change, UndoStack};
 use super::view::TvmvView;
@@ -79,6 +81,8 @@ pub struct Model {
     pub images: HashMap<String, Image>,
     /// The text column's width, which pictures scale down to.
     pub column_width: i32,
+    /// Room kept right of the text for the comment column.
+    pub review_reserve: i32,
 }
 
 impl Model {
@@ -204,6 +208,10 @@ pub struct DocumentView {
     table_row_height: Cell<i32>,
     /// Building and dropping grids around the screen is queued.
     grids_pending: Cell<bool>,
+    /// The comment column (not in table cells).
+    review: RefCell<Option<Rc<ReviewColumn>>>,
+    /// The bottom margin without room added for cards.
+    base_bottom_margin: Cell<i32>,
 }
 
 /// Where the first-screen parse of a large document stops: the first blank
@@ -275,6 +283,7 @@ impl DocumentView {
             partial: false,
             images: HashMap::new(),
             column_width: 0,
+            review_reserve: 0,
         }));
         view.set_model(Rc::clone(&model));
         let doc = Rc::new_cyclic(|me| DocumentView {
@@ -322,7 +331,11 @@ impl DocumentView {
             extra_menu: RefCell::new(None),
             table_row_height: Cell::new((theme_em * 2.45).round() as i32),
             grids_pending: Cell::new(false),
+            review: RefCell::new(None),
+            base_bottom_margin: Cell::new(0),
         });
+        doc.base_bottom_margin.set(doc.view.bottom_margin());
+        doc.add_review_actions();
         doc.shape_table_line();
         doc.color_find_tags();
         doc.apply_css();
@@ -379,6 +392,13 @@ impl DocumentView {
         }
         if let Some(extra) = self.extra_menu.borrow().as_ref().filter(|_| editable) {
             menu.append_section(None, extra);
+        }
+        // Commenting doesn't need edit mode.
+        if self.cell.borrow().is_none() {
+            let review = gtk4::gio::Menu::new();
+            review.append(Some("Comment…"), Some("review.comment"));
+            review.append(Some("Suggest Edit…"), Some("review.suggest"));
+            menu.append_section(None, &review);
         }
         self.view.set_extra_menu((menu.n_items() > 0).then_some(menu).as_ref());
     }
@@ -746,6 +766,10 @@ impl DocumentView {
         self.view.set_on_drawn(move |visible| {
             if let Some(doc) = me_drawn.upgrade() {
                 doc.grids_on_screen(visible);
+                // Lines above the cards are laid out as GTK gets to them.
+                if let Some(column) = doc.review.borrow().as_ref() {
+                    column.queue_layout();
+                }
             }
         });
         self.view.set_on_column(move |x, width| {
@@ -891,6 +915,7 @@ impl DocumentView {
     fn notify_layout(&self) {
         self.flush_cell_edits();
         self.sync_tables();
+        self.update_review();
         self.request_images();
         self.view.queue_draw();
         if let Some(f) = self.on_layout.borrow().as_ref() {
@@ -974,6 +999,244 @@ impl DocumentView {
         self.view.queue_draw();
     }
 
+    // MARK: Review
+
+    fn add_review_actions(&self) {
+        let group = gtk4::gio::SimpleActionGroup::new();
+        for (name, suggestion) in [("comment", false), ("suggest", true)] {
+            let action = gtk4::gio::SimpleAction::new(name, None);
+            let me = self.me.clone();
+            action.connect_activate(move |_, _| {
+                if let Some(doc) = me.upgrade() {
+                    doc.open_composer(suggestion);
+                }
+            });
+            group.add_action(&action);
+        }
+        self.view.insert_action_group("review", Some(&group));
+    }
+
+    /// The comment column, created on first use.
+    fn review_column(&self) -> Rc<ReviewColumn> {
+        if let Some(c) = self.review.borrow().as_ref() {
+            return Rc::clone(c);
+        }
+        let column = ReviewColumn::new(&self.me.upgrade().expect("a live view"));
+        *self.review.borrow_mut() = Some(Rc::clone(&column));
+        column
+    }
+
+    /// The column (diagnostics and tests).
+    pub fn review_cards(&self) -> Option<Rc<ReviewColumn>> {
+        self.review.borrow().clone()
+    }
+
+    /// Cards for the threads of the current layout.
+    fn update_review(&self) {
+        if self.cell.borrow().is_some() {
+            return;
+        }
+        let models = {
+            let model = self.model.borrow();
+            match model.prepared.layout.review.as_ref() {
+                Some(review) if model.prepared.layout.length == model.source.text().len() => {
+                    review_ops::cards(review, model.source.text())
+                }
+                Some(_) => return,
+                None => Vec::new(),
+            }
+        };
+        if models.is_empty() && self.review.borrow().is_none() {
+            return;
+        }
+        self.review_column().update(models);
+        self.review_column_changed();
+        self.update_review_focus();
+    }
+
+    /// The column appeared or went: the text column makes room, or takes it back.
+    pub fn review_column_changed(&self) {
+        let shows = self.review.borrow().as_ref().is_some_and(|c| c.shows());
+        let reserve = if shows { review_cards::COLUMN_WIDTH } else { 0 };
+        if self.model.borrow().review_reserve != reserve {
+            self.model.borrow_mut().review_reserve = reserve;
+            self.view.queue_resize();
+        }
+    }
+
+    /// The top of the line holding source offset `at`, in buffer coordinates.
+    pub fn line_top(&self, at: usize) -> i32 {
+        let model = self.model.borrow();
+        let at = at.min(model.source.text().len());
+        self.view.location(&self.buffer.iter_at_offset(model.source.to_buffer(at))).y()
+    }
+
+    /// Make room below the text for cards reaching down to `bottom`.
+    pub fn reserve_bottom(&self, bottom: i32) {
+        let base = self.base_bottom_margin.get();
+        let end = self.buffer.end_iter();
+        let (y, h) = self.view.line_yrange(&end);
+        let text_bottom = y + h;
+        let wanted = if bottom + 24 > text_bottom { base + bottom + 24 - text_bottom } else { base };
+        if self.view.bottom_margin() != wanted {
+            self.view.set_bottom_margin(wanted);
+        }
+    }
+
+    /// Focus the card of the anchor the caret is in (none outside anchors).
+    fn update_review_focus(&self) {
+        let Some(column) = self.review.borrow().clone() else { return };
+        let id = {
+            let model = self.model.borrow();
+            let caret = model.source.to_source(self.buffer.cursor_position());
+            model.prepared.layout.review.as_ref().and_then(|r| {
+                r.anchors
+                    .iter()
+                    .find(|a| a.range.contains(&caret) || (caret > 0 && a.range.contains(&(caret - 1))))
+                    .map(|a| a.id.clone())
+            })
+        };
+        column.focus(id.as_deref(), false);
+    }
+
+    /// Apply review `edits` as one undoable step, read-only or not.
+    pub fn apply_review(&self, edits: &[ReviewEdit]) -> bool {
+        if edits.is_empty() {
+            return false;
+        }
+        let caret = self.selection().start;
+        self.buffer.begin_user_action();
+        for e in edits.iter().rev() {
+            self.replace(e.range.clone(), &e.insert);
+        }
+        self.buffer.end_user_action();
+        self.set_caret(review_ops::caret_through(caret, edits));
+        true
+    }
+
+    fn author(&self) -> String {
+        let folder = self.document_path.borrow().as_ref().and_then(|p| p.parent().map(PathBuf::from));
+        review_ops::current_author(folder.as_deref())
+    }
+
+    fn today() -> String {
+        glib::DateTime::now_local().and_then(|t| t.format("%Y-%m-%d")).map_or_else(|_| "1970-01-01".into(), |s| s.to_string())
+    }
+
+    /// Comment on the selection (a point comment at a caret). The new
+    /// thread's id, or `None` when the selection can't hold one.
+    pub fn add_comment(&self, body: &str, author: &str, date: &str) -> Option<String> {
+        let text = self.text();
+        let ops = review_ops::Ops::new(&text);
+        let id = review_ops::new_id(&ops.ids());
+        let edits = ops.add_comment(self.selection(), body, &review_ops::Byline { author, date }, Some(&id));
+        self.apply_review(&edits).then_some(id)
+    }
+
+    /// Suggest `replacement` for the selection.
+    pub fn add_suggestion(&self, replacement: &str, body: &str, author: &str, date: &str) -> Option<String> {
+        let text = self.text();
+        let ops = review_ops::Ops::new(&text);
+        let id = review_ops::new_id(&ops.ids());
+        let edits =
+            ops.add_suggestion(self.selection(), replacement, body, &review_ops::Byline { author, date }, Some(&id));
+        self.apply_review(&edits).then_some(id)
+    }
+
+    pub fn reply(&self, id: &str, body: &str, author: &str, date: &str) -> bool {
+        let text = self.text();
+        self.apply_review(&review_ops::Ops::new(&text).reply(id, body, &review_ops::Byline { author, date }))
+    }
+
+    /// Settle thread `id`: resolve it, or accept or reject its suggestion.
+    pub fn settle(&self, id: &str, action: &review_cards::Action) -> bool {
+        let text = self.text();
+        let ops = review_ops::Ops::new(&text);
+        let edits = match action {
+            review_cards::Action::Accept => ops.accept(id),
+            review_cards::Action::Reject | review_cards::Action::RemoveMarkup => ops.reject(id),
+            _ => ops.resolve(id),
+        };
+        self.apply_review(&edits)
+    }
+
+    pub fn settle_all(&self, accepting: bool) -> bool {
+        let text = self.text();
+        let ops = review_ops::Ops::new(&text);
+        let edits = if accepting { ops.accept_all() } else { ops.reject_all() };
+        let ok = self.apply_review(&edits);
+        if !ok {
+            self.view.error_bell();
+        }
+        ok
+    }
+
+    /// What a card's button or reply asks for.
+    pub fn card_action(&self, id: &str, action: review_cards::Action) {
+        let done = match &action {
+            review_cards::Action::Reply(body) => self.reply(id, body, &self.author(), &Self::today()),
+            other => self.settle(id, other),
+        };
+        if !done {
+            self.view.error_bell();
+        }
+    }
+
+    /// Write a comment (or a suggestion) on the selection in a card in the
+    /// comment column.
+    pub fn open_composer(&self, suggestion: bool) -> bool {
+        if self.cell.borrow().is_some() || !self.is_loaded() {
+            // A cell's selection is in its own text: not supported yet.
+            self.view.error_bell();
+            return true;
+        }
+        let selection = self.selection();
+        let original = self.text();
+        let selected = suggestion.then(|| original[selection.clone()].to_string());
+        let anchor = selection.start;
+        let me = self.me.clone();
+        let submit: review_cards::Submit = Box::new(move |body, replacement| {
+            let Some(doc) = me.upgrade() else { return Ok(()) };
+            // The selection is an offset into the text as it was: if the text
+            // changed meanwhile, it would land on other words.
+            if doc.text() != original {
+                return Err("The document changed. Cancel and select the text again.".into());
+            }
+            doc.select(selection.clone());
+            let (author, date) = (doc.author(), Self::today());
+            let added = match replacement {
+                Some(r) => doc.add_suggestion(r, body, &author, &date),
+                None => doc.add_comment(body, &author, &date),
+            };
+            added.map(|_| ()).ok_or_else(|| "Select text within one paragraph, outside code and other comments.".into())
+        });
+        self.review_column().open_composer(selected.as_deref(), anchor, submit);
+        true
+    }
+
+    /// Put the caret at the next (previous) thread's anchor, wrapping round.
+    pub fn move_to_thread(&self, forward: bool) -> bool {
+        let text = self.text();
+        let anchors: Vec<usize> = review_ops::cards(&crate::review::parse(&text), &text)
+            .into_iter()
+            .filter(|c| c.kind != review_ops::CardKind::OrphanThread)
+            .map(|c| c.anchor)
+            .collect();
+        if anchors.is_empty() {
+            self.view.error_bell();
+            return true;
+        }
+        let caret = self.selection().start;
+        let target = if forward {
+            anchors.iter().copied().find(|&a| a > caret).unwrap_or(anchors[0])
+        } else {
+            anchors.iter().copied().rev().find(|&a| a < caret).unwrap_or(anchors[anchors.len() - 1])
+        };
+        self.set_caret(target);
+        self.view.scroll_to_mark(&self.buffer.get_insert(), 0.1, false, 0.0, 0.0);
+        true
+    }
+
     // MARK: Tables
 
     fn shape_table_line(&self) {
@@ -986,6 +1249,7 @@ impl DocumentView {
     /// undo of its own (the document's covers them).
     pub fn set_cell_hooks(&self, hooks: CellHooks) {
         *self.cell.borrow_mut() = Some(hooks);
+        self.update_spelling_menu();
     }
 
     /// Follow a link from the document, or from one of its cells.
@@ -1483,6 +1747,7 @@ impl DocumentView {
         };
         self.prev_caret.set(offset);
         self.selection_changed();
+        self.update_review_focus();
     }
 
     /// A caret beside a grid's anchor would type into the table's hidden
@@ -1857,6 +2122,10 @@ impl DocumentView {
                     doc.wrap_selection("**");
                     true
                 }
+                (gdk::Key::m, m) if m == ctrl | shift => doc.open_composer(false),
+                (gdk::Key::e, m) if m == ctrl | shift => doc.open_composer(true),
+                (gdk::Key::F8, m) if m.is_empty() => doc.move_to_thread(true),
+                (gdk::Key::F8, m) if m == shift => doc.move_to_thread(false),
                 (gdk::Key::i, m) if m == ctrl => {
                     doc.wrap_selection("*");
                     true

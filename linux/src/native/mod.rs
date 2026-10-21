@@ -6,6 +6,7 @@ pub mod check;
 pub mod document_view;
 pub mod document_window;
 pub mod styler;
+pub mod review_cards;
 pub mod table_grid;
 pub mod theme;
 pub mod undo;

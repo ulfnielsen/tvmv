@@ -136,7 +136,15 @@ impl NativeTheme {
              textview.tvmv-native.tvmv-cell {{ line-height: 1.3; background-color: transparent; \
                border-right: 1px solid {rule}; border-bottom: 1px solid {rule}; }}\n\
              textview.tvmv-native.tvmv-cell text {{ background-color: transparent; }}\n\
-             textview.tvmv-native.tvmv-cell-header {{ background-color: {deep}; font-weight: bold; }}\n",
+             textview.tvmv-native.tvmv-cell-header {{ background-color: {deep}; font-weight: bold; }}\n\
+             .tvmv-card {{ background-color: {deep}; border: 1px solid {rule}; border-radius: 8px; padding: 10px 12px; \
+               font-family: sans-serif; font-size: 12px; line-height: 1.3; }}\n\
+             .tvmv-card.focused {{ border: 2px solid {accent}; padding: 9px 11px; }}\n\
+             .tvmv-card label {{ color: {soft}; }}\n\
+             .tvmv-card label.tvmv-card-heading {{ font-size: 10px; font-weight: 600; letter-spacing: 0.6px; color: {muted}; }}\n\
+             .tvmv-card label.tvmv-card-heading.problem {{ color: {accent}; }}\n\
+             .tvmv-card label.tvmv-card-change {{ font-weight: 500; color: {ink}; }}\n\
+             .tvmv-card label.error {{ color: #c01c28; }}\n",
             body = self.body_family.replace('"', ""),
             size = self.size,
             lh = Self::LINE_HEIGHT,
@@ -145,6 +153,9 @@ impl NativeTheme {
             selection = css_color(&selection),
             rule = css_color(&rule),
             deep = css_color(&self.paper_deep),
+            accent = css_color(&self.accent),
+            soft = css_color(&self.ink_soft),
+            muted = css_color(&self.muted),
         )
     }
 }

@@ -29,6 +29,7 @@ pub mod reading;
 pub mod print;
 pub mod render;
 pub mod review;
+pub mod review_ops;
 pub mod review_spans;
 pub mod startup;
 pub mod table_source;

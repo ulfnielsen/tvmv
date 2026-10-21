@@ -558,7 +558,9 @@ fn spelling_checks(r: &mut Report) {
         marked && flagged.is_empty(),
         format!("flagged at {flagged:?} of {exempt:?}"),
     );
-    r.check("G3 corrections are offered only while editing", doc.view.extra_menu().is_none(), "");
+    // The menu's sections: spelling while editing, then Comment / Suggest Edit.
+    let sections = |doc: &DocumentView| doc.view.extra_menu().map_or(0, |m| m.n_items());
+    r.check("G3 corrections are offered only while editing", sections(&doc) == 1, format!("{} sections", sections(&doc)));
     doc.set_editable(true);
     let end = doc.text().find(" here").unwrap() + " here".len();
     doc.set_caret(end);
@@ -568,14 +570,14 @@ fn spelling_checks(r: &mut Report) {
     let typed = until(Duration::from_secs(3), || misspelled(&doc, at + 1));
     r.check(
         "G4 a word typed while editing is checked, and the menu offers corrections",
-        typed && doc.view.extra_menu().is_some(),
+        typed && sections(&doc) == 2,
         format!("{:?}", &doc.text()[..at + 4]),
     );
     doc.set_spelling(false);
     settle();
     r.check(
         "G5 turning spelling off clears the marks and the corrections menu",
-        !misspelled(&doc, first + 1) && !misspelled(&doc, at + 1) && doc.view.extra_menu().is_none(),
+        !misspelled(&doc, first + 1) && !misspelled(&doc, at + 1) && sections(&doc) == 1,
         "",
     );
     window.close();
@@ -718,6 +720,168 @@ fn table_checks(r: &mut Report) {
     doc.reveal_table(text.find("| A").unwrap());
     settle();
     r.check("H11 a hidden table's source draws no code pills", hidden == 1 && pills(&doc) == 2, format!("{hidden}, revealed {}", pills(&doc)));
+    window.close();
+}
+
+fn review_checks(r: &mut Report) {
+    use crate::native::review_cards::Action;
+    println!("\nI. review");
+    const DAY: &str = "2026-10-14";
+    let doc_text = "Intro paragraph.\n\nThe {==cache==}[^rv-a1b2] is {~~cold~>warm~~}[^rv-c3d4] today.\n\nAnother line with a point.[^rv-e5f6]\n\n[^rv-a1b2]: @ulf 2026-10-14: Why?\n    @claude 2026-10-14: Because.\n[^rv-c3d4]: @claude 2026-10-14 suggestion: Warmer.\n[^rv-e5f6]: @ulf 2026-10-14: Source?\n";
+    let (doc, window) = open(doc_text, false);
+    window.set_default_size(1200, 700);
+    settle();
+    until(Duration::from_millis(500), || false);
+    settle();
+    let column = doc.review_cards().expect("a comment column");
+    let cards = column.cards.borrow().clone();
+    let ids: Vec<String> = cards.iter().map(|c| c.id()).collect();
+    let bounds: Vec<(f32, f32, f32)> = cards
+        .iter()
+        .filter_map(|c| c.widget.compute_bounds(&doc.view).map(|b| (b.x(), b.y(), b.y() + b.height())))
+        .collect();
+    let text_end = (doc.view.width() - doc.view.right_margin()) as f32;
+    let beside = bounds.iter().all(|b| b.0 > text_end);
+    let apart = bounds.windows(2).all(|w| w[0].2 <= w[1].1);
+    let line = doc.view.buffer_to_window_coords(gtk4::TextWindowType::Widget, 0, doc.line_top(doc_text.find("cache").unwrap())).1 as f32;
+    r.check(
+        "I1 one card per thread, beside the text, in order, without overlapping, the first on its line",
+        ids == ["rv-a1b2", "rv-c3d4", "rv-e5f6"] && beside && apart && bounds.first().is_some_and(|b| (b.1 - line).abs() <= 2.0),
+        format!("{ids:?} {bounds:?} text ends {text_end}, line {line}"),
+    );
+    // The caret in an anchor focuses its card; only that one shows actions.
+    doc.set_caret(doc_text.find("cold").unwrap() + 1);
+    settle();
+    let focused: Vec<bool> = column.cards.borrow().iter().map(|c| c.is_focused()).collect();
+    r.check("I2 the caret in an anchor focuses its card", focused == [false, true, false], format!("{focused:?}"));
+    // Typing elsewhere keeps the cards, and a half-written reply.
+    let first = Rc::clone(&column.cards.borrow()[0]);
+    if let Some(reply) = &first.reply {
+        reply.set_text("half a reply");
+    }
+    doc.set_editable(true);
+    doc.set_caret(doc_text.find("Intro").unwrap() + 5);
+    type_text(&doc, "x");
+    settle();
+    let kept = Rc::ptr_eq(&first, &column.cards.borrow()[0]) && first.reply.as_ref().is_some_and(|e| e.text() == "half a reply");
+    r.check("I3 typing keeps the cards and a half-written reply", kept, "");
+    doc.undo();
+    settle();
+    // Accept from the suggestion's card button.
+    let suggestion = column.cards.borrow().iter().find(|c| c.id() == "rv-c3d4").cloned();
+    if let Some(button) = suggestion.and_then(|c| c.button("Accept")) {
+        button.emit_clicked();
+    }
+    settle();
+    r.check(
+        "I4 a card's Accept settles its suggestion",
+        doc.text().contains("is warm today.") && !doc.text().contains("rv-c3d4"),
+        format!("{:?}", doc.text()),
+    );
+    // Reply from the comment's card.
+    let comment = column.cards.borrow().iter().find(|c| c.id() == "rv-e5f6").cloned();
+    if let Some(entry) = comment.as_ref().and_then(|c| c.reply.clone()) {
+        entry.set_text("Here.");
+        entry.emit_activate();
+    }
+    settle();
+    let author = crate::review_ops::current_author(None);
+    r.check(
+        "I5 a card's reply appends to its thread",
+        doc.text().contains(&format!("[^rv-e5f6]: @ulf 2026-10-14: Source?\n    @{author} ")),
+        format!("{:?}", doc.text()),
+    );
+    // Next and previous thread move the caret, wrapping round.
+    doc.set_caret(0);
+    doc.move_to_thread(true);
+    let a = doc.selection().start;
+    doc.move_to_thread(true);
+    let b = doc.selection().start;
+    doc.move_to_thread(false);
+    let c = doc.selection().start;
+    r.check(
+        "I6 next and previous thread move the caret",
+        a == doc.text().find("cache").unwrap() && b > a && c == a,
+        format!("{a} {b} {c}"),
+    );
+    window.close();
+
+    let text = "The cache is stale.\n";
+    let (doc, window) = open(text, false);
+    let cache = text.find("cache").unwrap();
+    doc.select(cache..cache + 5);
+    let id = doc.add_comment("Why?", "ulf", DAY);
+    settle();
+    let added = doc.text();
+    doc.undo();
+    settle();
+    r.check(
+        "I7 commenting on the selection is one undoable edit, while reading",
+        id.is_some() && added.starts_with("The {==cache==}[^rv-") && doc.text() == text,
+        format!("{added:?}"),
+    );
+    let two = "One.\n\nTwo.\n";
+    doc.load(two.into());
+    settle();
+    doc.select(0..two.len());
+    r.check(
+        "I8 a comment needs a selection within one block",
+        doc.add_comment("x", "ulf", DAY).is_none() && doc.text() == two,
+        format!("{:?}", doc.text()),
+    );
+    doc.load(text.into());
+    settle();
+    doc.select(cache..cache + 5);
+    let sid = doc.add_suggestion("index", "Clearer.", "ulf", DAY);
+    r.check(
+        "I9 suggesting replaces the selection",
+        sid.is_some() && doc.text().starts_with("The {~~cache~>index~~}[^rv-"),
+        format!("{:?}", doc.text()),
+    );
+    // The composer: a comment on the selection.
+    doc.load(text.into());
+    settle();
+    doc.select(cache..cache + 5);
+    doc.open_composer(false);
+    settle();
+    let column = doc.review_cards().expect("a column");
+    let composer = column.composer.borrow().clone();
+    let opened = composer.is_some() && doc.model.borrow().review_reserve > 0;
+    if let Some(c) = &composer {
+        c.body.set_text("Why?");
+        c.body.emit_activate();
+    }
+    settle();
+    r.check(
+        "I10 the composer adds a comment on the selection, and closes",
+        opened && column.composer.borrow().is_none() && doc.text().starts_with("The {==cache==}[^rv-") && doc.text().contains(": Why?"),
+        format!("{:?}", doc.text()),
+    );
+    // Resolving the last thread takes the column away.
+    let id = doc.text().split("[^").nth(1).and_then(|s| s.split(']').next()).unwrap_or("").to_string();
+    doc.card_action(&id, Action::Resolve);
+    settle();
+    r.check(
+        "I11 the column goes when the last comment does",
+        doc.text() == text && doc.model.borrow().review_reserve == 0,
+        format!("{:?}, reserve {}", doc.text(), doc.model.borrow().review_reserve),
+    );
+    // A composer whose text changed under it says so.
+    doc.select(cache..cache + 5);
+    doc.open_composer(false);
+    settle();
+    doc.set_editable(true);
+    doc.set_caret(0);
+    type_text(&doc, "x");
+    settle();
+    let composer = column.composer.borrow().clone();
+    if let Some(c) = &composer {
+        c.body.set_text("Late");
+        c.body.emit_activate();
+    }
+    settle();
+    let refused = composer.is_some_and(|c| c.message.is_visible()) && !doc.text().contains("rv-");
+    r.check("I12 a composer refuses text that changed under it", refused, format!("{:?}", doc.text()));
     window.close();
 }
 
@@ -967,6 +1131,7 @@ pub fn run() -> glib::ExitCode {
     image_checks(&mut r);
     spelling_checks(&mut r);
     table_checks(&mut r);
+    review_checks(&mut r);
     for size in [64 * 1024, 1024 * 1024, 5 * 1024 * 1024] {
         perf_checks(&mut r, size);
     }

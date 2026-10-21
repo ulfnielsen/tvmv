@@ -117,6 +117,35 @@ impl DocumentWindow {
         let go_bookmark = button("go-jump-symbolic", "Go to bookmark (right-click to clear)");
         go_bookmark.set_sensitive(saved.bookmark_position().is_some());
         let print_button = button("document-print-symbolic", "Print or save as PDF (Ctrl+P)");
+        let review_menu = gtk4::gio::Menu::new();
+        let section = |items: &[(&str, &str, Option<&str>)]| {
+            let part = gtk4::gio::Menu::new();
+            for &(label, action, accel) in items {
+                let item = gtk4::gio::MenuItem::new(Some(label), Some(action));
+                if let Some(accel) = accel {
+                    item.set_attribute_value("accel", Some(&accel.to_variant()));
+                }
+                part.append_item(&item);
+            }
+            part
+        };
+        review_menu.append_section(None, &section(&[
+            ("Comment…", "win.review-comment", Some("<Control><Shift>m")),
+            ("Suggest Edit…", "win.review-suggest", Some("<Control><Shift>e")),
+        ]));
+        review_menu.append_section(None, &section(&[
+            ("Next Thread", "win.review-next", Some("F8")),
+            ("Previous Thread", "win.review-previous", Some("<Shift>F8")),
+        ]));
+        review_menu.append_section(None, &section(&[
+            ("Accept All Suggestions", "win.review-accept-all", None),
+            ("Reject All Suggestions", "win.review-reject-all", None),
+        ]));
+        let review_button = gtk4::MenuButton::new();
+        review_button.set_icon_name("mail-message-new-symbolic");
+        review_button.set_tooltip_text(Some("Review"));
+        review_button.set_has_frame(false);
+        review_button.set_menu_model(Some(&review_menu));
         let open_settings = button("preferences-system-symbolic", "Settings (Ctrl+,)");
 
         let toolbar = GtkBox::new(Orientation::Horizontal, 2);
@@ -132,6 +161,7 @@ impl DocumentWindow {
             progress.upcast_ref(),
             save_bookmark.upcast_ref(),
             go_bookmark.upcast_ref(),
+            review_button.upcast_ref(),
             print_button.upcast_ref(),
             open_settings.upcast_ref(),
         ] {
@@ -382,6 +412,20 @@ impl DocumentWindow {
             }
             go_bookmark.add_controller(gesture);
             go_bookmark.connect_destroy(move |_| popover.unparent());
+        }
+
+        for (name, run) in [
+            ("review-comment", (|d: &DocumentView| { d.open_composer(false); }) as fn(&DocumentView)),
+            ("review-suggest", |d| { d.open_composer(true); }),
+            ("review-next", |d| { d.move_to_thread(true); }),
+            ("review-previous", |d| { d.move_to_thread(false); }),
+            ("review-accept-all", |d| { d.settle_all(true); }),
+            ("review-reject-all", |d| { d.settle_all(false); }),
+        ] {
+            let action = gtk4::gio::SimpleAction::new(name, None);
+            let doc = Rc::clone(&doc);
+            action.connect_activate(move |_, _| run(&doc));
+            window.add_action(&action);
         }
 
         let print = {

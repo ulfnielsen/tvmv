@@ -163,17 +163,22 @@ impl TvmvView {
     /// Centre a column of the theme's measure (or fill the width), with at
     /// least the theme's padding either side.
     pub fn layout_column(&self, width: i32) {
-        let Some((measure, full, padding)) = self.with_model(|m| (m.theme.measure, m.theme.full_width, m.theme.padding))
+        let Some((measure, full, padding, reserve)) =
+            self.with_model(|m| (m.theme.measure, m.theme.full_width, m.theme.padding, m.review_reserve))
         else {
             return;
         };
+        // The comment column, when the document has one, takes its room on
+        // the right; the text centres in what is left.
+        let total = width;
+        let width = (width - reserve).max(1);
         let zero = self.text_width("0") as f64;
         // A measured column keeps a readable minimum; a full-width one (a
         // table cell) is exactly what is left inside its padding.
         let available = (width as f64 - 2.0 * padding).max(if full { 1.0 } else { 200.0 });
         let column = if full { available } else { (measure * zero).min(available) };
         let x = padding.max((width as f64 - column) / 2.0).round() as i32;
-        let right = (width - x - column.round() as i32).max(0);
+        let right = (total - x - column.round() as i32).max(0);
         if self.left_margin() != x {
             self.set_left_margin(x);
         }

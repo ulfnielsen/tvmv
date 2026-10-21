@@ -319,17 +319,26 @@ covers.
 
 ## Review comments
 
-The core is ported from Swift: `ReviewMarkup` (done, `review.rs`),
-`ReviewSpans`, `ReviewLayout` and `ReviewOperations`. The UI differs from
-macOS as follows:
+The core is ported from Swift: `ReviewMarkup` (`review.rs`), `ReviewSpans`,
+the fold in `layout.rs` (`ReviewLayout.swift`) and `ReviewOperations`
+(`review_ops.rs`, with the card models, the stacking, the caret rule and the
+git author from `ReviewCardView.swift` and `DocumentTextView+Review.swift`).
+The UI (`native/review_cards.rs`) differs from macOS as follows:
 
-- **Cards** are `TvmvView::add_overlay` children placed in buffer coordinates
-  inside a right margin (`set_right_margin`). They are stacked by the
-  `ReviewLayout` port and moved on scroll and relayout.
-- **Narrow windows** show gutter markers that open a `gtk::Popover`.
-- **Creating** a comment or suggestion opens a popover at the selection.
-- **The Review menu** is a section of the window's primary menu. The
-  commands are the same as on macOS.
+- **Cards** are `TextView::add_overlay` children placed in buffer
+  coordinates in a column right of the text. The text column narrows to make
+  room, as on macOS. They are stacked with `review_ops::stack` and placed
+  again after each frame drawn, since GTK lays out the lines above them in
+  the background; only those whose place changed move.
+- **Narrow windows** keep the column (the text column has a 200 px
+  minimum), as macOS does; the gutter markers with popovers were not built.
+- **Creating** a comment or suggestion opens the composer as a card in the
+  column, as on macOS.
+- **The Review menu** is a toolbar menu button: Comment… (Ctrl+Shift+M),
+  Suggest Edit… (Ctrl+Shift+E), Next and Previous Thread (F8, Shift+F8;
+  macOS's ⌥⌘↓/↑ have no free Linux equivalent), Accept and Reject All
+  Suggestions. Comment… and Suggest Edit… are in the text's right-click
+  menu too. All of them work while reading.
 
 ## Reader features
 
@@ -472,7 +481,7 @@ priority idle, which waits behind the lazy styler.
    and the row, column and alignment commands in a cell's right-click menu
    (`table_source.rs`, ported with its tests). Not ported: the macOS hover
    handles on the grid's borders, and keyboard shortcuts for the commands.
-5. The review core port, then cards and commands.
+5. The review core port, then cards and commands. **Done 2026-10-21.**
 
 ## Risks
 
