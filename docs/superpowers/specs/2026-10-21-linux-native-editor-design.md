@@ -187,6 +187,29 @@ Measured by `tvmv --self-check` (headless, Broadway):
 - **Remote images** go through GIO, which needs gvfs's http backend
   (installed on GNOME and KDE desktops).
 
+## Findings from the hands-on pass (2026-10-21)
+
+- **GTK 4 aborts hit-testing below the text of a line with hidden text**
+  ("byte index off the end of the line"): `gtk_text_layout_get_iter_at_pixel`
+  takes the line's whole byte count, hidden characters included, as a
+  position among the visible ones. The pointer, clicks and drags all hit-test.
+  So no line with hidden text gets room below it (`styler::NO_ROOM_BELOW`):
+  a picture's room is all above its line, a code block's bottom space is
+  above the line after it, and a table's anchor has the blank line above the
+  table to itself (`table_source::anchor_offset`). Below the last line, clicks
+  and drags are handled by the view, not GTK. Found by hovering; reproduced by
+  sweeping every point of a document (`TVMV_TRACE_HOVER=FILE tvmv
+  --self-check`), now self-check H12.
+- **`TextView::remove` does not remove overlays** (GTK 4.14), and **overlays
+  don't move on scroll** (4.14 and 4.22) until their container is allocated,
+  which scrolling doesn't do. Cards sit in reused slots, and each scroll
+  queues the view and the container.
+- **A press on an overlay reaches the text view,** which moves its caret:
+  card clicks stop at the card.
+- **Ubuntu 26.04** (GTK 4.22, libspelling 0.4.9): a child anchor fires no
+  commit notify, so libspelling's engine runs an anchor short; the adapter is
+  replaced, and the old one disposed, whenever anchors go in.
+
 ## Findings from step 4 (2026-10-21)
 
 - **libspelling 0.2 and child anchors.** The adapter follows the buffer's

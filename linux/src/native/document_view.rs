@@ -199,6 +199,9 @@ pub struct DocumentView {
     grids: RefCell<Vec<(gtk4::TextChildAnchor, Rc<TableGrid>)>>,
     /// The anchor's line: half an em above and below the grid.
     table_line: gtk4::TextTag,
+    /// The same, for an anchor sharing its line with hidden text (a table
+    /// with no blank line above): no room below (`styler::NO_ROOM_BELOW`).
+    table_line_tight: gtk4::TextTag,
     /// When this view is a table cell: how it reaches its grid.
     cell: RefCell<Option<CellHooks>>,
     /// Cell edits made while the layout was older than the text.
@@ -275,6 +278,8 @@ impl DocumentView {
         let scroll_mark = buffer.create_mark(None, &buffer.start_iter(), true);
         let table_line = gtk4::TextTag::new(None);
         buffer.tag_table().add(&table_line);
+        let table_line_tight = gtk4::TextTag::new(None);
+        buffer.tag_table().add(&table_line_tight);
         let model = Rc::new(RefCell::new(Model {
             source: SourceText::new(String::new()),
             prepared: Rc::new(Prepared::default()),
@@ -327,6 +332,7 @@ impl DocumentView {
             spelling: RefCell::new(spelling),
             grids: RefCell::default(),
             table_line,
+            table_line_tight,
             cell: RefCell::new(None),
             pending_cell_edits: RefCell::default(),
             extra_menu: RefCell::new(None),
@@ -995,7 +1001,8 @@ impl DocumentView {
         let from = anchors.partition_point(|&a| a < range.start);
         for &at in anchors[from..].iter().take_while(|&&a| a <= range.end) {
             let after = model.source.to_buffer(at);
-            self.buffer.apply_tag(&self.table_line, &self.buffer.iter_at_offset(after - 1), &self.buffer.iter_at_offset(after));
+            let tag = self.anchor_line_tag(model.source.text(), at);
+            self.buffer.apply_tag(tag, &self.buffer.iter_at_offset(after - 1), &self.buffer.iter_at_offset(after));
         }
         // Styling clears every tag in the range, find's too.
         self.tag_matches(&model, range);
@@ -1264,11 +1271,20 @@ impl DocumentView {
 
     /// The anchor's line: the anchor sits on the blank line above its table
     /// (`table_source::anchor_offset`), taking the gap that line made, so it
-    /// keeps that gap above as well as half an em each side.
+    /// keeps that gap above as well as half an em each side. That line holds
+    /// no hidden text, so room below is safe; on a table's own first line it
+    /// is not (`styler::NO_ROOM_BELOW`).
     fn shape_table_line(&self) {
         let em = self.model.borrow().theme.em();
         self.table_line.set_pixels_above_lines((em * 1.5).round() as i32);
         self.table_line.set_pixels_below_lines((em / 2.0).round() as i32);
+        self.table_line_tight.set_pixels_above_lines(em.round() as i32);
+        self.table_line_tight.set_pixels_below_lines(0);
+    }
+
+    /// The line tag for an anchor before source offset `at`.
+    fn anchor_line_tag(&self, text: &str, at: usize) -> &gtk4::TextTag {
+        if text.as_bytes().get(at) == Some(&b'\n') { &self.table_line } else { &self.table_line_tight }
     }
 
     /// The spell checker's adapter on this buffer.
@@ -1466,7 +1482,8 @@ impl DocumentView {
             self.syncing.set(false);
             self.model.borrow_mut().source.add_anchor(start);
             let after = self.model.borrow().source.to_buffer(start);
-            self.buffer.apply_tag(&self.table_line, &self.buffer.iter_at_offset(after - 1), &self.buffer.iter_at_offset(after));
+            let tag = self.anchor_line_tag(&anchor_text, start).clone();
+            self.buffer.apply_tag(&tag, &self.buffer.iter_at_offset(after - 1), &self.buffer.iter_at_offset(after));
             let grid = TableGrid::new(&me);
             self.view.add_child_at_anchor(&grid.widget, &anchor);
             keep.push((anchor, grid, start));
@@ -2225,6 +2242,11 @@ impl DocumentView {
     /// Source offset under widget point (`x`, `y`), and the buffer point.
     fn source_at(&self, x: f64, y: f64) -> Option<(usize, (i32, i32))> {
         let (bx, by) = self.view.window_to_buffer_coords(gtk4::TextWindowType::Widget, x as i32, y as i32);
+        // Not below the text (`styler::NO_ROOM_BELOW`).
+        let (end_y, end_h) = self.view.line_yrange(&self.buffer.end_iter());
+        if by >= end_y + end_h {
+            return None;
+        }
         let iter = self.view.iter_at_location(bx, by)?;
         Some((self.model.borrow().source.to_source(iter.offset()), (bx, by)))
     }
@@ -2239,7 +2261,58 @@ impl DocumentView {
         })
     }
 
+    /// Whether buffer point `y` is below the text, on a view whose last line
+    /// has hidden text: GTK's hit test there aborts (`styler::NO_ROOM_BELOW`).
+    pub(crate) fn below_risky_end(&self, by: i32) -> bool {
+        let end = self.buffer.end_iter();
+        let (y, h) = self.view.line_yrange(&end);
+        by >= y + h && end.line_offset() > end.visible_line_offset()
+    }
+
+    /// Clicks and drags below the end of the text, where GTK's own handling
+    /// would hit-test and abort, put the caret (or the selection's end) at
+    /// the end instead.
+    fn guard_below_end(&self) {
+        let guard = gtk4::EventControllerLegacy::new();
+        guard.set_propagation_phase(gtk4::PropagationPhase::Capture);
+        let me = self.me.clone();
+        guard.connect_event(move |_, event| {
+            let Some(doc) = me.upgrade() else { return glib::Propagation::Proceed };
+            use gdk::EventType::*;
+            let kind = event.event_type();
+            let pressed = event.modifier_state().contains(gdk::ModifierType::BUTTON1_MASK);
+            let relevant = kind == ButtonPress || kind == ButtonRelease || (kind == MotionNotify && pressed);
+            let Some((x, y)) = event.position().filter(|_| relevant) else { return glib::Propagation::Proceed };
+            let Some(native) = doc.view.native() else { return glib::Propagation::Proceed };
+            // Event positions are the surface's; the native widget sits in it
+            // at the surface transform (a client-side shadow).
+            let (tx, ty) = native.surface_transform();
+            let at = gtk4::graphene::Point::new((x - tx) as f32, (y - ty) as f32);
+            let Some(point) = native.compute_point(&doc.view, &at) else {
+                return glib::Propagation::Proceed;
+            };
+            let (_, by) = doc.view.window_to_buffer_coords(gtk4::TextWindowType::Widget, point.x() as i32, point.y() as i32);
+            if !doc.below_risky_end(by) {
+                return glib::Propagation::Proceed;
+            }
+            if kind == ButtonPress {
+                let end = doc.buffer.end_iter();
+                if event.modifier_state().contains(gdk::ModifierType::SHIFT_MASK) {
+                    doc.buffer.move_mark(&doc.buffer.get_insert(), &end);
+                } else {
+                    doc.buffer.place_cursor(&end);
+                }
+                doc.view.grab_focus();
+            } else if kind == MotionNotify {
+                doc.buffer.move_mark(&doc.buffer.get_insert(), &doc.buffer.end_iter());
+            }
+            glib::Propagation::Stop
+        });
+        self.view.add_controller(guard);
+    }
+
     fn connect_pointer(&self) {
+        self.guard_below_end();
         let click = gtk4::GestureClick::new();
         click.set_button(gdk::BUTTON_PRIMARY);
         click.set_propagation_phase(gtk4::PropagationPhase::Capture);

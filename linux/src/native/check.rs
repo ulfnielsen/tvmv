@@ -746,19 +746,36 @@ fn table_checks(r: &mut Report) {
     r.check("H11 a hidden table's source draws no code pills", hidden == 1 && pills(&doc) == 2, format!("{hidden}, revealed {}", pills(&doc)));
     window.close();
 
-    // Hit-testing every point (as the pointer does) once aborted GTK when a
-    // table's anchor shared its line with the hidden source.
-    let text = "## Tables\n\n| Feature  | Reading | Editing |\n|:---------|:-------:|--------:|\n| Outline  | yes     | yes     |\n\nClick a cell while editing and type; Tab moves to the next one. Right-click a cell for row and column commands.\n\n| A |\n|---|\n| b |\n";
-    let (doc, window) = open(text, false);
-    settle();
-    let (w, h) = (doc.view.width(), doc.view.height());
-    for y in (0..h).step_by(3) {
-        for x in (0..w).step_by(5) {
-            let (bx, by) = doc.view.window_to_buffer_coords(gtk4::TextWindowType::Widget, x, y);
-            let _ = doc.view.iter_at_location(bx, by);
+    // Hit-testing every point (as the pointer and clicks do) aborted GTK
+    // below the text of any line with hidden text: an image line, a table's
+    // anchor line, a document's last line (styler::NO_ROOM_BELOW).
+    let folder = ImageFolder::new();
+    folder.png("pic.png", 300, 120);
+    let text = "## Tables\n\n| Feature  | Reading | Editing |\n|:---------|:-------:|--------:|\n| Outline  | yes     | yes     |\n\nClick a cell while editing and type; Tab moves to the next one.\n\n![pic](pic.png)\n\n> A quote after the picture.\n\n![pic](pic.png)\n\n```\ncode after it\n```\n\n> ```\n> code in a quote\n> ```\n\nThe last line has **bold** and no newline";
+    let (doc, window) = open_with_images(&folder, text, false);
+    settled(&doc, "pic.png");
+    if let Some(adj) = doc.view.vadjustment() {
+        let mut top = 0.0;
+        loop {
+            adj.set_value(top);
+            settle();
+            let (w, h) = (doc.view.width(), doc.view.height());
+            for y in (0..h).step_by(3) {
+                for x in (0..w).step_by(9) {
+                    let (bx, by) = doc.view.window_to_buffer_coords(gtk4::TextWindowType::Widget, x, y);
+                    // Below the end the view keeps the pointer from GTK.
+                    if !doc.below_risky_end(by) {
+                        let _ = doc.view.iter_at_location(bx, by);
+                    }
+                }
+            }
+            if top >= adj.upper() - adj.page_size() {
+                break;
+            }
+            top = (top + adj.page_size() / 2.0).min(adj.upper() - adj.page_size());
         }
     }
-    r.check("H12 the pointer can go anywhere over tables", doc.table_grids().len() == 2, "");
+    r.check("H12 the pointer can go anywhere, around pictures, tables and the last line", doc.table_grids().len() == 1, "");
     window.close();
 }
 
@@ -1140,6 +1157,10 @@ pub fn screenshot(input: &std::path::Path, output: &str, size: (i32, i32)) -> gl
     window.present();
     until(Duration::from_secs(30), || doc.is_loaded() && !doc.is_styling());
     settle();
+    // Pictures load and grids build after styling; let them land.
+    let wait = std::env::var("TVMV_SHOT_WAIT").ok().and_then(|v| v.parse().ok()).unwrap_or(0);
+    until(Duration::from_millis(wait), || false);
+    settle();
     let frames = painted.get();
     doc.view.queue_draw();
     until(Duration::from_secs(5), || painted.get() > frames);
@@ -1192,13 +1213,43 @@ pub fn save_png(window: &gtk4::Window, output: &str) -> glib::ExitCode {
 /// `TVMV_TRACE_HOVER=FILE tvmv --self-check`).
 fn trace_hover(path: &str) {
     let text = std::fs::read_to_string(path).unwrap();
-    let (doc, window) = open(&text, false);
-    window.set_default_size(1300, 950);
+    let (w, h) = std::env::var("TVMV_WINDOW_SIZE")
+        .ok()
+        .and_then(|s| {
+            let (w, h) = s.split_once('x')?;
+            Some((w.parse().ok()?, h.parse().ok()?))
+        })
+        .unwrap_or((1300, 950));
+    let doc = DocumentView::new(theme());
+    doc.set_document_path(std::path::Path::new(path).canonicalize().ok());
+    doc.load(text.clone());
+    let window = gtk4::Window::new();
+    window.set_default_size(w, h);
+    let scroller = gtk4::ScrolledWindow::new();
+    scroller.set_hscrollbar_policy(gtk4::PolicyType::Never);
+    scroller.set_child(Some(&doc.view));
+    window.set_child(Some(&scroller));
+    window.present();
     settle();
     until(Duration::from_millis(800), || false);
     let sweep = |label: &str| {
         settle();
         eprintln!("sweep after {label}");
+        let Some(adj) = doc.view.vadjustment() else { return };
+        let mut top = 0.0;
+        loop {
+            adj.set_value(top);
+            settle();
+            sweep_screen(&doc);
+            if top >= adj.upper() - adj.page_size() {
+                break;
+            }
+            top = (top + adj.page_size() / 2.0).min(adj.upper() - adj.page_size());
+        }
+        adj.set_value(0.0);
+        settle();
+    };
+    fn sweep_screen(doc: &DocumentView) {
         let (w, h) = (doc.view.width(), doc.view.height());
         for y in (0..h).step_by(3) {
             for x in (0..w).step_by(7) {
@@ -1212,7 +1263,7 @@ fn trace_hover(path: &str) {
                 let _ = doc.view.iter_at_location(bx, by);
             }
         }
-    };
+    }
     sweep("load");
     let Some(at) = text.find("cache") else {
         eprintln!("no crash");

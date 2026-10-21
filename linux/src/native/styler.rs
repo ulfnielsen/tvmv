@@ -60,6 +60,15 @@ pub struct Tags {
 
 pub const NO_SPELL_TAG: &str = "gtksourceview:context-classes:no-spell-check";
 
+/// No line with hidden text gets room below it, only above. GTK 4
+/// hit-tests a point below a line's text with the line's whole byte count,
+/// hidden characters included, as a position among the visible ones: on a
+/// line with hidden text that is past its end, and GTK aborts ("byte index
+/// off the end of the line"). The pointer and every click go through that
+/// hit test. Below the last line is the same: `DocumentView` keeps clicks
+/// and drags there away from GTK.
+pub const NO_ROOM_BELOW: () = ();
+
 impl Tags {
     fn new(buffer: &TextBuffer) -> Tags {
         let table = buffer.tag_table();
@@ -103,7 +112,9 @@ impl Tags {
         self.blank.set_line_height(1.0);
         self.code_line.set_line_height(1.15);
         self.code_first.set_pixels_above_lines(px(em * 0.7));
-        self.code_last.set_pixels_below_lines(px(em * 1.1));
+        // Above the line after the block, not below its last line: no tag
+        // reserves room below a line (see `NO_ROOM_BELOW`).
+        self.code_last.set_pixels_above_lines(px(em * 1.1));
         self.quote.set_foreground_rgba(Some(&theme.ink_soft));
         for (i, tag) in self.headings.iter().enumerate() {
             tag.set_scale(NativeTheme::heading_scale(i + 1));
@@ -133,6 +144,7 @@ impl Tags {
         self.point_carrier.set_letter_spacing(px(em * 0.25 * pango::SCALE as f64));
         self.gap.set_foreground_rgba(Some(&theme.paper));
         self.gap.set_scale(0.5);
+
     }
 }
 
@@ -271,11 +283,12 @@ impl Styler {
     }
 
     /// A picture `height` pixels tall, half an em above and below it, as on
-    /// macOS (the view draws it in that room).
+    /// macOS; the view draws it in that room, which is all above the line
+    /// (see `NO_ROOM_BELOW`).
     fn shape_image_line(&self, tag: &TextTag, height: i32) {
-        let half = (self.em.get() / 2.0).round() as i32;
-        tag.set_pixels_above_lines(height + half);
-        tag.set_pixels_below_lines(half);
+        let em = self.em.get().round() as i32;
+        tag.set_pixels_above_lines(height + em);
+        tag.set_pixels_below_lines(0);
         tag.set_size_points(HAIRLINE_POINTS);
         tag.set_line_height(1.0);
     }
@@ -416,6 +429,17 @@ impl Styler {
             line_start = line.end;
         }
 
+        // A code block's room below goes on the line after it.
+        for block in &layout.code_blocks {
+            if block.body.is_empty() || block.range.end >= text.len() {
+                continue;
+            }
+            let after = line_range(text, block.range.end);
+            let after = if after.start < block.range.end { line_range(text, after.end) } else { after };
+            if after.start >= range.start && after.start < range.end && after.start < text.len() {
+                tag(&tags.code_last, &after);
+            }
+        }
         let first_block = layout.code_blocks.partition_point(|c| c.range.end <= range.start);
         for block in layout.code_blocks[first_block..].iter().take_while(|c| c.range.start < range.end) {
             if block.body.is_empty() || block.body.end <= range.start || block.body.start >= range.end {
@@ -427,9 +451,7 @@ impl Styler {
                 if line.start <= block.body.start {
                     tag(&tags.code_first, &line);
                 }
-                if line.end >= block.body.end {
-                    tag(&tags.code_last, &line);
-                }
+
                 if line.end >= text.len() {
                     break;
                 }
