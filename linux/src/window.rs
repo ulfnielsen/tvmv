@@ -43,7 +43,7 @@ pub struct DocumentWindow {
 /// A settled edit costs a full parse plus DOM replacement, so large documents
 /// wait longer before paying it while small ones keep the snappy cadence.
 /// Matches `ViewerModel.renderDebounceDelay`.
-fn render_debounce(text: &str) -> std::time::Duration {
+pub fn render_debounce(text: &str) -> std::time::Duration {
     let bytes = text.len();
     let ms = if bytes > 4_000_000 {
         1000

@@ -12,6 +12,7 @@
 //!
 //! Diagnostics:
 //!   tvmv --frame-bench <f> [--idle] measure frames actually painted
+//!   tvmv --bench <f> [--runs N]     compare the WebKit window and the native view
 //!   tvmv --webkit-features [filter] list WebKit runtime features
 
 use std::cell::RefCell;
@@ -32,7 +33,7 @@ fn main() -> ExitCode {
     // should not get a sandbox warning per file.
     let uses_webkit = !matches!(
         args.first().map(String::as_str),
-        Some("--thumbnail" | "--html" | "--native" | "--self-check" | "--native-shot")
+        Some("--thumbnail" | "--html" | "--native" | "--self-check" | "--native-shot" | "--bench")
     );
     if uses_webkit {
         // Both must happen before any WebKit type is touched.
@@ -104,6 +105,24 @@ fn main() -> ExitCode {
                 eprintln!("tvmv: --native needs a file");
                 ExitCode::FAILURE
             }
+        },
+        Some("--bench") => match args.get(1) {
+            Some(input) => {
+                let runs = args
+                    .iter()
+                    .position(|a| a == "--runs")
+                    .and_then(|i| args.get(i + 1)?.parse().ok())
+                    .unwrap_or(1);
+                tvmv::bench::run(&PathBuf::from(input), runs)
+            }
+            None => {
+                eprintln!("tvmv: --bench needs a file");
+                ExitCode::FAILURE
+            }
+        },
+        Some("--bench-run") => match (args.get(1), args.get(2)) {
+            (Some(kind), Some(input)) => tvmv::bench::run_one(kind, &PathBuf::from(input)),
+            _ => ExitCode::FAILURE,
         },
         Some("--self-check") => exit_code(tvmv::native::check::run()),
         Some("--native-shot") => match (args.get(1), args.get(2)) {

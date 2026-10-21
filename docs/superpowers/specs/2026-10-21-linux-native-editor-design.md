@@ -319,6 +319,28 @@ the GTK harness:
 - **Fully tagged** within 2 s at 5 MB, without blocking input.
 - **Tag memory** stays under 100 MB at 5 MB (measured: 91 MB).
 
+### Against the WebKit window (2026-10-21)
+
+`tvmv --bench FILE --runs 3` opens the file in both, each in a fresh
+process, on a real display (GNOME Wayland; run it under
+`gnome-session-inhibit --inhibit idle`, since a locked screen paints no
+frames). Medians of 3 runs on the generated 1 MB and 5 MB documents:
+
+| | 1 MB WebKit | 1 MB native | 5 MB WebKit | 5 MB native |
+|---|---|---|---|---|
+| open, from process start | 1334 ms | 156 ms | 5275 ms | 180 ms |
+| open, second window | 1215 ms | 42 ms | 5210 ms | 44 ms |
+| fully styled | — | 478 ms | — | 2.3 s |
+| after an edit | 600 ms wait + 962 ms | 84 ms | 1000 ms wait + 5150 ms | 497 ms |
+| main thread per edit | 61 ms | 1.4 ms | 370 ms | 8.9 ms |
+| scroll fps / worst frame | 59 / 133 ms | 60 / 32 ms | 53 / 700 ms | 60 / 17 ms |
+| memory, all processes (PSS) | 882 MB | 207 MB | 2.7 GB | 816 MB |
+
+The native view's first-launch open includes about 150 ms of process and
+GTK start-up. An early run showed a 1.2 s first paint at 1 MB; that was the
+probe's fault, not the view's: it attached to the frame clock from a default-
+priority idle, which waits behind the lazy styler.
+
 ## Testing
 
 - **Layout golden corpus:**

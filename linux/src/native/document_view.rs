@@ -108,6 +108,8 @@ pub struct DocumentView {
     fresh_ok: Cell<bool>,
     loaded: Cell<bool>,
     last_apply: Cell<Duration>,
+    /// How many parse results have been installed (diagnostics).
+    applied: Cell<u64>,
     /// A link was activated (read-only click, or Ctrl+click while editing).
     on_follow_link: RefCell<Option<LinkCallback>>,
     /// The text changed (dirtiness) or a new layout was applied.
@@ -197,6 +199,7 @@ impl DocumentView {
             fresh_ok: Cell::new(false),
             loaded: Cell::new(false),
             last_apply: Cell::new(Duration::ZERO),
+            applied: Cell::new(0),
             on_follow_link: RefCell::new(None),
             on_changed: RefCell::new(None),
             on_layout: RefCell::new(None),
@@ -670,6 +673,7 @@ impl DocumentView {
         self.sync_soft_breaks(changed.clone());
         self.restyle(changed);
         self.last_apply.set(started.elapsed());
+        self.applied.set(self.applied.get() + 1);
         self.notify_layout();
     }
 
@@ -766,6 +770,11 @@ impl DocumentView {
     /// How long the last parse result took to install (diff, swaps, restyle).
     pub fn last_apply(&self) -> Duration {
         self.last_apply.get()
+    }
+
+    /// How many parse results have been installed since loading.
+    pub fn parses_applied(&self) -> u64 {
+        self.applied.get()
     }
 
     /// Whether styling of a large document is still catching up.

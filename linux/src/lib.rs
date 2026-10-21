@@ -8,6 +8,7 @@
 pub mod app;
 pub mod appearance;
 pub mod assets;
+pub mod bench;
 pub mod offsets;
 pub mod outline;
 pub mod patch;
