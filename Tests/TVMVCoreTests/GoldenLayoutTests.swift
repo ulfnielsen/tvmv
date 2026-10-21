@@ -96,7 +96,7 @@ final class GoldenLayoutTests: XCTestCase {
                 let a = actual[key] as? [String] ?? []
                 let e = expected[key] as? [String] ?? []
                 guard a != e else { continue }
-                let i = zip(a, e).firstIndex { $0 != $1 } ?? min(a.count, e.count)
+                let i = zip(a, e).enumerated().first { $1.0 != $1.1 }?.offset ?? min(a.count, e.count)
                 XCTFail("""
                     \(name).\(key): first difference at [\(i)]
                     expected: \(i < e.count ? e[i] : "<end>")
