@@ -440,6 +440,21 @@ impl ReviewColumn {
             Some(i) => i,
             None => {
                 let frame = gtk4::Box::new(gtk4::Orientation::Vertical, 0);
+                // Clicks on a card are the card's: passed on, the text view
+                // would move its caret to the click, out of the card's
+                // anchor, unfocusing the card and hiding the button being
+                // pressed before the click completes. Scrolling passes on.
+                let clicks = gtk4::EventControllerLegacy::new();
+                clicks.connect_event(|_, event| {
+                    use gtk4::gdk::EventType::*;
+                    match event.event_type() {
+                        ButtonPress | ButtonRelease | TouchBegin | TouchUpdate | TouchEnd | TouchCancel => {
+                            glib::Propagation::Stop
+                        }
+                        _ => glib::Propagation::Proceed,
+                    }
+                });
+                frame.add_controller(clicks);
                 host.view.add_overlay(&frame, 0, 0);
                 slots.push(Slot { frame, content: None, at: None });
                 slots.len() - 1
