@@ -1,4 +1,8 @@
-//! A document window: outline sidebar, find bar, and the preview web view.
+//! The WebKit reader window: outline sidebar, find bar, and the preview web
+//! view. Read-only. Since the native editor became the main window
+//! (`native/document_window.rs`) this serves `--peek`, the diagnostics that
+//! render through the web pipeline (`--snapshot`, `--frame-bench`) and the
+//! `--bench` baseline.
 //!
 //! No titlebar widget is set, so the window manager draws server-side
 //! decorations — what KDE and tiling-WM users expect, and what libadwaita would
@@ -18,7 +22,6 @@ use webkit6::prelude::*;
 use crate::assets::WebSource;
 use crate::chrome;
 use crate::document::Document;
-use crate::editor::{Editor, EditorMessage};
 use crate::find::{Find, FindAction};
 use crate::outline::Outline;
 use crate::preview::{Preview, PreviewMessage};
@@ -26,21 +29,17 @@ use crate::reading::{self, ReadingState};
 use crate::render::render_html;
 use crate::settings::Settings;
 
-pub struct DocumentWindow {
+pub struct WebWindow {
     pub window: ApplicationWindow,
     pub preview: Rc<Preview>,
-    editor: Rc<Editor>,
     outline_widget: gtk4::ScrolledWindow,
-    /// The Ctrl+E action, kept so `start_editing` can reuse it rather than
-    /// reimplementing the lazy load of CodeMirror.
-    toggle_editing: Rc<dyn Fn()>,
     /// Held so live reload keeps working — dropping it stops the watch.
     _watcher: crate::watcher::FileWatcher,
 }
 
-/// Preview re-render debounce after an edit, scaled to document size.
+/// Preview re-render debounce after a change, scaled to document size.
 ///
-/// A settled edit costs a full parse plus DOM replacement, so large documents
+/// A re-render costs a full parse plus DOM replacement, so large documents
 /// wait longer before paying it while small ones keep the snappy cadence.
 /// Matches `ViewerModel.renderDebounceDelay`.
 pub fn render_debounce(text: &str) -> std::time::Duration {
@@ -60,7 +59,7 @@ pub fn render_debounce(text: &str) -> std::time::Duration {
 pub type OnRenderComplete = Box<dyn Fn(&Preview)>;
 
 /// The user's stylesheet, or empty for the built-in theme.
-fn read_user_css(settings: &Settings) -> String {
+pub fn read_user_css(settings: &Settings) -> String {
     let Some(path) = settings.custom_css_path() else {
         return String::new();
     };
@@ -70,7 +69,7 @@ fn read_user_css(settings: &Settings) -> String {
     })
 }
 
-impl DocumentWindow {
+impl WebWindow {
     pub fn new(
         app: &Application,
         web: &WebSource,
@@ -136,8 +135,7 @@ impl DocumentWindow {
                 Rc::new(RefCell::new(Document::empty(path)))
             }
         };
-        let editor_slot: Rc<RefCell<Option<Rc<Editor>>>> = Rc::new(RefCell::new(None));
-        // Bumped on every edit; a pending re-render whose generation is stale
+        // Bumped on every change; a pending re-render whose generation is stale
         // has been superseded and does nothing.
         let render_generation = Rc::new(std::cell::Cell::new(0u64));
 
@@ -255,7 +253,7 @@ impl DocumentWindow {
                     reading_position.set(ratio);
                     progress_label.set_text(&format!("{}%", (ratio * 100.0).round() as i32));
                 }
-                // Editor sync lands in Task 10.
+                // Source sync was for the editor pane, which is gone.
                 PreviewMessage::SourceClick { .. } => {}
             }
         }));
@@ -263,59 +261,6 @@ impl DocumentWindow {
         if saved_reading.position > 0.0 {
             preview.set_pending_scroll(Some(saved_reading.position.clamp(0.0, 1.0)));
         }
-
-        // --- editor -------------------------------------------------------
-
-        let editor = Rc::new(Editor::new({
-            let document = Rc::clone(&document);
-            let editor_slot = Rc::clone(&editor_slot);
-            let preview_slot = Rc::clone(&preview_slot);
-            let window = window.clone();
-            let generation = Rc::clone(&render_generation);
-            let editor_style = settings.editor_style_json(system_prefers_dark());
-            move |message| match message {
-                EditorMessage::Ready => {
-                    let Some(editor) = editor_slot.borrow().clone() else { return };
-                    editor.apply_style(&editor_style);
-                    // resetHistory: this is a fresh document, not a reload.
-                    editor.set_text(document.borrow().text(), true);
-                    editor.focus();
-                }
-                EditorMessage::TextPatch { patches, length } => {
-                    let applied = document.borrow_mut().apply_patches(&patches, length);
-                    if applied {
-                        window.set_title(Some(&document.borrow().title()));
-                        schedule_render(&generation, &document, &preview_slot);
-                    } else if let Some(editor) = editor_slot.borrow().clone() {
-                        // Incoherent payload: the editor is authoritative, so
-                        // pull the whole document rather than guess.
-                        let document = Rc::clone(&document);
-                        let preview_slot = Rc::clone(&preview_slot);
-                        let generation = Rc::clone(&generation);
-                        let window = window.clone();
-                        editor.get_text(move |text| {
-                            let Some(text) = text else { return };
-                            document.borrow_mut().set_text(text);
-                            window.set_title(Some(&document.borrow().title()));
-                            schedule_render(&generation, &document, &preview_slot);
-                        });
-                    }
-                }
-                EditorMessage::Scrolled { top_line } => {
-                    if let Some(preview) = preview_slot.borrow().as_ref() {
-                        preview.scroll_to_source_line(top_line);
-                    }
-                }
-                EditorMessage::CursorMoved { line, .. } => {
-                    if let Some(preview) = preview_slot.borrow().as_ref() {
-                        preview.reveal_source_line(line);
-                    }
-                }
-                EditorMessage::Error(msg) => eprintln!("tvmv: editor: {msg}"),
-            }
-        }));
-        *editor_slot.borrow_mut() = Some(Rc::clone(&editor));
-        editor.web_view.set_visible(false);
 
         // --- layout -------------------------------------------------------
 
@@ -332,10 +277,6 @@ impl DocumentWindow {
         toolbar.set_margin_end(4);
         toolbar.set_margin_top(2);
         toolbar.set_margin_bottom(2);
-        let toggle_editor = Button::from_icon_name("document-edit-symbolic");
-        toggle_editor.set_tooltip_text(Some("Toggle editor (Ctrl+E)"));
-        toggle_editor.add_css_class("flat");
-
         let print_button = Button::from_icon_name("document-print-symbolic");
         print_button.set_tooltip_text(Some("Print or save as PDF (Ctrl+P)"));
         print_button.add_css_class("flat");
@@ -354,25 +295,15 @@ impl DocumentWindow {
 
         toolbar.append(&toggle_outline);
         toolbar.append(&open_find);
-        toolbar.append(&toggle_editor);
         toolbar.append(&progress_label);
         toolbar.append(&save_bookmark);
         toolbar.append(&go_bookmark);
         toolbar.append(&print_button);
         toolbar.append(&open_settings);
 
-        let editor_split = Paned::new(Orientation::Horizontal);
-        editor_split.set_start_child(Some(&editor.web_view));
-        editor_split.set_end_child(Some(&preview.web_view));
-        editor_split.set_position(if settings.editor_pane_width > 0.0 {
-            settings.editor_pane_width as i32
-        } else {
-            420
-        });
-
         let split = Paned::new(Orientation::Horizontal);
         split.set_start_child(Some(&outline.widget));
-        split.set_end_child(Some(&editor_split));
+        split.set_end_child(Some(&preview.web_view));
         split.set_position(240);
         split.set_resize_start_child(false);
         split.set_shrink_start_child(false);
@@ -433,7 +364,8 @@ impl DocumentWindow {
                     bookmark.set(Some(ratio));
                     go_bookmark.set_sensitive(true);
                     reading::save(&path, ReadingState {
-                        position: reading_position.get(), bookmark: Some(ratio),
+                        position: reading_position.get(), bookmark: Some(ratio), bookmark_offset: None,
+                        ..reading::load(&path)
                     });
                 });
             });
@@ -458,7 +390,9 @@ impl DocumentWindow {
             clear.connect_activate(move |_, _| {
                 bookmark.set(None);
                 button.set_sensitive(false);
-                reading::save(&path, ReadingState { position: reading_position.get(), bookmark: None });
+                let mut state = reading::load(&path);
+                state.clear_bookmark();
+                reading::save(&path, ReadingState { position: reading_position.get(), ..state });
             });
             window.add_action(&clear);
 
@@ -474,33 +408,6 @@ impl DocumentWindow {
             }
             go_bookmark.add_controller(gesture);
             go_bookmark.connect_destroy(move |_| popover.unparent());
-        }
-
-        // Toggling the pane on loads editor.html the first time — CodeMirror is
-        // 1.5 MB, and a reader who never edits should never pay for it.
-        let editor_loaded = Rc::new(std::cell::Cell::new(false));
-        let toggle_editing = {
-            let editor = Rc::clone(&editor);
-            let loaded = Rc::clone(&editor_loaded);
-            let document = Rc::clone(&document);
-            move || {
-                let showing = !editor.web_view.is_visible();
-                editor.web_view.set_visible(showing);
-                if !showing {
-                    return;
-                }
-                if !loaded.replace(true) {
-                    editor.load();
-                } else {
-                    // Already loaded: re-seed without dropping undo history.
-                    editor.set_text(document.borrow().text(), false);
-                    editor.focus();
-                }
-            }
-        };
-        {
-            let toggle = toggle_editing.clone();
-            toggle_editor.connect_clicked(move |_| toggle());
         }
 
         // Promotion: the peek window's whole purpose is to be temporary, so the
@@ -530,7 +437,7 @@ impl DocumentWindow {
         let do_print = {
             let preview = Rc::clone(&preview);
             let window = window.clone();
-            move || crate::print::print(&preview.web_view, &window)
+            move || crate::print::print(&preview.web_view, &window, || {})
         };
         {
             let print = do_print.clone();
@@ -546,6 +453,7 @@ impl DocumentWindow {
                     &preview.web_view,
                     &window,
                     &crate::print::pdf_name_for(&path),
+                    || {},
                 )
             }
         };
@@ -570,14 +478,11 @@ impl DocumentWindow {
             let find = Rc::clone(&find);
             let sidebar = outline.widget.clone();
             let preview_for_keys = Rc::clone(&preview);
-            let toggle_editing_for_keys = toggle_editing.clone();
             let show_settings_for_keys = show_settings.clone();
             let print_for_keys = do_print.clone();
             let peek_window = window.clone();
             let promote_for_keys = promote.clone();
             let save_pdf_for_keys = save_pdf.clone();
-            let save_doc = Rc::clone(&document);
-            let save_window = window.clone();
             keys.connect_key_pressed(move |_, key, _, modifier| {
                 use gtk4::gdk::Key;
                 let ctrl = modifier.contains(gtk4::gdk::ModifierType::CONTROL_MASK);
@@ -601,24 +506,16 @@ impl DocumentWindow {
                         show_settings_for_keys();
                         gtk4::glib::Propagation::Stop
                     }
-                    // A peek window has no editor: editing means this document
-                    // is worth a real window, so Ctrl+E promotes into one.
-                    Key::e if ctrl && peek => {
-                        promote_for_keys(true);
-                        gtk4::glib::Propagation::Stop
-                    }
+                    // This window does not edit: editing means the document is
+                    // worth a real window, so Ctrl+E promotes into one.
                     Key::e if ctrl => {
-                        toggle_editing_for_keys();
+                        promote_for_keys(true);
                         gtk4::glib::Propagation::Stop
                     }
                     // Enter is the "keep this one" gesture, the counterpart to
                     // Escape. Only a peek window has anything to promote to.
                     Key::Return | Key::KP_Enter if peek => {
                         promote_for_keys(false);
-                        gtk4::glib::Propagation::Stop
-                    }
-                    Key::s if ctrl => {
-                        save_document(&save_doc, &save_window);
                         gtk4::glib::Propagation::Stop
                     }
                     Key::F9 => {
@@ -684,69 +581,42 @@ impl DocumentWindow {
         {
             let document = Rc::clone(&document);
             let preview_slot = Rc::clone(&preview_slot);
-            let editor_slot = Rc::clone(&editor_slot);
             let generation = Rc::clone(&render_generation);
             let window = window.clone();
             gtk4::glib::spawn_future_local(async move {
                 while change_rx.recv().await.is_ok() {
-                    on_file_changed(&document, &preview_slot, &editor_slot, &generation, &window);
+                    on_file_changed(&document, &preview_slot, &generation, &window);
                 }
             });
         }
 
-        // Close guard: unsaved edits must not disappear with the window.
+        // Keep the reader's place. The fraction only: an offset written by
+        // the native view stays, and is what it restores.
         {
-            let document = Rc::clone(&document);
             let path = path.to_path_buf();
             let reading_position = Rc::clone(&reading_position);
-            let bookmark = Rc::clone(&bookmark);
-            window.connect_close_request(move |window| {
-                reading::save(&path, ReadingState {
-                    position: reading_position.get(), bookmark: bookmark.get(),
-                });
-                if !document.borrow().is_dirty() {
-                    return gtk4::glib::Propagation::Proceed;
-                }
-                confirm_discard(window, &document);
-                gtk4::glib::Propagation::Stop
+            window.connect_close_request(move |_| {
+                reading::save(&path, ReadingState { position: reading_position.get(), ..reading::load(&path) });
+                gtk4::glib::Propagation::Proceed
             });
         }
 
         preview.load_template();
 
-        Self {
-            window,
-            preview,
-            editor: Rc::clone(&editor),
-            outline_widget: outline.widget.clone(),
-            toggle_editing: Rc::new(toggle_editing.clone()),
-            _watcher: watcher,
-        }
+        Self { window, preview, outline_widget: outline.widget.clone(), _watcher: watcher }
     }
 }
 
-impl DocumentWindow {
+impl WebWindow {
     /// Push changed settings into this window, live.
     ///
     /// Typography and theme go through the shared `applyStyle`; the custom
     /// stylesheet through `applyUserCSS`, which is appended after the built-in
     /// theme so it overrides it. Reading the file here rather than in the
     /// settings window keeps the "no stylesheet" case a single empty string.
-    /// Open the editor pane if it is not already open.
-    ///
-    /// Idempotent, unlike the Ctrl+E toggle: a promoted peek window asks for
-    /// editing exactly once, and a toggle would close a pane that a future
-    /// caller had already opened.
-    pub fn start_editing(&self) {
-        if !self.editor.web_view.is_visible() {
-            (self.toggle_editing)();
-        }
-    }
-
     pub fn apply_settings(&self, settings: &Settings) {
         let dark = system_prefers_dark();
         self.preview.apply_style(&settings.style_json(dark));
-        self.editor.apply_style(&settings.editor_style_json(dark));
 
         self.preview.apply_user_css(&read_user_css(settings));
 
@@ -756,58 +626,22 @@ impl DocumentWindow {
     }
 }
 
-/// The document changed on disk.
-///
-/// Three outcomes, in order of how much they can cost the user:
-///
-/// 1. **It was us.** A save fires the watcher like any other write, and the
-///    watcher cannot tell whose write it was. Comparing content against the
-///    last-saved text is reliable where a timing window is not.
-/// 2. **Clean document** — adopt it silently. That is live reload, and it is
-///    the whole point of watching.
-/// 3. **Unsaved edits** — never silently discard them. Ask.
+/// The document changed on disk: adopt it, keeping the reader's place. Our
+/// own saves never come through here: this window does not edit.
 fn on_file_changed(
     document: &Rc<RefCell<Document>>,
     preview_slot: &Rc<RefCell<Option<Rc<Preview>>>>,
-    editor_slot: &Rc<RefCell<Option<Rc<Editor>>>>,
     generation: &Rc<std::cell::Cell<u64>>,
     window: &ApplicationWindow,
 ) {
-    let disk = match document.borrow().read_from_disk() {
-        Ok(text) => text,
+    if document.borrow_mut().reload().is_err() {
         // Mid-write, or deleted and about to be recreated: the watcher will
         // fire again when it settles.
-        Err(_) => return,
-    };
-
-    if disk == document.borrow().last_saved() {
-        return; // our own save
-    }
-
-    if document.borrow().is_dirty() {
-        confirm_external_change(window, document, preview_slot, editor_slot, generation);
         return;
     }
-
-    if document.borrow_mut().reload().is_err() {
-        return;
-    }
-    adopt_reloaded(document, preview_slot, editor_slot, generation, window);
-}
-
-/// Push freshly-loaded text into the preview, the editor, and the title.
-fn adopt_reloaded(
-    document: &Rc<RefCell<Document>>,
-    preview_slot: &Rc<RefCell<Option<Rc<Preview>>>>,
-    editor_slot: &Rc<RefCell<Option<Rc<Editor>>>>,
-    generation: &Rc<std::cell::Cell<u64>>,
-    window: &ApplicationWindow,
-) {
     window.set_title(Some(&document.borrow().title()));
-
-    // Keep the reader's place across the reload: capture the scroll position
-    // first, render from the capture's completion so the two cannot race, and
-    // let `renderComplete` put it back.
+    // Capture the scroll position first, render from the capture's
+    // completion so the two cannot race, and let `renderComplete` put it back.
     match preview_slot.borrow().clone() {
         Some(preview) => {
             let generation = Rc::clone(generation);
@@ -819,61 +653,13 @@ fn adopt_reloaded(
         }
         None => schedule_render(generation, document, preview_slot),
     }
-
-    if let Some(editor) = editor_slot.borrow().clone()
-        && editor.web_view.is_visible()
-    {
-        // resetHistory false: the document changed underneath, but the user's
-        // undo stack is still theirs.
-        editor.set_text(document.borrow().text(), false);
-    }
 }
 
-/// The file changed on disk while there are unsaved edits.
-fn confirm_external_change(
-    window: &ApplicationWindow,
-    document: &Rc<RefCell<Document>>,
-    preview_slot: &Rc<RefCell<Option<Rc<Preview>>>>,
-    editor_slot: &Rc<RefCell<Option<Rc<Editor>>>>,
-    generation: &Rc<std::cell::Cell<u64>>,
-) {
-    let name = document
-        .borrow()
-        .path()
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "This document".to_string());
-
-    let dialog = gtk4::AlertDialog::builder()
-        .message(format!("{name} changed on disk"))
-        .detail("You have unsaved edits. Reloading discards them.")
-        .buttons(["Keep my edits", "Reload from disk"])
-        .cancel_button(0)
-        .default_button(0)
-        .modal(true)
-        .build();
-
-    let document = Rc::clone(document);
-    let preview_slot = Rc::clone(preview_slot);
-    let editor_slot = Rc::clone(editor_slot);
-    let generation = Rc::clone(generation);
-    let owned_window = window.clone();
-    dialog.choose(Some(window), gtk4::gio::Cancellable::NONE, move |answer| {
-        let window = owned_window;
-        if answer != Ok(1) {
-            return; // keep editing
-        }
-        if document.borrow_mut().reload().is_ok() {
-            adopt_reloaded(&document, &preview_slot, &editor_slot, &generation, &window);
-        }
-    });
-}
-
-/// Re-render the preview after an edit, debounced and superseded-aware.
+/// Re-render the preview after a change, debounced and superseded-aware.
 ///
 /// Each call bumps the generation; when the timer fires, a render whose
-/// generation no longer matches has been overtaken by a newer keystroke and is
-/// dropped. That keeps a fast typist from queueing a parse per batch.
+/// generation no longer matches has been overtaken by a newer change and is
+/// dropped.
 fn schedule_render(
     generation: &Rc<std::cell::Cell<u64>>,
     document: &Rc<RefCell<Document>>,
@@ -897,60 +683,8 @@ fn schedule_render(
     });
 }
 
-/// Save, refreshing the title so the dirty marker clears.
-fn save_document(document: &Rc<RefCell<Document>>, window: &ApplicationWindow) {
-    if let Err(e) = document.borrow_mut().save() {
-        eprintln!("tvmv: saving {}: {e}", document.borrow().path().display());
-        let dialog = gtk4::AlertDialog::builder()
-            .message("Could not save")
-            .detail(format!("{}: {e}", document.borrow().path().display()))
-            .modal(true)
-            .build();
-        dialog.show(Some(window));
-        return;
-    }
-    window.set_title(Some(&document.borrow().title()));
-}
-
-/// Ask before dropping unsaved edits, then act on the answer.
-fn confirm_discard(window: &ApplicationWindow, document: &Rc<RefCell<Document>>) {
-    let name = document
-        .borrow()
-        .path()
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_else(|| "this document".to_string());
-
-    let dialog = gtk4::AlertDialog::builder()
-        .message(format!("Save changes to {name}?"))
-        .detail("Your changes will be lost if you don't save them.")
-        .buttons(["Cancel", "Discard", "Save"])
-        .cancel_button(0)
-        .default_button(2)
-        .modal(true)
-        .build();
-
-    let document = Rc::clone(document);
-    let owned_window = window.clone();
-    dialog.choose(Some(window), gtk4::gio::Cancellable::NONE, move |answer| {
-        let window = owned_window;
-        match answer {
-            Ok(1) => {
-                // Discard: the guard checks dirtiness, so clear it first.
-                document.borrow_mut().mark_clean();
-                window.close();
-            }
-            // A failed save keeps the window open — closing anyway would lose
-            // the edits.
-            Ok(2) if document.borrow_mut().save().is_ok() => window.close(),
-            // Cancel, or the dialog was dismissed.
-            _ => {}
-        }
-    });
-}
-
 /// Serial for per-window CSS scoping.
-fn next_window_serial() -> usize {
+pub fn next_window_serial() -> usize {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static NEXT: AtomicUsize = AtomicUsize::new(0);
     NEXT.fetch_add(1, Ordering::Relaxed)

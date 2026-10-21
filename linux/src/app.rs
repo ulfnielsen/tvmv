@@ -13,9 +13,11 @@ use gtk4::gio::ApplicationFlags;
 use gtk4::prelude::*;
 use gtk4::{Application, ApplicationWindow, glib};
 
+use crate::native::document_window::DocumentWindow;
+use crate::reading::Position;
 use crate::resources;
 use crate::settings::Settings;
-use crate::window::DocumentWindow;
+use crate::window::WebWindow;
 
 /// Push settings into every open window.
 pub fn apply_settings_to_all(settings: &Settings) {
@@ -66,7 +68,7 @@ pub fn run_with_hint(paths: Vec<PathBuf>, hint: &'static str) -> glib::ExitCode 
                 if peek {
                     open_peek(app, &path);
                 } else {
-                    open_window(app, &path, None);
+                    open_window(app, &path);
                 }
             }
         }
@@ -103,7 +105,7 @@ pub fn run_with_hint(paths: Vec<PathBuf>, hint: &'static str) -> glib::ExitCode 
             let Ok(file) = result else { return };
             match file.path() {
                 Some(path) => {
-                    open_window(&app, &path, None);
+                    open_window(&app, &path);
                 }
                 // A non-local file (a remote share via the portal) has no
                 // path; the renderer needs one for `tvmv-asset://doc/`.
@@ -136,89 +138,86 @@ pub fn run_with_hint(paths: Vec<PathBuf>, hint: &'static str) -> glib::ExitCode 
     app.run_with_args::<&str>(&[])
 }
 
+/// An open window of either kind.
+enum Open {
+    Native(DocumentWindow),
+    Web(WebWindow),
+}
+
+impl Open {
+    fn window(&self) -> &ApplicationWindow {
+        match self {
+            Open::Native(w) => &w.window,
+            Open::Web(w) => &w.window,
+        }
+    }
+
+    fn apply_settings(&self, settings: &Settings) {
+        match self {
+            Open::Native(w) => w.apply_settings(settings),
+            Open::Web(w) => w.apply_settings(settings),
+        }
+    }
+}
+
 // Windows currently open.
 //
-// GTK's `Application` keeps the `GtkWindow` alive, but not our `DocumentWindow`
-// — and that owns the file watcher. Dropping it stopped live reload the instant
+// GTK's `Application` keeps the `GtkWindow` alive, but not our window structs
+// — and those own the file watcher. Dropping it stopped live reload the instant
 // the window opened, silently: the window looked perfectly normal, it just never
 // reloaded. Held here until the window is destroyed.
 //
 // GTK is single-threaded, so thread-local is the right scope.
 thread_local! {
-    static OPEN_WINDOWS: RefCell<Vec<DocumentWindow>> = const { RefCell::new(Vec::new()) };
+    static OPEN_WINDOWS: RefCell<Vec<Open>> = const { RefCell::new(Vec::new()) };
 }
 
 /// `GApplication::open` hint that marks a preview request.
 pub const PEEK_HINT: &str = "peek";
 
-/// Open a chromeless preview window.
+/// Keep `open` until its window is destroyed, then drop it, so watcher
+/// threads do not outlive their windows.
+fn hold(open: Open) -> ApplicationWindow {
+    let window = open.window().clone();
+    window.connect_destroy(|window| {
+        OPEN_WINDOWS.with(|all| all.borrow_mut().retain(|o| o.window() != window));
+    });
+    OPEN_WINDOWS.with(|all| all.borrow_mut().push(open));
+    window.present();
+    window
+}
+
+/// Open a chromeless preview window: the web reader, reusing the running
+/// instance's warm WebProcess.
 pub fn open_peek(app: &Application, path: &Path) -> Option<ApplicationWindow> {
     let web = resources::web_source();
     let settings = shared_settings();
-    let doc = DocumentWindow::peek(app, &web, path, &settings.borrow());
-    let window = doc.window.clone();
-
-    window.connect_destroy(|window| {
-        OPEN_WINDOWS.with(|open| open.borrow_mut().retain(|doc| doc.window != *window));
-    });
-    OPEN_WINDOWS.with(|open| open.borrow_mut().push(doc));
-
-    window.present();
-    Some(window)
+    Some(hold(Open::Web(WebWindow::peek(app, &web, path, &settings.borrow()))))
 }
 
-pub fn open_window(
+/// Open a document window: the native reader/editor.
+pub fn open_window(app: &Application, path: &Path) -> Option<ApplicationWindow> {
+    let settings = shared_settings();
+    Some(hold(Open::Native(DocumentWindow::new(app, path, &settings.borrow(), None, false))))
+}
+
+/// Open the web reader window (diagnostics and the `--bench` baseline).
+pub fn open_web_window(
     app: &Application,
     path: &Path,
     on_render_complete: Option<crate::window::OnRenderComplete>,
-) -> Option<ApplicationWindow> {
-    open(app, path, on_render_complete, None, false)
-}
-
-/// Take over from a `--peek` preview: a full window on the same document, at
-/// the same reading position, with the editor already open when that was the
-/// gesture the user made.
-///
-/// The position rides in through `set_pending_scroll`, so the first render puts
-/// it back through the same `renderComplete` path a live reload uses rather
-/// than a second mechanism. The caller closes the peek window only once this
-/// has returned a window — a moment with none at all would end the application.
-pub fn promote_peek(
-    app: &Application,
-    path: &Path,
-    scroll: Option<f64>,
-    editing: bool,
-) -> Option<ApplicationWindow> {
-    open(app, path, None, scroll, editing)
-}
-
-fn open(
-    app: &Application,
-    path: &Path,
-    on_render_complete: Option<crate::window::OnRenderComplete>,
-    scroll: Option<f64>,
-    editing: bool,
 ) -> Option<ApplicationWindow> {
     let web = resources::web_source();
     let settings = shared_settings();
-    let doc = DocumentWindow::new(app, &web, path, &settings.borrow(), on_render_complete);
-    let window = doc.window.clone();
+    Some(hold(Open::Web(WebWindow::new(app, &web, path, &settings.borrow(), on_render_complete))))
+}
 
-    // Both of these land before the main loop runs again, so before the page
-    // can report a render: the position is staged for the first one, and the
-    // editor pane is open from the moment the window appears.
-    doc.preview.set_pending_scroll(scroll);
-    if editing {
-        doc.start_editing();
-    }
-
-    // Drop our state when the window goes away, so watcher threads do not
-    // outlive their windows.
-    window.connect_destroy(|window| {
-        OPEN_WINDOWS.with(|open| open.borrow_mut().retain(|doc| doc.window != *window));
-    });
-    OPEN_WINDOWS.with(|open| open.borrow_mut().push(doc));
-
-    window.present();
-    Some(window)
+/// Take over from a `--peek` preview: a document window on the same
+/// document, at the same reading position, editable when that was the
+/// gesture. The caller closes the peek window only once this has returned a
+/// window: a moment with none at all would end the application.
+pub fn promote_peek(app: &Application, path: &Path, scroll: Option<f64>, editing: bool) -> Option<ApplicationWindow> {
+    let settings = shared_settings();
+    let position = scroll.map(Position::Fraction);
+    Some(hold(Open::Native(DocumentWindow::new(app, path, &settings.borrow(), position, editing))))
 }

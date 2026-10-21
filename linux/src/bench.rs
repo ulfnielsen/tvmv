@@ -229,13 +229,13 @@ fn webkit(path: PathBuf, text: String, start: Instant) -> ExitCode {
                         report(&values);
                         quit.quit();
                     });
-                    if crate::app::open_window(&app, &path, Some(done)).is_none() {
+                    if crate::app::open_web_window(&app, &path, Some(done)).is_none() {
                         app.quit();
                     }
                 });
             })
         };
-        match crate::app::open_window(app, &path, Some(done)) {
+        match crate::app::open_web_window(app, &path, Some(done)) {
             Some(window) => *window_slot.borrow_mut() = Some(window),
             None => app.quit(),
         }

@@ -149,6 +149,24 @@ Measured by `tvmv --self-check` (headless, Broadway):
 | GTK line validation done | 83 ms | 1.0 s | 5.2 s |
 | keystroke + installing its parse (median) | 0.6 ms | 1.2 ms | 8.0 ms |
 
+## Findings from step 2 (2026-10-21)
+
+- **Scrolling to an offset needs the lines above it laid out.** GTK lays
+  lines out top-down in the background, after styling, and gives lines not
+  laid out yet no height. `scroll_to_mark` therefore stops at the end of
+  what is laid out. Restoring the reading position waits until the target
+  line's top stops moving, then scrolls once (scrolling by hand first
+  cancels it). Measured on GNOME Wayland: about 1 s at 1 MB, 5.5 s at 5 MB.
+  A later improvement is to raise GTK's validation above styling while a
+  restore is pending.
+- **WebKit prints only a view inside a realized window.** The print view is
+  put in a window that is realized but never shown, and destroyed when the
+  print finishes or is cancelled.
+- **A probe at default idle priority waits behind the lazy styler**
+  (priority 123). The first `--bench` runs measured a 1.2 s first paint at
+  1 MB that was the probe's own delay; diagnostics that watch the frame
+  clock attach at high priority.
+
 ## Offsets
 
 There are three coordinate systems:
@@ -266,16 +284,22 @@ macOS as follows:
   headings through the `HeadingSlugger` port.
 - **Links:** a click while read-only, or Ctrl+click while editing. The
   cursor changes to a pointer over links.
-- **Reading position and bookmarks:** `reading.json` stores fractions today
-  (`position`, `bookmark`). Each fraction is read once and rewritten as a
-  source offset, as on macOS. Clear Bookmark keeps the right-click popover.
-- **Find:** `sourceview5::SearchContext` on the buffer, kept inside the
-  existing bar in `find.rs`. It searches the source, as on macOS.
+- **Reading position and bookmarks:** `reading.json` gains `offset` and
+  `bookmark_offset` (source bytes) beside the old fractions (`position`,
+  `bookmark`). A fraction is read until an offset replaces it, as on macOS;
+  the web window (peek) writes only the fraction, so it never clobbers an
+  offset. Clear Bookmark keeps the right-click popover.
+- **Find:** inside the existing bar in `find.rs`. It searches the source,
+  as on macOS, ignoring case (`reader::find_matches`), and highlights with
+  two tags the styler's clearing is followed by re-applying. Step 3 can move
+  this to `sourceview5::SearchContext` with the switch to GtkSourceView.
 - **Settings:** fonts, size, measure, full width and light/dark/auto apply
   to the tag table live. The paper & ink colors come from the same values
   as `NativeTheme`.
-- **Print and PDF:** unchanged. `print.rs` feeds the current text,
-  including unsaved edits, into the web pipeline.
+- **Print and PDF:** `print::print_markdown` renders the current text,
+  including unsaved edits, through the web pipeline in a web view nobody
+  sees, with the reader's typography and the custom stylesheet. `--pdf`
+  uses the same path, so it no longer opens a window.
 
 ## Components
 
@@ -296,13 +320,17 @@ All in `linux/src`. Pure modules are unit-tested without GTK.
   - `styler.rs`: the tags, plus `Prepared`, a layout with the range indexes
     built on the parse thread.
   - `undo.rs` (pure) and `theme.rs`.
-  - `check.rs`: `tvmv --self-check` and `tvmv --native-shot`.
-  - `window.rs`: the step-1 window behind `tvmv --native`, which step 2
-    retires.
+  - `check.rs`: `tvmv --self-check`, `tvmv --native-shot`, and the PNG
+    writer behind `tvmv --window-shot`.
+  - `document_window.rs`: the document window (toolbar, find, outline,
+    reading position, print, settings, live reload, close guard).
+- **Pure, for the reader:** `reader.rs`, with the `HeadingSlugger` port, the
+  outline, link rules (`linkTarget`) and find.
   - To come: `table_grid.rs` and `review_cards.rs`.
-- **Removed from the main window:** `editor.rs` and the CodeMirror bridge,
-  and `preview.rs` as the main view. Peek, `--html`, `--pdf` and print keep
-  the web layer.
+- **Removed from the main window:** `editor.rs` and the CodeMirror bridge
+  (deleted), and `preview.rs` as the main view. `window.rs` is now
+  `WebWindow`, read-only, for peek, `--snapshot`, `--frame-bench` and the
+  `--bench` baseline; `--html`, `--pdf` and print keep the web layer.
 - **New dependencies:** `sourceview5` and `libspelling`, with versions
   matching gtk4 0.11. On Debian/Ubuntu these need `libgtksourceview-5-dev`
   and `libspelling-1-dev`. The Flatpak gets GtkSourceView from the GNOME
@@ -372,10 +400,11 @@ priority idle, which waits behind the lazy styler.
 
 1. `layout.rs` with the golden corpus, then
    `SourceText`, `TvmvView` and `styler.rs`. Read-only first, then Ctrl+E
-   editing with the edit rules. **Done 2026-10-21,** behind
-   `tvmv --native FILE`. It still needs the manual pass on a desktop.
+   editing with the edit rules. **Done 2026-10-21.**
 2. Reader features: outline, links, reading position, find, settings and
-   print. Then remove the CodeMirror pane.
+   print. Then remove the CodeMirror pane. **Done 2026-10-21:** the native
+   view is the document window; `--native` is gone. It still needs the
+   manual pass on a desktop (IME, Orca, HiDPI, KDE).
 3. Lists, quotes, checkboxes, images and spelling.
 4. `TableGrid`.
 5. The review core port, then cards and commands.

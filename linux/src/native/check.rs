@@ -312,6 +312,68 @@ fn big_document(target: usize) -> String {
     s
 }
 
+fn reader_checks(r: &mut Report) {
+    println!("\nE. reader");
+    let text = big_document(40 * 1024);
+    let (doc, window) = open(&text, false);
+    let headings = doc.headings();
+    let items = crate::reader::outline(&headings);
+    r.check(
+        "E1 the outline lists the headings with web slugs",
+        items.len() > 100 && items[0].anchor == "section-1" && items[41].anchor == "section-42",
+        format!("{} items, first {:?}", items.len(), items.first().map(|i| &i.anchor)),
+    );
+    let target = &headings[60];
+    let t = Instant::now();
+    doc.scroll_to_offset(target.range.start);
+    let at_top = |doc: &DocumentView| {
+        let top = doc.top_offset();
+        top <= target.range.start && target.range.start - top < 40
+    };
+    let landed = until(Duration::from_secs(2), || at_top(&doc));
+    r.check(
+        "E2 scrolling to a heading puts it at the top",
+        landed,
+        format!("heading at {}, top {} after {:?}", target.range.start, doc.top_offset(), t.elapsed()),
+    );
+    doc.scroll_to_fraction(0.5);
+    settle();
+    let f = doc.scroll_fraction();
+    r.check("E3 a fraction scrolls to that fraction", (f - 0.5).abs() < 0.02, format!("{f:.3}"));
+
+    let matches = crate::reader::find_matches(&doc.text(), "emphasis");
+    doc.set_find(matches.clone(), Some(3));
+    let tagged = |doc: &DocumentView| {
+        doc.has_tag_at(matches[0].start + 1, "find")
+            && doc.has_tag_at(matches[3].start + 1, "find-current")
+            && !doc.has_tag_at(matches[3].start + 1, "find")
+    };
+    let before = tagged(&doc);
+    doc.restyle(0..doc.text().len());
+    r.check("E4 find's highlights survive restyling", before && tagged(&doc), format!("{} matches", matches.len()));
+    doc.show_match(matches[50].clone());
+    let shown = until(Duration::from_secs(2), || doc.top_offset() < matches[50].start && doc.top_offset() + 2000 > matches[50].start)
+        && doc.selection() == matches[50];
+    doc.set_find(Vec::new(), None);
+    r.check(
+        "E5 showing a match selects it and scrolls to it; clearing removes the highlights",
+        shown && !doc.has_tag_at(matches[0].start + 1, "find"),
+        format!("selection {:?}, match {:?}", doc.selection(), matches[50]),
+    );
+    window.close();
+
+    // A large document: the offset lands once the whole text is in.
+    let text = big_document(1024 * 1024);
+    let (doc, window) = open(&text, false);
+    until(Duration::from_secs(20), || doc.is_loaded());
+    let at = text[text.len() * 2 / 3..].find("## ").map(|i| text.len() * 2 / 3 + i).unwrap_or(0);
+    doc.scroll_to_offset(at);
+    until(Duration::from_secs(10), || doc.top_offset().abs_diff(at) < 40);
+    let top = doc.top_offset();
+    r.check("E6 an offset two thirds into 1 MB lands at the top", top.abs_diff(at) < 40, format!("asked {at}, top {top}"));
+    window.close();
+}
+
 fn perf_checks(r: &mut Report, size: usize) {
     println!("\nD. performance at {} KB", size / 1024);
     let text = big_document(size);
@@ -507,7 +569,12 @@ pub fn screenshot(input: &std::path::Path, output: &str, size: (i32, i32)) -> gl
         let rect = doc.view.iter_location(&doc.buffer.iter_at_offset(model.source.to_buffer(at)));
         println!("heading 'T' x={} y={}; view left margin {}", rect.x(), rect.y(), doc.view.left_margin());
     }
-    let paintable = gtk4::WidgetPaintable::new(Some(&window));
+    save_png(window.upcast_ref(), output)
+}
+
+/// Render `window` as it is now to a PNG.
+pub fn save_png(window: &gtk4::Window, output: &str) -> glib::ExitCode {
+    let paintable = gtk4::WidgetPaintable::new(Some(window));
     let snapshot = gtk4::Snapshot::new();
     paintable.snapshot(&snapshot, window.width() as f64, window.height() as f64);
     let (Some(node), Some(renderer)) = (snapshot.to_node(), window.renderer()) else {
@@ -548,6 +615,7 @@ pub fn run() -> glib::ExitCode {
     caret_checks(&mut r);
     soft_break_checks(&mut r);
     editing_checks(&mut r);
+    reader_checks(&mut r);
     for size in [64 * 1024, 1024 * 1024, 5 * 1024 * 1024] {
         perf_checks(&mut r, size);
     }

@@ -27,7 +27,7 @@ use gtk4::prelude::*;
 use gtk4::{gdk, glib, TextBuffer};
 
 use crate::edit_rules::{self, DeleteAction};
-use crate::layout::{Style, encloses};
+use crate::layout::{Heading, Style, encloses};
 use crate::offsets::SourceText;
 
 use super::styler::{Prepared, Styler};
@@ -115,6 +115,13 @@ pub struct DocumentView {
     /// The text changed (dirtiness) or a new layout was applied.
     on_changed: RefCell<Option<Callback>>,
     on_layout: RefCell<Option<Callback>>,
+    /// Find: every match, and which one is current (source ranges).
+    find_matches: RefCell<Vec<Range<usize>>>,
+    find_current: Cell<Option<usize>>,
+    find_tag: gtk4::TextTag,
+    find_current_tag: gtk4::TextTag,
+    /// Where `scroll_to_offset` aims; scrolling to a mark waits for layout.
+    scroll_mark: gtk4::TextMark,
 }
 
 /// Where the first-screen parse of a large document stops: the first blank
@@ -160,6 +167,12 @@ impl DocumentView {
         let buffer = view.buffer();
         buffer.set_enable_undo(false);
         let styler = Styler::new(&buffer, &theme);
+        // Added after the styler's tags, so a match shows over any style.
+        let find_tag = gtk4::TextTag::new(Some("find"));
+        let find_current_tag = gtk4::TextTag::new(Some("find-current"));
+        buffer.tag_table().add(&find_tag);
+        buffer.tag_table().add(&find_current_tag);
+        let scroll_mark = buffer.create_mark(None, &buffer.start_iter(), true);
         let model = Rc::new(RefCell::new(Model {
             source: SourceText::new(String::new()),
             prepared: Rc::new(Prepared::default()),
@@ -203,7 +216,13 @@ impl DocumentView {
             on_follow_link: RefCell::new(None),
             on_changed: RefCell::new(None),
             on_layout: RefCell::new(None),
+            find_matches: RefCell::new(Vec::new()),
+            find_current: Cell::new(None),
+            find_tag,
+            find_current_tag,
+            scroll_mark,
         });
+        doc.color_find_tags();
         doc.apply_css();
         doc.set_editable(false);
         doc.connect();
@@ -254,6 +273,7 @@ impl DocumentView {
         }
         self.styler.set_theme(&theme);
         self.model.borrow_mut().theme = theme;
+        self.color_find_tags();
         self.apply_css();
         self.view.queue_resize();
         self.restyle_all();
@@ -737,8 +757,107 @@ impl DocumentView {
         let revealed = |unit: &Range<usize>| model.is_revealed(unit);
         let view = &self.view;
         let width = |s: &str| view.text_width(s);
-        self.styler.apply(&model.source, &model.prepared, range, fresh, &model.theme, &revealed, &width);
+        self.styler.apply(&model.source, &model.prepared, range.clone(), fresh, &model.theme, &revealed, &width);
+        // Styling clears every tag in the range, find's too.
+        self.tag_matches(&model, range);
         self.view.queue_draw();
+    }
+
+    // MARK: Reader
+
+    /// The headings of the current layout.
+    pub fn headings(&self) -> Vec<Heading> {
+        self.model.borrow().prepared.layout.headings.clone()
+    }
+
+    /// Scroll so source offset `at` is at the top. GTK scrolls to a mark
+    /// once the lines up to it are laid out.
+    pub fn scroll_to_offset(&self, at: usize) {
+        // The very top includes the view's top margin, which the mark's line
+        // does not.
+        if at == 0 {
+            if let Some(adj) = self.view.vadjustment() {
+                adj.set_value(0.0);
+            }
+            return;
+        }
+        let offset = {
+            let model = self.model.borrow();
+            model.source.to_buffer(at.min(model.source.text().len()))
+        };
+        let iter = self.buffer.iter_at_offset(offset);
+        self.buffer.move_mark(&self.scroll_mark, &iter);
+        self.view.scroll_to_mark(&self.scroll_mark, 0.0, true, 0.0, 0.0);
+    }
+
+    /// Source offset of the first character at the top of the visible area.
+    pub fn top_offset(&self) -> usize {
+        let visible = self.view.visible_rect();
+        // One pixel below the edge, so the line above does not claim it.
+        let y = visible.y() + 1;
+        let iter = self
+            .view
+            .iter_at_location(self.view.left_margin() + 1, y)
+            .unwrap_or_else(|| self.view.line_at_y(y).0);
+        self.model.borrow().source.to_source(iter.offset())
+    }
+
+    /// Scroll progress, 0…1.
+    pub fn scroll_fraction(&self) -> f64 {
+        let Some(adj) = self.view.vadjustment() else { return 0.0 };
+        let max = adj.upper() - adj.page_size();
+        if max > 0.0 { (adj.value() / max).clamp(0.0, 1.0) } else { 0.0 }
+    }
+
+    /// Scroll to progress `fraction` (a legacy reading position).
+    pub fn scroll_to_fraction(&self, fraction: f64) {
+        let Some(adj) = self.view.vadjustment() else { return };
+        adj.set_value((adj.upper() - adj.page_size()).max(0.0) * fraction.clamp(0.0, 1.0));
+    }
+
+    /// Highlight find's matches, `current` more strongly.
+    pub fn set_find(&self, matches: Vec<Range<usize>>, current: Option<usize>) {
+        let (start, end) = self.buffer.bounds();
+        self.buffer.remove_tag(&self.find_tag, &start, &end);
+        self.buffer.remove_tag(&self.find_current_tag, &start, &end);
+        *self.find_matches.borrow_mut() = matches;
+        self.find_current.set(current);
+        let len = self.model.borrow().source.text().len();
+        self.tag_matches(&self.model.borrow(), 0..len);
+    }
+
+    /// Select source `range` and scroll it into view, a third of the way down.
+    pub fn show_match(&self, range: Range<usize>) {
+        self.select(range.clone());
+        let offset = self.model.borrow().source.to_buffer(range.start);
+        let iter = self.buffer.iter_at_offset(offset);
+        self.buffer.move_mark(&self.scroll_mark, &iter);
+        self.view.scroll_to_mark(&self.scroll_mark, 0.1, true, 0.0, 0.3);
+    }
+
+    fn tag_matches(&self, model: &Model, range: Range<usize>) {
+        let matches = self.find_matches.borrow();
+        let from = matches.partition_point(|m| m.end <= range.start);
+        let current = self.find_current.get();
+        for (i, m) in matches.iter().enumerate().skip(from) {
+            if m.start >= range.end {
+                break;
+            }
+            let start = self.buffer.iter_at_offset(model.source.to_buffer(m.start));
+            let end = self.buffer.iter_at_offset(model.source.to_buffer(m.end));
+            let tag = if current == Some(i) { &self.find_current_tag } else { &self.find_tag };
+            self.buffer.apply_tag(tag, &start, &end);
+        }
+    }
+
+    fn color_find_tags(&self) {
+        let theme = &self.model.borrow().theme;
+        let mut all = theme.review_highlight;
+        all.set_alpha(all.alpha() * 0.7);
+        self.find_tag.set_background_rgba(Some(&all));
+        let mut current = theme.accent;
+        current.set_alpha(0.35);
+        self.find_current_tag.set_background_rgba(Some(&current));
     }
 
     fn restyle_all(&self) {

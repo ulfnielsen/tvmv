@@ -120,7 +120,7 @@ fn main() -> ExitCode {
                 }
             });
 
-            if app::open_window(application, &path, Some(on_render_complete)).is_none() {
+            if app::open_web_window(application, &path, Some(on_render_complete)).is_none() {
                 application.quit();
             }
 

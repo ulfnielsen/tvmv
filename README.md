@@ -17,12 +17,17 @@ place, the Markdown renders as you type, and tables edit as grids. Code blocks
 show as plain monospace, and math and Mermaid diagrams as their source; print
 and Save as PDF render all three.
 
-On **iOS and Linux** a web layer (`Sources/TVMVCore/Resources/web/`, shared
-verbatim) renders the document with syntax highlighting, KaTeX math and Mermaid
-diagrams, and edits in a CodeMirror pane with live preview — SwiftUI +
-`WKWebView` on iOS, Rust + GTK4 + WebKitGTK on Linux. Both link the same pinned
-cmark-gfm revision, so the HTML is byte-identical. macOS uses the same layer
-for printing.
+On **Linux** the document is a native GTK text view too, built the same way:
+read-only on open, `Ctrl+E` to edit in place, markup hidden. Tables, images and
+spelling are still to come there; until then tables and images show as their
+source.
+
+On **iOS** a web layer (`Sources/TVMVCore/Resources/web/`, shared verbatim)
+renders the document with syntax highlighting, KaTeX math and Mermaid diagrams,
+and edits in a CodeMirror pane with live preview. Linux uses the same layer
+(through WebKitGTK) for `--peek`, printing and Save as PDF, and macOS for
+printing. All of them link the same pinned cmark-gfm revision, so the HTML is
+byte-identical.
 
 ## Build & install
 
@@ -81,9 +86,10 @@ hides the markup and shows each thread as a card in a column beside the text.
 Select text and right-click → **Comment…** or **Suggest Edit…** (⌘⇧M / ⌘⇧E);
 cards take replies, resolve, and accept or reject suggestions. The **Review**
 menu steps between threads (⌥⌘↓ / ⌥⌘↑) and accepts or rejects all suggestions.
-Comments are signed with your git `user.name`. On iOS and Linux the reader
-renders review markup — highlights, insertions and deletions in color, threads
-as footnotes — but does not yet have the cards or the commands.
+Comments are signed with your git `user.name`. On iOS the reader renders review
+markup — highlights, insertions and deletions in color, threads as footnotes —
+and on Linux the native view colors it the same way, but neither has the cards
+or the commands yet.
 
 To remove a saved bookmark, use **View → Clear Bookmark** or right-click the
 bookmark button.
@@ -119,10 +125,11 @@ launch scene's *Create Document* fails on simulators without an iCloud account
 
 ## Linux
 
-A native GTK4 + WebKitGTK app sharing the **same** web layer as the Mac app —
-`app.css`, `boot.js`, the CodeMirror editor and the vendored KaTeX / Mermaid /
-highlight.js are used unmodified, so a document renders identically on both.
-Only the shell is rewritten (Rust, in `linux/`); no Swift is ported.
+A native GTK4 app in Rust (`linux/`). The document window is a native text
+view, ported from the Mac app's (`docs/superpowers/specs/2026-10-21-linux-native-editor-design.md`),
+and it parses with the same cmark-gfm. `--peek`, print and Save as PDF render
+through WebKitGTK with the **same** web layer as the Mac app (`app.css`,
+`boot.js` and the vendored KaTeX / Mermaid / highlight.js, unmodified).
 
 Clone **with submodules** — the Markdown parser is the pinned
 `linux/vendor/swift-cmark`, and a plain `git clone` leaves it empty and fails the
@@ -160,7 +167,9 @@ nothing is installed beside it and no stale copy on disk can be served instead;
 
 | | |
 |---|---|
-| `Ctrl+E` | editor pane |
+| `Ctrl+E` | edit in place (documents open read-only) |
+| `Ctrl+'` / `Ctrl+Alt+M` | show the markup under the caret / all markup |
+| `Ctrl+B` / `Ctrl+I` | bold / italic |
 | Toolbar bookmark buttons | save this place / return to it (right-click to clear) |
 | `Ctrl+S` | save |
 | `Ctrl+F` | find, with match count |
@@ -169,8 +178,7 @@ nothing is installed beside it and no stale copy on disk can be served instead;
 | `Ctrl+,` | settings |
 
 In a `--peek` window: `Escape` closes it, `Enter` opens it as a real window, and
-`Ctrl+E` does that with the editor already open. All three keep your place in
-the document.
+`Ctrl+E` does that with editing on. All three keep your place in the document.
 
 Non-interactive modes: `--html`, `--pdf out.pdf in.md`, `--peek file.md`
 (chromeless preview), `--thumbnail in.md out.png 256`.
@@ -260,9 +268,10 @@ gresource bundles with no plugin API.
 Out of the box TVMV wears its built-in "paper & ink" theme, which has taste. If
 you don't, you can override it with your own CSS — TVMV won't judge.
 
-Custom CSS applies on Linux. The macOS app now renders documents natively and
-does not load custom CSS (styling options will return in another form); its
-print and Save as PDF use the built-in theme.
+Both apps now render documents natively and do not load custom CSS there
+(styling options will return in another form). On Linux custom CSS still
+applies to `--peek` windows, print and Save as PDF; on macOS print and Save as
+PDF use the built-in theme.
 
 Open **Settings (Ctrl+,) → Custom CSS → Choose…** and pick a `.css` file. TVMV injects
 it after the built-in theme (overriding it), tints the window chrome — sidebar,
@@ -271,7 +280,7 @@ and **live-reloads** as you edit the file. *Reset to default* goes back to the
 built-in theme. Nothing is loaded unless you pick a file.
 
 Try [`examples/comic-msd.css`](examples/comic-msd.css) — Comic Sans on MSD teal
-(pictured in the web-rendered window, which Linux uses):
+(pictured in the web-rendered window, which Linux uses for `--peek`):
 
 ![TVMV with a custom theme](docs/theme-screenshot.png)
 

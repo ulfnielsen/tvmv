@@ -6,9 +6,9 @@
 //!   tvmv --pdf <out.pdf> <file.md>  render straight to PDF, no window
 //!   tvmv --peek <file.md>            chromeless preview, Escape to close
 //!   tvmv --thumbnail <in> <out> <n>  draw a file-manager thumbnail (no WebKit)
-//!   tvmv --native <file.md>          the native editor, while it is built
 //!   tvmv --self-check                scripted checks of the native editor
 //!   tvmv --native-shot <in> <out.png> [WxH]  the native view, rendered offscreen
+//!   tvmv --window-shot <in> <out.png> [query] the document window, after a find
 //!
 //! Diagnostics:
 //!   tvmv --frame-bench <f> [--idle] measure frames actually painted
@@ -33,7 +33,7 @@ fn main() -> ExitCode {
     // should not get a sandbox warning per file.
     let uses_webkit = !matches!(
         args.first().map(String::as_str),
-        Some("--thumbnail" | "--html" | "--native" | "--self-check" | "--native-shot" | "--bench")
+        Some("--thumbnail" | "--html" | "--self-check" | "--native-shot" | "--window-shot" | "--bench")
     );
     if uses_webkit {
         // Both must happen before any WebKit type is touched.
@@ -99,13 +99,6 @@ fn main() -> ExitCode {
                 ExitCode::FAILURE
             }
         },
-        Some("--native") => match args.get(1) {
-            Some(input) => exit_code(tvmv::native::window::run(&PathBuf::from(input))),
-            None => {
-                eprintln!("tvmv: --native needs a file");
-                ExitCode::FAILURE
-            }
-        },
         Some("--bench") => match args.get(1) {
             Some(input) => {
                 let runs = args
@@ -125,6 +118,13 @@ fn main() -> ExitCode {
             _ => ExitCode::FAILURE,
         },
         Some("--self-check") => exit_code(tvmv::native::check::run()),
+        Some("--window-shot") => match (args.get(1), args.get(2)) {
+            (Some(input), Some(output)) => window_shot(PathBuf::from(input), output.clone(), args.get(3).cloned()),
+            _ => {
+                eprintln!("tvmv: --window-shot needs an input file and an output PNG");
+                ExitCode::FAILURE
+            }
+        },
         Some("--native-shot") => match (args.get(1), args.get(2)) {
             (Some(input), Some(output)) => {
                 let size = args
@@ -203,7 +203,7 @@ fn snapshot(output: PathBuf, input: PathBuf) -> ExitCode {
             });
         });
 
-        if app::open_window(application, &input, Some(on_render_complete)).is_none() {
+        if app::open_web_window(application, &input, Some(on_render_complete)).is_none() {
             application.quit();
         }
     });
@@ -262,40 +262,87 @@ fn thumbnail(input: PathBuf, output: PathBuf, size: i32) -> ExitCode {
 /// Exercises the same `WebKitPrintOperation` path the Print command uses, so the
 /// shared `@media print` rules are what produce the output.
 fn export_pdf(output: PathBuf, input: PathBuf) -> ExitCode {
+    let markdown = match std::fs::read_to_string(&input) {
+        Ok(text) => text.replace("\r\n", "\n"),
+        Err(e) => {
+            eprintln!("tvmv: {}: {e}", input.display());
+            return ExitCode::FAILURE;
+        }
+    };
     let application = gtk4::Application::builder()
         .application_id("dk.dyregod.tvmv.pdf")
         .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
         .build();
-
+    let code = Rc::new(std::cell::Cell::new(ExitCode::FAILURE));
+    let result = Rc::clone(&code);
     application.connect_activate(move |application| {
-        let output = output.clone();
-        let application_for_quit = application.clone();
-
-        let on_render_complete: tvmv::window::OnRenderComplete = Box::new(move |preview| {
-            let output = output.clone();
-            let application = application_for_quit.clone();
-            let web_view = preview.web_view.clone();
-
-            // renderComplete means the DOM is final, including the lazy KaTeX and
-            // Mermaid passes; printing before that would drop them.
-            gtk4::glib::timeout_add_local_once(std::time::Duration::from_millis(300), move || {
-                let application = application.clone();
-                let output = output.clone();
-                tvmv::print::export_pdf(&web_view, &output.clone(), move |ok| {
-                    if ok {
-                        println!("wrote {}", output.display());
-                    }
-                    application.quit();
-                });
-            });
+        // No window: the print pipeline renders in a web view nobody sees.
+        let hold = application.hold();
+        let (written, result) = (output.clone(), Rc::clone(&result));
+        let quit = application.clone();
+        let done = Box::new(move |ok: bool| {
+            if ok {
+                println!("wrote {}", written.display());
+                result.set(ExitCode::SUCCESS);
+            }
+            let _ = &hold;
+            quit.quit();
         });
-
-        if app::open_window(application, &input, Some(on_render_complete)).is_none() {
-            application.quit();
-        }
+        let settings = app::shared_settings();
+        tvmv::print::print_markdown(
+            &markdown,
+            input.parent().map(PathBuf::from),
+            &settings.borrow(),
+            tvmv::print::Output::File(output.clone(), done),
+        );
     });
+    application.run_with_args::<&str>(&[]);
+    code.replace(ExitCode::FAILURE)
+}
 
-    exit_code(application.run_with_args::<&str>(&[]))
+/// Open the document window on `input`, optionally find `query`, and write
+/// the window to `output` once it has settled.
+fn window_shot(input: PathBuf, output: String, query: Option<String>) -> ExitCode {
+    let application = gtk4::Application::builder()
+        .application_id("dk.dyregod.tvmv.shot")
+        .flags(gtk4::gio::ApplicationFlags::NON_UNIQUE)
+        .build();
+    let code = Rc::new(std::cell::Cell::new(ExitCode::FAILURE));
+    let result = Rc::clone(&code);
+    application.connect_activate(move |application| {
+        let Some(window) = app::open_window(application, &input) else { return };
+        // Type the query into the find bar, opened as Ctrl+F opens it.
+        if let (Some(query), Some(bar), Some(entry)) = (
+            query.clone(),
+            find_descendant::<gtk4::SearchBar>(window.upcast_ref()),
+            find_descendant::<gtk4::SearchEntry>(window.upcast_ref()),
+        ) {
+            bar.set_search_mode(true);
+            gtk4::glib::timeout_add_local_once(std::time::Duration::from_millis(500), move || entry.set_text(&query));
+        }
+        let (application, output, result) = (application.clone(), output.clone(), Rc::clone(&result));
+        gtk4::glib::timeout_add_local_once(std::time::Duration::from_millis(std::env::var("TVMV_SHOT_WAIT").ok().and_then(|v| v.parse().ok()).unwrap_or(2500)), move || {
+            let ok = tvmv::native::check::save_png(window.upcast_ref(), &output) == gtk4::glib::ExitCode::SUCCESS;
+            result.set(if ok { ExitCode::SUCCESS } else { ExitCode::FAILURE });
+            application.quit();
+        });
+    });
+    application.run_with_args::<&str>(&[]);
+    code.replace(ExitCode::FAILURE)
+}
+
+fn find_descendant<T: IsA<gtk4::Widget>>(root: &gtk4::Widget) -> Option<T> {
+    let mut child = root.first_child();
+    while let Some(widget) = child {
+        if let Ok(found) = widget.clone().downcast::<T>() {
+            return Some(found);
+        }
+        if let Some(found) = find_descendant::<T>(&widget) {
+            return Some(found);
+        }
+        child = widget.next_sibling();
+    }
+    None
 }
 
 /// Measure frames GTK **actually paints**.
@@ -379,7 +426,7 @@ fn frame_bench(input: PathBuf, scroll: bool) -> ExitCode {
             });
         });
 
-        match app::open_window(application, &input, Some(on_render_complete)) {
+        match app::open_web_window(application, &input, Some(on_render_complete)) {
             Some(window) => *window_slot.borrow_mut() = Some(window),
             None => application.quit(),
         }
