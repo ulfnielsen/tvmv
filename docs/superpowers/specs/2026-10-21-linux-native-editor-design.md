@@ -31,9 +31,11 @@ source, styled as code, and external changes keep today's banner.
      comment and **Ctrl+Shift+E** suggests an edit.
    - Ctrl+E no longer opens a pane. In a `--peek` window it still promotes
      to a real window, now with editing on.
-2. **Text stack: GtkSourceView 5.** `TvmvView` subclasses
+2. **Text stack: GtkTextView now, GtkSourceView 5 with spelling.**
+   `TvmvView` subclasses `gtk::TextView`. Step 3 switches the parent to
    `sourceview5::View` over a `sourceview5::Buffer`, which libspelling
-   requires. No language definition and no syntax highlighting: TVMV's tags
+   requires; neither library is installed on the development machine yet.
+   There is no language definition and no syntax highlighting: TVMV's tags
    do all the styling.
 3. **Hiding uses tags with `invisible = true`.** GTK drops invisible text from
    layout. Raw GTK already skips it for arrow keys, word motion and
@@ -54,6 +56,19 @@ source, styled as code, and external changes keep today's banner.
 7. **Custom CSS is dropped from the main window.** Settings keeps it for
    print and `--html`, which still use the web pipeline. Peek and thumbnails
    are unchanged.
+8. **Soft line breaks are spaces in the buffer.** A GTK paragraph ends at
+   every newline, and no tag changes that, so a hard-wrapped paragraph
+   would not reflow. The buffer holds a space wherever the layout has a
+   soft break, and the source mirror keeps the newline. Both are one byte,
+   so offsets agree.
+   - The buffer is therefore not the file. Saving writes the mirror, and
+     copying copies the source.
+   - When a newline becomes or stops being a soft break, the view swaps the
+     character in the buffer. Swaps are neither mirrored nor undoable.
+9. **Undo is the view's own,** in source offsets (`native/undo.rs`), and
+   GTK's is off. GTK's undo would record the swaps above. One stack is also
+   the single edit path that table cells and review actions need. Typing
+   coalesces by word, and runs of deletes coalesce.
 
 ## Evidence (throwaway spike, 2026-10-20)
 
@@ -94,6 +109,46 @@ checks headless under Broadway. It used plain GtkTextView and pulldown-cmark.
   readers, libspelling, HiDPI, scrolling at 5 MB, and GtkSourceView in place
   of GtkTextView.
 
+## Findings from step 1 (2026-10-21)
+
+These are GTK 4.14 behaviors the view depends on, each found while building
+step 1:
+
+- **`iter_location` is wrong after hidden text.** It measures invisible
+  characters as if they were shown: each one shifts the reported x by one
+  character. `cursor_locations` gives the drawn position, so all drawing
+  uses it.
+- **`iter_at_location` returns nothing past a line's end,** for example at
+  the right edge of the window. The visible range comes from `line_at_y`.
+  The first version fell back to the whole document there. It then asked
+  GTK about every list item on every frame, which forced a layout of the
+  whole document: 3 s per frame at 5 MB.
+- **`remove_all_tags` searches for the next toggle of any tag,** and in an
+  unstyled stretch of buffer that search runs to the end. So the first pass
+  over a never-styled range does not clear first. Otherwise lazy styling
+  was quadratic: 36 s at 5 MB.
+- **Priorities:** lazy styling runs at idle priority 123. That is after
+  redraws (120) and before GTK's background line validation (125), so no
+  line is laid out unstyled and then again.
+- **A transparent foreground draws opaque.** "Clear" text (a point
+  comment's carrier, the `>` gap of a substitution) uses the paper color.
+- **The default text color comes from the `textview` CSS node,** not
+  `textview text`.
+- **A large document's buffer starts with its first screen only.** The
+  first 32 KB, cut at a blank line, is parsed and styled synchronously. The
+  whole text goes into the buffer when its full parse lands. Filling a
+  buffer costs about 17 ms per MB.
+
+Measured by `tvmv --self-check` (headless, Broadway):
+
+| | 64 KB | 1 MB | 5 MB |
+|---|---|---|---|
+| first screen shown, styled | 12 ms | 13 ms | 20 ms |
+| whole parse landed | 31 ms | 132 ms | 642 ms |
+| everything styled | 39 ms | 414 ms | 2.2 s |
+| GTK line validation done | 83 ms | 1.0 s | 5.2 s |
+| keystroke + installing its parse (median) | 0.6 ms | 1.2 ms | 8.0 ms |
+
 ## Offsets
 
 There are three coordinate systems:
@@ -105,10 +160,11 @@ There are three coordinate systems:
 - **Swift offsets** are UTF-16. They appear only in the golden fixtures and
   are converted by the test harness.
 
-`OffsetMap` converts between the first two. It holds a byte-to-character
-table built per block, plus the sorted anchor positions. Lookups are
-O(log n), and an edit updates the map from the edited block onward. Saving
-needs no mapping: `get_text(include_hidden = true)` returns the file.
+`SourceText` (`offsets.rs`) mirrors the source and converts between the
+first two. It holds (byte, character) checkpoints about 256 bytes apart,
+plus the sorted anchor positions. A lookup is a binary search plus a count
+within one gap. An edit shifts the checkpoints after it and re-spaces the
+gap it landed in. Saving writes the mirror (see decision 8).
 
 ## What renders how
 
@@ -118,7 +174,7 @@ The same as the base spec's table, except for these rows:
 |---|---|---|
 | Bullets, numbers, checkboxes, quote rules, thematic breaks, code-block backgrounds | Drawn in `TvmvView::snapshot_layer` (below text) | Visible lines only |
 | Fence lines | Invisible, so they take no height | Caret rule below |
-| Images | `insert_paintable` with a `gdk::Texture` from the local file | Counted in `OffsetMap` |
+| Images | `insert_paintable` with a `gdk::Texture` from the local file | Counted in `SourceText` |
 | Tables | `TableGrid` on a child anchor | Below |
 | Math, Mermaid, HTML blocks, front matter | Source, in the code style | Embedded rendering deferred |
 | Review cards | `TvmvView::add_overlay` in the right margin | Below |
@@ -228,13 +284,22 @@ All in `linux/src`. Pure modules are unit-tested without GTK.
 - **Pure:**
   - `layout.rs`: ports of `MarkdownLayout`, `MarkdownLayoutParser` and
     `MarkdownLayoutDiff` over the cmark AST.
-  - `edit_rules.rs`, `offsets.rs` (`OffsetMap`), and `table_source.rs`.
+  - `edit_rules.rs`, `offsets.rs` (`SourceText`), and `table_source.rs`.
   - `review.rs`, extended with `review_spans.rs`, `review_layout.rs` and
     `review_ops.rs`.
-- **GTK:**
-  - `view.rs`: `TvmvView` (the subclass, drawing, reveal state, key handling).
-  - `styler.rs`: the tag table and lazy tagging.
-  - `table_grid.rs` and `review_cards.rs`.
+- **GTK, in `native/`:**
+  - `view.rs`: `TvmvView`, the subclass. It lays out the column and draws
+    below the text.
+  - `document_view.rs`: the controller. It owns the source mirror, the
+    parse cycle, the edit path, the edit rules, reveal, the clipboard and
+    input.
+  - `styler.rs`: the tags, plus `Prepared`, a layout with the range indexes
+    built on the parse thread.
+  - `undo.rs` (pure) and `theme.rs`.
+  - `check.rs`: `tvmv --self-check` and `tvmv --native-shot`.
+  - `window.rs`: the step-1 window behind `tvmv --native`, which step 2
+    retires.
+  - To come: `table_grid.rs` and `review_cards.rs`.
 - **Removed from the main window:** `editor.rs` and the CodeMirror bridge,
   and `preview.rs` as the main view. Peek, `--html`, `--pdf` and print keep
   the web layer.
@@ -284,8 +349,9 @@ the GTK harness:
 ## Build order
 
 1. `layout.rs` with the golden corpus, then
-   `OffsetMap`, `TvmvView` and `styler.rs`. Read-only first, then Ctrl+E
-   editing with the edit rules.
+   `SourceText`, `TvmvView` and `styler.rs`. Read-only first, then Ctrl+E
+   editing with the edit rules. **Done 2026-10-21,** behind
+   `tvmv --native FILE`. It still needs the manual pass on a desktop.
 2. Reader features: outline, links, reading position, find, settings and
    print. Then remove the CodeMirror pane.
 3. Lists, quotes, checkboxes, images and spelling.

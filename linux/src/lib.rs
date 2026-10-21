@@ -20,6 +20,7 @@ pub mod edit_rules;
 pub mod editor;
 pub mod find;
 pub mod js;
+pub mod native;
 pub mod layout;
 pub mod preview;
 pub mod reading;

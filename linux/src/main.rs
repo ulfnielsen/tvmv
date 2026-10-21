@@ -6,6 +6,9 @@
 //!   tvmv --pdf <out.pdf> <file.md>  render straight to PDF, no window
 //!   tvmv --peek <file.md>            chromeless preview, Escape to close
 //!   tvmv --thumbnail <in> <out> <n>  draw a file-manager thumbnail (no WebKit)
+//!   tvmv --native <file.md>          the native editor, while it is built
+//!   tvmv --self-check                scripted checks of the native editor
+//!   tvmv --native-shot <in> <out.png> [WxH]  the native view, rendered offscreen
 //!
 //! Diagnostics:
 //!   tvmv --frame-bench <f> [--idle] measure frames actually painted
@@ -27,7 +30,10 @@ fn main() -> ExitCode {
     // Only for the modes that actually start WebKit. `--thumbnail` and `--html`
     // never do, and a file manager running the thumbnailer over a directory
     // should not get a sandbox warning per file.
-    let uses_webkit = !matches!(args.first().map(String::as_str), Some("--thumbnail" | "--html"));
+    let uses_webkit = !matches!(
+        args.first().map(String::as_str),
+        Some("--thumbnail" | "--html" | "--native" | "--self-check" | "--native-shot")
+    );
     if uses_webkit {
         // Both must happen before any WebKit type is touched.
         tvmv::startup::apply_opt_out();
@@ -89,6 +95,28 @@ fn main() -> ExitCode {
             }
             None => {
                 eprintln!("tvmv: --frame-bench needs a file");
+                ExitCode::FAILURE
+            }
+        },
+        Some("--native") => match args.get(1) {
+            Some(input) => exit_code(tvmv::native::window::run(&PathBuf::from(input))),
+            None => {
+                eprintln!("tvmv: --native needs a file");
+                ExitCode::FAILURE
+            }
+        },
+        Some("--self-check") => exit_code(tvmv::native::check::run()),
+        Some("--native-shot") => match (args.get(1), args.get(2)) {
+            (Some(input), Some(output)) => {
+                let size = args
+                    .get(3)
+                    .and_then(|s| s.split_once('x'))
+                    .and_then(|(w, h)| Some((w.parse().ok()?, h.parse().ok()?)))
+                    .unwrap_or((900, 1000));
+                exit_code(tvmv::native::check::screenshot(&PathBuf::from(input), output, size))
+            }
+            _ => {
+                eprintln!("tvmv: --native-shot needs <input.md> <output.png> [WxH]");
                 ExitCode::FAILURE
             }
         },
