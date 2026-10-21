@@ -1,0 +1,40 @@
+{
+  "blockImages": [],
+  "blocks": [
+    "0+30 heading",
+    "31+16 heading",
+    "48+43 paragraph",
+    "93+30 paragraph",
+    "125+32 paragraph",
+    "159+46 paragraph",
+    "207+18 paragraph",
+    "227+32 table",
+    "261+39 paragraph",
+    "301+11 list"
+  ],
+  "codeBlocks": [],
+  "definitions": [],
+  "headings": [
+    "1 0+30 Setext heading",
+    "2 31+16 Another"
+  ],
+  "length": 313,
+  "listItems": [
+    "301+2 301+1 0 bullet - -",
+    "307+2 307+1 0 bullet - -"
+  ],
+  "markers": [
+    "15+15 0+30 line",
+    "39+8 31+16 line"
+  ],
+  "quoteLines": [],
+  "softBreaks": [],
+  "spellExempt": [],
+  "styles": [
+    "0+30 heading(1)",
+    "31+16 heading(2)"
+  ],
+  "tables": [
+    "227+32 none,none 229+1 233+1 / 253+0 256+1"
+  ]
+}

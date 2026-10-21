@@ -1,0 +1,67 @@
+{
+  "blockImages": [],
+  "blocks": [
+    "0+9 heading",
+    "11+164 block_quote",
+    "177+77 list",
+    "255+15 paragraph",
+    "276+47 code_block",
+    "324+24 html_block",
+    "350+45 paragraph"
+  ],
+  "codeBlocks": [
+    "111+40 124+26",
+    "272+51 276+47"
+  ],
+  "definitions": [
+    "397+34 [ref]: https://example.com \"Title\""
+  ],
+  "headings": [
+    "1 0+10 Nesting"
+  ],
+  "length": 432,
+  "listItems": [
+    "44+3 44+2 0 ordered - -",
+    "99+3 99+2 0 ordered - -",
+    "177+2 177+1 0 bullet - -",
+    "185+4 187+1 1 bullet - -",
+    "196+6 200+1 2 bullet - -",
+    "244+2 244+1 0 bullet - -"
+  ],
+  "markers": [
+    "0+2 0+10",
+    "111+13 111+40 line",
+    "373+1 373+21",
+    "388+6 373+21"
+  ],
+  "quoteLines": [
+    "11+2 1",
+    "40+1 1",
+    "42+2 1",
+    "53+1 1",
+    "55+2 1",
+    "95+1 1",
+    "97+2 1",
+    "109+1 1",
+    "111+2 1",
+    "124+2 1",
+    "142+2 1",
+    "151+1 1",
+    "153+2 1"
+  ],
+  "softBreaks": [],
+  "spellExempt": [
+    "111+40",
+    "272+51",
+    "324+24",
+    "388+6"
+  ],
+  "styles": [
+    "0+10 heading(1)",
+    "111+40 codeBlock(rust)",
+    "272+51 codeBlock()",
+    "324+24 html",
+    "374+14 link(https://example.com)"
+  ],
+  "tables": []
+}

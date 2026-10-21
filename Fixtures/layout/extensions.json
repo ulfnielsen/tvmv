@@ -1,0 +1,77 @@
+{
+  "blockImages": [],
+  "blocks": [
+    "0+16 heading",
+    "18+9 heading",
+    "29+110 table",
+    "141+16 heading",
+    "159+46 paragraph",
+    "207+12 heading",
+    "221+87 paragraph",
+    "310+13 heading",
+    "325+68 list",
+    "394+11 heading",
+    "407+67 table"
+  ],
+  "codeBlocks": [],
+  "definitions": [],
+  "headings": [
+    "1 0+17 GFM extensions",
+    "2 18+10 Tables",
+    "2 141+17 Strikethrough",
+    "2 207+13 Autolinks",
+    "2 310+14 Task lists",
+    "2 394+12 Combined"
+  ],
+  "length": 475,
+  "listItems": [
+    "325+6 325+1 0 bullet todo 327+3",
+    "341+6 341+1 0 bullet done 343+3",
+    "355+8 357+1 1 bullet todo 359+3",
+    "380+2 380+1 0 bullet - -"
+  ],
+  "markers": [
+    "0+2 0+17",
+    "18+3 18+10",
+    "141+3 141+17",
+    "165+2 165+10",
+    "173+2 165+10",
+    "180+2 180+19",
+    "197+2 180+19",
+    "189+2 189+8",
+    "195+2 189+8",
+    "207+3 207+13",
+    "310+3 310+14",
+    "394+3 394+12",
+    "439+2 439+7",
+    "444+2 439+7"
+  ],
+  "quoteLines": [],
+  "softBreaks": [
+    "283"
+  ],
+  "spellExempt": [
+    "226+15",
+    "246+33",
+    "447+19"
+  ],
+  "styles": [
+    "0+17 heading(1)",
+    "18+10 heading(2)",
+    "141+17 heading(2)",
+    "167+6 strikethrough",
+    "182+15 strikethrough",
+    "191+4 strong",
+    "207+13 heading(2)",
+    "226+15 autolink(http://www.example.com)",
+    "246+33 autolink(https://example.com/path?q=1#frag)",
+    "310+14 heading(2)",
+    "394+12 heading(2)",
+    "441+3 strikethrough",
+    "447+19 autolink(https://example.com)"
+  ],
+  "tables": [
+    "29+110 none,center,right 31+7 41+6 50+5 / 83+6 92+3 98+13 / 116+13 132+3 138+0",
+    "407+67 none,none 409+4 416+4 / 439+27 469+3"
+  ]
+}

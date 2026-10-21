@@ -1,0 +1,54 @@
+{
+  "blockImages": [],
+  "blocks": [
+    "0+37 heading",
+    "39+40 paragraph",
+    "81+38 paragraph",
+    "121+69 code_block",
+    "192+61 code_block",
+    "255+19 code_block",
+    "276+24 paragraph",
+    "302+29 code_block"
+  ],
+  "codeBlocks": [
+    "121+70 132+54",
+    "192+62 201+48",
+    "255+20 259+11",
+    "302+30 312+19"
+  ],
+  "definitions": [],
+  "headings": [
+    "1 0+38 Fences the web layer post-processes"
+  ],
+  "length": 332,
+  "listItems": [],
+  "markers": [
+    "0+2 0+38",
+    "121+11 121+70 line",
+    "187+4 121+70 line",
+    "192+9 192+62 line",
+    "250+4 192+62 line",
+    "255+4 255+20 line",
+    "271+4 255+20 line",
+    "302+10 302+30 line"
+  ],
+  "quoteLines": [],
+  "softBreaks": [
+    "83",
+    "116"
+  ],
+  "spellExempt": [
+    "121+70",
+    "192+62",
+    "255+20",
+    "302+30"
+  ],
+  "styles": [
+    "0+38 heading(1)",
+    "121+70 codeBlock(mermaid)",
+    "192+62 codeBlock(swift)",
+    "255+20 codeBlock()",
+    "302+30 codeBlock(python)"
+  ],
+  "tables": []
+}

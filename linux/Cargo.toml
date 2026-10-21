@@ -21,6 +21,7 @@ path = "src/main.rs"
 cc = "1"
 
 [dependencies]
+unicode-segmentation = "1.13.2"
 async-channel = "2.5.0"
 cairo-rs = { version = "0.22", features = ["png"] }
 glib = "0.22"
