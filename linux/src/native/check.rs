@@ -726,6 +726,16 @@ fn table_checks(r: &mut Report) {
     settle();
     until(Duration::from_millis(400), || grid.tools_shown());
     r.check("H7b the table's buttons show while one of its cells has focus", grid.tools_shown(), "");
+    grid.press(1, 0, CellKey::Next);
+    settle();
+    grid.press(1, 1, CellKey::Previous);
+    settle();
+    let carets: Vec<bool> = (0..3).flat_map(|r| (0..2).map(move |c| (r, c))).filter_map(|(r, c)| grid.cell(r, c)).map(|c| c.view.is_cursor_visible()).collect();
+    r.check(
+        "H7d only the focused cell shows a caret, not the document nor the other cells",
+        !doc.view.is_cursor_visible() && carets.iter().filter(|&&v| v).count() == 1 && grid.focused() == Some((1, 0)),
+        format!("document {}, cells {carets:?}", doc.view.is_cursor_visible()),
+    );
     // A shortcut runs its command; the menu shows the shortcuts.
     grid.press(1, 0, CellKey::Command(Command::InsertColumnRight));
     settle();
@@ -1377,6 +1387,24 @@ fn trace_pick() {
             break;
         }
         w = widget.parent();
+    }
+    if let Ok(out) = std::env::var("TVMV_TRACE_PICK_SHOT") {
+        doc.set_editable(true);
+        grid.cell(1, 1).unwrap().view.grab_focus();
+        settle();
+        grid.press(1, 1, crate::native::document_view::CellKey::Previous);
+        settle();
+        until(Duration::from_millis(600), || false);
+        settle();
+        eprintln!("focused cell {:?}, main view focus {}, main cursor visible {}", grid.focused(), doc.view.has_focus(), doc.view.is_cursor_visible());
+        for r in 0..2 {
+            for c in 0..2 {
+                if let Some(cell) = grid.cell(r, c) {
+                    eprintln!("cell {r},{c}: focus {} cursor visible {}", cell.view.has_focus(), cell.view.is_cursor_visible());
+                }
+            }
+        }
+        save_png(window.upcast_ref(), &out);
     }
     eprintln!("cell editable {}, extra menu items {:?}", cell.is_editable(), cell.view.extra_menu().map(|m| m.n_items()));
     let popped = cell.view.activate_action("menu.popup", None);

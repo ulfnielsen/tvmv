@@ -376,11 +376,18 @@ impl DocumentView {
 
     pub fn set_editable(&self, editable: bool) {
         self.view.set_editable(editable);
-        self.view.set_cursor_visible(editable);
+        self.update_cursor();
         self.update_spelling_menu();
         for (_, grid) in self.grids.borrow().iter() {
             grid.set_editable(editable);
         }
+    }
+
+    /// The caret shows while editing, in the view with the focus only. GTK
+    /// draws it in an unfocused view too: with a table cell or a reply field
+    /// focused, the document's caret would stay on show beside it.
+    fn update_cursor(&self) {
+        self.view.set_cursor_visible(self.view.is_editable() && self.view.has_focus());
     }
 
     /// Turn spell checking on or off (Settings → Check spelling).
@@ -683,6 +690,12 @@ impl DocumentView {
     // MARK: Signals
 
     fn connect(&self) {
+        let me = self.me.clone();
+        self.view.connect_has_focus_notify(move |_| {
+            if let Some(doc) = me.upgrade() {
+                doc.update_cursor();
+            }
+        });
         // An image on the clipboard with no text pastes as a picture.
         let me = self.me.clone();
         self.view.connect_paste_clipboard(move |view| {
