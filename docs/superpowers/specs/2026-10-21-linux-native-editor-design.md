@@ -255,7 +255,7 @@ The same as the base spec's table, except for these rows:
 | Block images | Drawn in `snapshot_layer` in the room their line reserves; a failed one shows "▨ alt" | Loaded off the main thread (`images.rs`) |
 | Tables | `TableGrid` on a child anchor | Below |
 | Math, Mermaid, HTML blocks, front matter | Source, in the code style | Embedded rendering deferred |
-| Review cards | `TvmvView::add_overlay` in the right margin | Below |
+| Review cards | A `gtk::Fixed` in the view's right gutter | Below |
 
 ## Editing rules
 
