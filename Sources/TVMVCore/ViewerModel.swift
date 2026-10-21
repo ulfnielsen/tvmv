@@ -73,7 +73,6 @@ public final class ViewerModel: ObservableObject {
     /// type-then-Return never navigates against a search that never ran.
     private var pendingFindQuery: String?
     private var watcher: FileWatcher?
-    private var cssWatcher: FileWatcher?
     private var isReady = false
     /// Latest-wins ordering for reloads: a slow read of one on-disk version
     /// must not apply over a newer reload that already finished.
@@ -416,13 +415,6 @@ public final class ViewerModel: ObservableObject {
         let base = "\(AssetSchemeHandler.scheme)://doc/"
         await controller.setContent(bodyHTML: html, docBaseHref: base)
         await controller.applyStyle(json: AppSettings.shared.styleJSON)
-        await controller.setUserCSS(UserCSS.load(AppSettings.shared.customCSSURL) ?? "")
-        await updateChrome()
-    }
-
-    public func applyUserCSS() async {
-        guard isReady else { return }
-        await controller?.setUserCSS(UserCSS.load(AppSettings.shared.customCSSURL) ?? "")
         await updateChrome()
     }
 
@@ -463,32 +455,11 @@ public final class ViewerModel: ObservableObject {
             }
             watcher?.start()
         }
-        // Live-reload the user CSS override while it's being edited.
-        startCSSWatcher()
-    }
-
-    private func startCSSWatcher() {
-        cssWatcher?.stop()
-        cssWatcher = nil
-        guard let cssURL = AppSettings.shared.customCSSURL,
-              FileManager.default.fileExists(atPath: cssURL.path) else { return }
-        cssWatcher = FileWatcher(url: cssURL) { [weak self] in
-            Task { @MainActor in await self?.applyUserCSS() }
-        }
-        cssWatcher?.start()
-    }
-
-    /// Re-watch + re-apply when the custom-CSS path changes in Settings.
-    public func cssPathChanged() {
-        startCSSWatcher()
-        Task { await applyUserCSS() }
     }
 
     public func stopWatching() {
         watcher?.stop()
         watcher = nil
-        cssWatcher?.stop()
-        cssWatcher = nil
     }
 
     /// Re-read the file from disk. Own-save echoes (disk == text) are ignored;

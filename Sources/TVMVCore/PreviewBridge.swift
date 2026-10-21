@@ -245,12 +245,6 @@ public final class MarkdownWebController {
         await run(js)
     }
 
-    /// Inject the user's custom stylesheet (overrides the theme). Empty clears it.
-    public func setUserCSS(_ css: String) async {
-        let js = "window.tvmv.applyUserCSS(\(JSString.literal(css)));"
-        await run(js)
-    }
-
     /// The page's effective background color (e.g. "rgb(0, 133, 124)"), so the
     /// app can tint its window chrome to match the theme.
     public func pageBackgroundColor() async -> String? {

@@ -20,7 +20,6 @@ public final class AppSettings: ObservableObject {
     @Published public var fullWidth: Bool { didSet { d.set(fullWidth, forKey: K.fullWidth) } }
     @Published public var theme: Theme { didSet { d.set(theme.rawValue, forKey: K.theme) } }
     @Published public var showOutline: Bool { didSet { d.set(showOutline, forKey: K.showOutline) } }
-    @Published public var customCSSPath: String { didSet { d.set(customCSSPath, forKey: K.customCSSPath) } }
     @Published public var editorPaneWidth: Double { didSet { d.set(editorPaneWidth, forKey: K.editorPaneWidth) } }
     /// Editor-pane font family. Empty means "same as the code font".
     @Published public var editorFont: String { didSet { d.set(editorFont, forKey: K.editorFont) } }
@@ -31,16 +30,9 @@ public final class AppSettings: ObservableObject {
     private enum K {
         static let bodyFont = "bodyFont", monoFont = "monoFont", baseSize = "baseSize"
         static let measure = "measure", fullWidth = "fullWidth", theme = "theme", showOutline = "showOutline"
-        static let customCSSPath = "customCSSPath"
         static let editorPaneWidth = "editorPaneWidth"
         static let editorFont = "editorFont"
         static let editorFontSize = "editorFontSize"
-    }
-
-    /// The custom-CSS file chosen in Settings, or `nil` for no override (the
-    /// built-in theme). Nothing is loaded unless the user explicitly picks a file.
-    public var customCSSURL: URL? {
-        customCSSPath.isEmpty ? nil : URL(fileURLWithPath: (customCSSPath as NSString).expandingTildeInPath)
     }
 
     /// `defaults` is injectable so tests can use an ephemeral suite and never
@@ -54,7 +46,6 @@ public final class AppSettings: ObservableObject {
         fullWidth = defaults.bool(forKey: K.fullWidth)            // default false
         theme = Theme(rawValue: defaults.string(forKey: K.theme) ?? "auto") ?? .auto
         showOutline = defaults.object(forKey: K.showOutline) as? Bool ?? true
-        customCSSPath = defaults.string(forKey: K.customCSSPath) ?? ""
         editorPaneWidth = defaults.object(forKey: K.editorPaneWidth) as? Double ?? 0
         editorFont = defaults.string(forKey: K.editorFont) ?? ""
         editorFontSize = defaults.object(forKey: K.editorFontSize) as? Double ?? 0

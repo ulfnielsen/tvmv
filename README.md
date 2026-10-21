@@ -270,32 +270,6 @@ records the build recipe and the KF5/KF6 detection Ubuntu 24.04 forces. GNOME
 Sushi's spacebar preview cannot be extended: its viewers are compiled into
 gresource bundles with no plugin API.
 
-## Custom themes (CSS)
-
-Out of the box TVMV wears its built-in "paper & ink" theme, which has taste. If
-you don't, you can override it with your own CSS — TVMV won't judge.
-
-Both apps now render documents natively and do not load custom CSS there
-(styling options will return in another form). On Linux custom CSS still
-applies to `--peek` windows, print and Save as PDF; on macOS print and Save as
-PDF use the built-in theme.
-
-Open **Settings (Ctrl+,) → Custom CSS → Choose…** and pick a `.css` file. TVMV injects
-it after the built-in theme (overriding it), tints the window chrome — sidebar,
-window, and title bar — to a slightly-lightened version of your background color,
-and **live-reloads** as you edit the file. *Reset to default* goes back to the
-built-in theme. Nothing is loaded unless you pick a file.
-
-Try [`examples/comic-msd.css`](examples/comic-msd.css) — Comic Sans on MSD teal
-(pictured in the web-rendered window, which Linux uses for `--peek`):
-
-![TVMV with a custom theme](docs/theme-screenshot.png)
-
-Writing your own: plain element rules (`#content.markdown-body …`) override
-directly; to override the typography **variables** (`--tvmv-body-font`,
-`--tvmv-base-size`, …) add `!important`, since the app sets those inline for live
-Settings updates.
-
 ## Releasing
 
 `build/release.fish [major|minor|patch]` (default `patch`) cuts a release: runs
