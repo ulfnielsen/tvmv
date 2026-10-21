@@ -821,6 +821,27 @@ fn review_checks(r: &mut Report) {
     );
     window.close();
 
+    // Cards scroll with the text.
+    let long = format!("{}{doc_text}", "Filler paragraph.\n\n".repeat(30));
+    let (doc, window) = open(&long, false);
+    settle();
+    until(Duration::from_millis(300), || false);
+    let card = doc.review_cards().and_then(|c| c.cards.borrow().first().cloned());
+    let y = |doc: &DocumentView| card.as_ref().and_then(|c| c.widget.compute_bounds(&doc.view)).map_or(0.0, |b| b.y());
+    let before = y(&doc);
+    if let Some(adj) = doc.view.vadjustment() {
+        adj.set_value(120.0);
+    }
+    settle();
+    let after = y(&doc);
+    let scrolled = doc.view.vadjustment().map_or(0.0, |a| a.value()) as f32;
+    r.check(
+        "I1b the cards scroll with the text",
+        scrolled > 0.0 && (before - after - scrolled).abs() <= 1.0,
+        format!("card at {before}, then {after}, scrolled {scrolled}"),
+    );
+    window.close();
+
     let text = "The cache is stale.\n";
     let (doc, window) = open(text, false);
     let cache = text.find("cache").unwrap();

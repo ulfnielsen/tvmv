@@ -419,6 +419,20 @@ impl ReviewColumn {
         }
     }
 
+    /// The text scrolled. GTK 4.14 moves overlays only when their container
+    /// is allocated, which scrolling doesn't do; and allocating the view
+    /// alone passes the container the same rectangle, so it is skipped.
+    pub fn scrolled(&self) {
+        // The view passes its scroll offset to the container as it is
+        // allocated; the container then places the overlays with it.
+        if let Some(host) = self.host.upgrade() {
+            host.view.queue_allocate();
+        }
+        if let Some(parent) = self.slots.borrow().first().and_then(|s| s.frame.parent()) {
+            parent.queue_allocate();
+        }
+    }
+
     /// Put `content` in a free slot (a new overlay if none is free).
     fn attach(&self, host: &DocumentView, content: &gtk4::Widget) {
         let mut slots = self.slots.borrow_mut();
