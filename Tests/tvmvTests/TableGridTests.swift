@@ -41,6 +41,13 @@ final class TableGridTests: XCTestCase {
         XCTAssertTrue(glyphHidden(ns.range(of: "| Bob").location))
     }
 
+    func testCellsPostNoFrameChanges() {
+        // Posting costs more with every text view: with each cell posting,
+        // a page of tables took quadratic time to load.
+        XCTAssertTrue(grid.cells.joined().allSatisfy { !$0.postsFrameChangedNotifications })
+        XCTAssertTrue(view.postsFrameChangedNotifications, "the document's scroll view follows its frame")
+    }
+
     func testTheGridReservesItsHeightAndFitsTheColumn() {
         // The table's first line is all hidden glyphs, which TextKit puts on
         // the line before; the reserved height lands on the line that starts

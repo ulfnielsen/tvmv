@@ -72,7 +72,7 @@ final class TableGridView: NSView {
         cells.joined().forEach { $0.removeFromSuperview() }
         cells = texts.enumerated().map { r, row in
             row.enumerated().map { c, value in
-                let cell = DocumentTextView.make()
+                let cell = DocumentTextView.make(cell: true)
                 var cellTheme = theme
                 cellTheme.columnWidth = nil
                 cellTheme.padding = 0

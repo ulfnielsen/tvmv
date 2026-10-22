@@ -103,8 +103,12 @@ final class DocumentTextView: NSTextView {
     private var unchangedPrefix = Int.max
     private var unchangedSuffix = Int.max
 
-    static func make() -> DocumentTextView {
+    /// `cell`: a table cell. Nothing observes a cell's frame, and AppKit's
+    /// cost to post a frame change grows with the number of text views, so
+    /// a cell posts none: with them, a page of tables loaded in quadratic time.
+    static func make(cell: Bool = false) -> DocumentTextView {
         let view = DocumentTextView(usingTextLayoutManager: false)   // TextKit 1: null glyphs
+        if cell { view.postsFrameChangedNotifications = false }
         view.configure()
         return view
     }
