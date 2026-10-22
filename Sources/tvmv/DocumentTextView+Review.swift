@@ -191,7 +191,7 @@ extension DocumentTextView {
         let shows = !models.isEmpty || reviewComposer != nil
         if shows != showsReviewColumn {
             showsReviewColumn = shows
-            columnChanged()
+            keepingLineInPlace { columnChanged() }
         }
 
         // Keep every card whose content is unchanged: an edit moves anchors on
@@ -237,6 +237,12 @@ extension DocumentTextView {
                                 ?? items.firstIndex { ($0.view as? ReviewCardView)?.isFocused == true },
                               gap: 8, top: textContainerOrigin.y)
         for (item, y) in zip(items, tops) { item.view.setFrameOrigin(NSPoint(x: x, y: y)) }
+        defer {
+            if revealsFocusedCard {
+                revealsFocusedCard = false
+                revealFocusedCard()
+            }
+        }
         // The view grows to hold a card that reaches past the text (enforced
         // in setFrameSize: the scroll view resets minSize as it tiles).
         let next = zip(items, tops).map { $1 + $0.view.frame.height }.max()
@@ -322,7 +328,10 @@ extension DocumentTextView {
         focusedReviewID = id
         let before = reviewCards.map(\.isFocused)
         for card in reviewCards { card.isFocused = card.id == id }
-        if reviewCards.map(\.isFocused) != before {
+        guard reviewCards.map(\.isFocused) != before else { return }
+        if layingOutReview {
+            revealsFocusedCard = true   // a new card has no place yet
+        } else {
             layoutReviewMargin()
             revealFocusedCard()
         }

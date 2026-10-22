@@ -61,6 +61,8 @@ final class DocumentTextView: NSTextView {
     /// The theme the cards and markers were built with.
     var reviewTheme: NativeTheme?
     var layingOutReview = false
+    /// The focus moved mid-layout: show the focused card once it is placed.
+    var revealsFocusedCard = false
     /// The comment or suggestion being written (⌘⇧M, ⌘⇧E), in the side column.
     var reviewComposer: ReviewComposerView?
     private var layingOutGrids = false
@@ -289,6 +291,33 @@ final class DocumentTextView: NSTextView {
         if textContainer?.size.width != column { restyleImages { _ in true } }
         layoutGrids()
         layoutReviewMargin()
+    }
+
+    /// Make `change` (one that rewraps the text) and scroll so the line being
+    /// worked on stays where it was on screen: the selection's when it is in
+    /// sight, else the top one. The comment column coming or going would
+    /// otherwise move what is being read.
+    func keepingLineInPlace(_ change: () -> Void) {
+        guard let lm = layoutManager, let tc = textContainer, let length = textStorage?.length, length > 0
+        else { change(); return }
+        func lineTop(_ character: Int) -> CGFloat {
+            lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: character), effectiveRange: nil).minY
+                + textContainerOrigin.y
+        }
+        let visible = visibleRect
+        var character = min(selectedRange().location, length - 1)
+        if !(visible.minY..<visible.maxY).contains(lineTop(character)) {
+            guard visible.minY > 0 else { change(); return }
+            // One point below the edge, as for the reading position.
+            let point = NSPoint(x: 0, y: visible.minY - textContainerOrigin.y + 1)
+            character = min(lm.characterIndexForGlyph(at: lm.glyphIndex(for: point, in: tc)), length - 1)
+        }
+        let offset = lineTop(character) - visible.minY
+        change()
+        // Lay out to the line and grow to match, or the scroll is clamped.
+        lm.ensureLayout(forCharacterRange: NSRange(location: 0, length: character + 1))
+        sizeToFit()
+        scroll(NSPoint(x: 0, y: max(0, lineTop(character) - offset)))
     }
 
     func layoutColumn() {
