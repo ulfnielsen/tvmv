@@ -32,8 +32,12 @@ public enum DocumentStyler {
         let source = storage.string as NSString
         let inlineImages = layout.inlineImages + (blockImagesInline ? layout.blockImages.map(inlineImage) : [])
         // A shown inline image's source is not styled as source: its alt
-        // keeps the font of the text around it.
-        let shownInline = Set(inlineImages.filter { !isRevealed($0.range) }.map(\.range))
+        // keeps the font of the text around it. One in a hidden table shows
+        // in its cell, not here.
+        let hiddenTables = layout.tables.map(\.range).filter { !isRevealed($0) }
+        let shownInline = Set(inlineImages.filter { image in
+            !isRevealed(image.range) && !hiddenTables.contains { NSLocationInRange(image.range.location, $0) }
+        }.map(\.range))
         func clip(_ r: NSRange) -> NSRange? {
             let c = NSIntersectionRange(r, range)
             return c.length > 0 ? c : nil

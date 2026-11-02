@@ -76,6 +76,15 @@ final class InlineImageStylerTests: XCTestCase {
         XCTAssertEqual(wide.height, 6, accuracy: 0.001)
     }
 
+    func testImageInAHiddenTableIsLeftToItsCell() {
+        // The grid's cell draws it; the table's hidden source must not.
+        let text = "| a |\n|---|\n| ![b](x.png) |\n"
+        let (storage, _) = stack(text, size: CGSize(width: 40, height: 20))
+        let bang = (text as NSString).range(of: "![b]").location
+        XCTAssertNil(storage.attribute(.tvmvImageCarrier, at: bang, effectiveRange: nil))
+        XCTAssertTrue(hidden(storage, bang))
+    }
+
     func testCellTreatsBlockImageAsInline() {
         let (storage, _) = stack("![b](x.png)", size: CGSize(width: 40, height: 20), blockImagesInline: true)
         XCTAssertEqual(storage.attribute(.tvmvImageCarrier, at: 0, effectiveRange: nil) as? String, "x.png")

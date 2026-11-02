@@ -186,6 +186,7 @@ The same as macOS, except:
   caret entering it reveals `![alt](path)`. The caret passes the image as
   one character. An image inside a link follows the link on tap/click.
 - **Linux** follows later (see Deferred).
+- The golden-corpus key follows with the Linux port.
 
 ## Editing rules
 

@@ -117,6 +117,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         hooks.view = self
         delegate = hooks
         engine.blockImageHeight = { [weak self] in self?.imageSize(for: $0)?.height }
+        engine.inlineImageSize = { [weak self] in self?.inlineImageSize(for: $0) }
         engine.tableHeight = { [weak self] in self?.tableHeights[$0] }
         layoutManager?.delegate = markupLayout
         textStorage?.delegate = hooks
@@ -369,9 +370,28 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         return exempt
     }
 
+    /// Hidden markup, or a shown inline image's carrier: to the caret,
+    /// delete and copy rules an inline image is one hidden run, which the
+    /// caret rests before or after. Only `.tvmvHidden` lays out as nothing.
     func isHidden(_ index: Int) -> Bool {
         guard let storage = textStorage, index >= 0, index < storage.length else { return false }
         return storage.attribute(.tvmvHidden, at: index, effectiveRange: nil) != nil
+            || storage.attribute(.tvmvImageCarrier, at: index, effectiveRange: nil) != nil
+    }
+
+    /// The source of the image shown as a picture that a one-character
+    /// Backspace (ending at its end) or Delete (starting at its start) would
+    /// cut into: the whole image goes instead.
+    fileprivate func shownImage(deletedBy range: NSRange, caret: Int) -> NSRange? {
+        guard range.length == 1, let storage = textStorage else { return nil }
+        let backward = caret == NSMaxRange(range)
+        let images = layout.inlineImages.map(\.range)
+            + (engine.treatsBlockImagesAsInline ? layout.blockImages.map(\.range) : [])
+        return images.first { image in
+            (backward ? NSMaxRange(image) == NSMaxRange(range) : image.location == range.location)
+                && NSMaxRange(image) <= storage.length
+                && storage.attribute(.tvmvImageCarrier, at: image.location, effectiveRange: nil) != nil
+        }
     }
 
     // MARK: Events
@@ -588,6 +608,15 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         let column = container.size.width - 2 * container.lineFragmentPadding
         let width = min(picture.size.width, column)
         return NSSize(width: width, height: picture.size.height * width / picture.size.width)
+    }
+
+    /// The size a loaded inline image is drawn at in its line (in a table
+    /// cell, its block images too).
+    private func inlineImageSize(for image: MarkdownLayout.InlineImage) -> CGSize? {
+        guard let picture = imageStore.image(for: image.url), picture.size.width > 0, let container = textContainer
+        else { return nil }
+        return InlineImageMetrics.size(natural: picture.size, theme: theme,
+                                       column: container.size.width - 2 * container.lineFragmentPadding)
     }
 
     /// Start loading every block and inline image not yet requested.
@@ -914,7 +943,9 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
                   !view.applyingEdit, view.documentUndo.isUndoing == false, view.documentUndo.isRedoing == false
             else { return true }   // keystrokes only: not undo/redo, not the app's own edits
             let caret = view.selectedRange().location
-            switch EditRules.retargetDelete(range, caret: caret, in: storage.string as NSString, isHidden: view.isHidden) {
+            let action = view.shownImage(deletedBy: range, caret: caret).map(EditRules.DeleteAction.replace)
+                ?? EditRules.retargetDelete(range, caret: caret, in: storage.string as NSString, isHidden: view.isHidden)
+            switch action {
             case .allow:
                 return true
             case .ignore:

@@ -13,7 +13,8 @@ Save-as-PDF, and font/size/measure/theme settings. Fully offline — all assets
 are vendored.
 
 On **macOS** the document is a native text view: you read and edit in the same
-place, the Markdown renders as you type, and tables edit as grids.
+place, the Markdown renders as you type, images, inline and block, show as
+pictures, and tables edit as grids.
 
 On **Linux** the document is a native GTK text view too, built the same way:
 read-only on open, `Ctrl+E` to edit in place, markup hidden, images shown (and

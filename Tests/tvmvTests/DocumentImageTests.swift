@@ -329,6 +329,137 @@ final class DocumentImageTests: XCTestCase {
         }
     }
 
+    // MARK: Inline images
+
+    /// The view-x where the character at `index` starts.
+    private func x(at index: Int) -> CGFloat {
+        let lm = view.layoutManager!
+        lm.ensureLayout(for: view.textContainer!)
+        let glyph = lm.glyphIndexForCharacter(at: index)
+        return lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minX + lm.location(forGlyphAt: glyph).x
+    }
+
+    private var column: CGFloat { view.textContainer!.size.width - 2 * view.textContainer!.lineFragmentPadding }
+
+    private func inlineImage() -> MarkdownLayout.InlineImage { view.layout.inlineImages[0] }
+
+    func testInlineImageShowsAsPicture() throws {
+        try writePNG("img/dot.png", width: 16, height: 16)
+        view.load("A ![b](img/dot.png) c\n")
+        pump { view.imageState(for: "img/dot.png") == .loaded }
+        XCTAssertEqual(view.imageState(for: "img/dot.png"), .loaded)
+        let image = inlineImage()
+        XCTAssertFalse(glyphHidden(image.range.location), "the carrier keeps the picture's room")
+        for i in image.range.location + 1..<NSMaxRange(image.range) { XCTAssertTrue(glyphHidden(i), "\(i)") }
+        XCTAssertEqual(x(at: NSMaxRange(image.range)) - x(at: image.range.location), 16, accuracy: 0.5)
+    }
+
+    func testUnloadedInlineImageShowsAlt() {
+        view.load("A ![b](img/missing.png) c\n")
+        pump { view.imageState(for: "img/missing.png") == .failed }
+        XCTAssertEqual(view.imageState(for: "img/missing.png"), .failed)
+        XCTAssertFalse(glyphHidden(4), "the alt shows")
+        XCTAssertTrue(glyphHidden(2))
+    }
+
+    func testCaretPassesInlineImageInOneStep() throws {
+        try writePNG("img/dot.png", width: 16, height: 16)
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load("A ![b](img/dot.png) c\n")
+        pump { view.imageState(for: "img/dot.png") == .loaded }
+        let image = inlineImage()
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        view.moveRight(nil)
+        XCTAssertEqual(view.selectedRange(), NSRange(location: NSMaxRange(image.range), length: 0))
+        view.moveLeft(nil)
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 2, length: 0))
+    }
+
+    func testBackspaceDeletesWholeInlineImage() throws {
+        try writePNG("img/dot.png", width: 16, height: 16)
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        let text = "A ![b](img/dot.png) c\n"
+        view.load(text)
+        pump { view.imageState(for: "img/dot.png") == .loaded }
+        view.setSelectedRange(NSRange(location: NSMaxRange(inlineImage().range), length: 0))
+        view.deleteBackward(nil)
+        pump { view.string != text }
+        XCTAssertEqual(view.string, "A  c\n")
+        view.undoManager!.undo()
+        XCTAssertEqual(view.string, text)
+    }
+
+    func testDeleteForwardDeletesWholeInlineImage() throws {
+        try writePNG("img/dot.png", width: 16, height: 16)
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        let text = "A ![b](img/dot.png) c\n"
+        view.load(text)
+        pump { view.imageState(for: "img/dot.png") == .loaded }
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        view.deleteForward(nil)
+        pump { view.string != text }
+        XCTAssertEqual(view.string, "A  c\n")
+    }
+
+    func testClickOnLinkedImageFollowsLink() throws {
+        try writePNG("img/dot.png", width: 16, height: 16)
+        view.load("[![b](img/dot.png)](https://x.example)\n")
+        pump { view.imageState(for: "img/dot.png") == .loaded }
+        let lm = view.layoutManager!
+        lm.ensureLayout(for: view.textContainer!)
+        let carrier = inlineImage().range.location
+        let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: carrier), effectiveRange: nil)
+        let centre = NSPoint(x: x(at: carrier) + 8 + view.textContainerOrigin.x,
+                             y: fragment.midY + view.textContainerOrigin.y)
+        XCTAssertEqual(view.link(at: centre), "https://x.example")
+    }
+
+    func testEditedAddressLoadsNewImage() throws {
+        try writePNG("img/dot.png", width: 16, height: 16)
+        try writePNG("img/dot2.png", width: 32, height: 16)
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load("A ![b](img/dot.png) c\n")
+        pump { view.imageState(for: "img/dot.png") == .loaded }
+        view.setSelectedRange(NSRange(location: 4, length: 0))
+        view.toggleRevealMarkup(nil)
+        let name = (view.string as NSString).range(of: "dot.png")
+        view.insertText("dot2.png", replacementRange: name)
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        view.moveToEndOfDocument(nil)
+        pump { view.imageState(for: "img/dot2.png") == .loaded && !view.revealing }
+        view.cancelOperation(nil)
+        XCTAssertEqual(view.imageState(for: "img/dot2.png"), .loaded)
+        let image = inlineImage()
+        XCTAssertEqual(image.url, "img/dot2.png")
+        let width = InlineImageMetrics.size(natural: CGSize(width: 32, height: 16), theme: view.theme, column: column).width
+        XCTAssertEqual(x(at: NSMaxRange(image.range)) - x(at: image.range.location), width, accuracy: 0.5)
+    }
+
+    func testFontSizeChangeResizesInlineImage() throws {
+        try writePNG("img/tall.png", width: 40, height: 80)
+        view.load("A ![b](img/tall.png) c\n")
+        pump { view.imageState(for: "img/tall.png") == .loaded }
+        view.theme = NativeTheme(bodyFamily: "Georgia", monoFamily: "Menlo", size: 24, measure: 70, fullWidth: false, dark: false)
+        let image = inlineImage()
+        let width = InlineImageMetrics.size(natural: CGSize(width: 40, height: 80), theme: view.theme, column: column).width
+        XCTAssertEqual(width, 40 * 24 * 1.4 / 80, accuracy: 0.01, "capped at 1.4 em")
+        XCTAssertEqual(x(at: NSMaxRange(image.range)) - x(at: image.range.location), width, accuracy: 0.5)
+    }
+
+    func testTableCellShowsImageAsPicture() throws {
+        try writePNG("img/dot.png", width: 16, height: 16)
+        view.load("| a |\n|---|\n| ![b](img/dot.png) |\n")
+        let cell = try XCTUnwrap(view.tableGrids.first?.cells.last?.first)
+        XCTAssertTrue(cell.engine.treatsBlockImagesAsInline)
+        pump { cell.imageState(for: "img/dot.png") == .loaded }
+        XCTAssertEqual(cell.imageState(for: "img/dot.png"), .loaded)
+        XCTAssertEqual(cell.textStorage!.attribute(.tvmvImageCarrier, at: 0, effectiveRange: nil) as? String, "img/dot.png")
+    }
+
     func testAPictureLandsOnWholeDevicePixels() throws {
         // Reported: SVGs sharp at some window widths, fuzzy at others. The
         // lines above set where a picture starts; at a fractional point its

@@ -80,6 +80,8 @@ final class TableGridView: NSView {
                 cellTheme.textAlignment = c < alignments.count ? Self.textAlignment(alignments[c]) : .natural
                 if r == 0 { cellTheme.body = NSFontManager.shared.convert(theme.body, toHaveTrait: .boldFontMask) }
                 cell.cellHost = self
+                cell.engine.treatsBlockImagesAsInline = true   // a cell's image sits in its line
+                cell.documentURL = document?.documentURL
                 cell.theme = cellTheme
                 cell.drawsBackground = false
                 cell.allowsUndo = false
