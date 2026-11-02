@@ -93,6 +93,8 @@ final class DocumentTextView: NSTextView {
     override var undoManager: UndoManager? { documentUndo }
 
     private let hooks = Hooks()
+    /// Held here: a layout manager's delegate is weak.
+    private let markupLayout = MarkupLayoutDelegate()
     private var parseGeneration = 0
     /// Background parses started (observability for large-document typing).
     private(set) var backgroundParsesStarted = 0
@@ -117,7 +119,7 @@ final class DocumentTextView: NSTextView {
     private func configure() {
         hooks.view = self
         delegate = hooks
-        layoutManager?.delegate = hooks
+        layoutManager?.delegate = markupLayout
         textStorage?.delegate = hooks
         isRichText = false
         allowsUndo = true
@@ -1179,8 +1181,8 @@ final class DocumentTextView: NSTextView {
 
     // MARK: Delegates
 
-    /// Delegate object for the view, its layout manager and its text storage.
-    private final class Hooks: NSObject, NSTextViewDelegate, NSLayoutManagerDelegate, NSTextStorageDelegate {
+    /// Delegate object for the view and its text storage.
+    private final class Hooks: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         weak var view: DocumentTextView?
         var loading = false
 
@@ -1230,48 +1232,6 @@ final class DocumentTextView: NSTextView {
 
         func textView(_ textView: NSTextView, shouldSetSpellingState value: Int, range: NSRange) -> Int {
             view?.isSpellExempt(range) == true ? 0 : value
-        }
-
-        /// Soft line breaks lay out as spaces: the paragraph reflows.
-        func layoutManager(_ lm: NSLayoutManager, shouldUse action: NSLayoutManager.ControlCharacterAction,
-                           forControlCharacterAt index: Int) -> NSLayoutManager.ControlCharacterAction {
-            lm.textStorage?.attribute(.tvmvSoftBreak, at: index, effectiveRange: nil) != nil ? .whitespace : action
-        }
-
-        /// A whitespace-action control glyph is zero-wide unless sized here:
-        /// a soft break takes the width of a space, or words run together.
-        func layoutManager(_ lm: NSLayoutManager, boundingBoxForControlGlyphAt glyphIndex: Int,
-                           for textContainer: NSTextContainer, proposedLineFragment: NSRect,
-                           glyphPosition: NSPoint, characterIndex: Int) -> NSRect {
-            let font = lm.textStorage?.attribute(.font, at: characterIndex, effectiveRange: nil) as? NSFont
-                ?? .systemFont(ofSize: NSFont.systemFontSize)
-            let width = (" " as NSString).size(withAttributes: [.font: font]).width
-            return NSRect(x: glyphPosition.x, y: 0, width: width, height: proposedLineFragment.height)
-        }
-
-        func layoutManager(_ lm: NSLayoutManager, shouldGenerateGlyphs glyphs: UnsafePointer<CGGlyph>,
-                           properties: UnsafePointer<NSLayoutManager.GlyphProperty>,
-                           characterIndexes: UnsafePointer<Int>, font: NSFont,
-                           forGlyphRange glyphRange: NSRange) -> Int {
-            guard let storage = lm.textStorage else { return 0 }
-            var props = Array(UnsafeBufferPointer(start: properties, count: glyphRange.length))
-            var changed = false
-            var run = NSRange(location: NSNotFound, length: 0)
-            var runHidden = false
-            for i in 0..<glyphRange.length {
-                let ci = characterIndexes[i]
-                if !NSLocationInRange(ci, run) {
-                    runHidden = storage.attribute(.tvmvHidden, at: ci, effectiveRange: &run) != nil
-                }
-                if runHidden, !props[i].contains(.controlCharacter) {
-                    props[i] = .null
-                    changed = true
-                }
-            }
-            guard changed else { return 0 }
-            lm.setGlyphs(glyphs, properties: props, characterIndexes: characterIndexes, font: font,
-                         forGlyphRange: glyphRange)
-            return glyphRange.length
         }
     }
 }
