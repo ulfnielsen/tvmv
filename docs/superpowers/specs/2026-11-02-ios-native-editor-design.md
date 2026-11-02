@@ -178,10 +178,13 @@ The same as macOS, except:
 - **Display:** the same technique as point-comment markers. The source
   hides except one carrier character, set clear with a kern that reserves
   the picture's width; the view draws the picture there. Its height is
-  capped (the builder picks the cap, about two body lines) and scaled to
-  keep the aspect ratio; a taller picture raises its line's height. Loading,
-  caps and decoding reuse the block-image path. While loading or after a
-  failure, the alt text shows in the muted style.
+  capped at 1.4 em (and its width at the text column), scaled to keep the
+  aspect ratio. The cap keeps a picture inside the 1.7 em body line, so a
+  picture never raises its line: a paragraph keeps its even line spacing
+  (a badge or icon reads as part of the text). Loading, caps and decoding
+  reuse the block-image path. While loading or after a failure, the alt
+  text shows in the muted style (with no alt, the file name; with neither,
+  the source).
 - **Editing:** the image is one reveal unit; Show Markdown, ⌘' or the
   caret entering it reveals `![alt](path)`. The caret passes the image as
   one character. An image inside a link follows the link on tap/click.
