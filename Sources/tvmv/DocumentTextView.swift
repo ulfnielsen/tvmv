@@ -7,21 +7,21 @@ import TVMVNativeText
 ///
 /// - Hiding: markers carry `.tvmvHidden`; the layout-manager delegate turns
 ///   those characters into null glyphs. The text itself never changes.
-/// - Parsing: after each edit the whole text is re-parsed (synchronously up
-///   to `syncParseLimit`, otherwise off the main thread, latest wins), and
-///   only the range where the old and new layouts differ is restyled.
+/// - Parsing and styling: `MarkdownTextEngine`, with this view as its host.
 /// - Reveal: double-click or ⌘' shows the markup of the span(s) under the
 ///   selection until Esc or the selection leaves them; ⌥⌘M shows all markup.
-final class DocumentTextView: NSTextView {
-    static let syncParseLimit = 64 * 1024
+final class DocumentTextView: NSTextView, MarkdownTextHost {
+    /// Parses and styles the text storage.
+    private(set) lazy var engine = MarkdownTextEngine(storage: textStorage!, host: self)
 
-    private(set) var layout = MarkdownLayout()
-    var theme: NativeTheme = NativeTheme(bodyFamily: "Georgia", monoFamily: "Menlo", size: 16,
-                                         measure: 80, fullWidth: false, dark: false) {
-        didSet { applyTheme() }
+    var layout: MarkdownLayout { engine.layout }
+    var theme: NativeTheme {
+        get { engine.theme }
+        set { engine.theme = newValue; applyTheme() }
     }
-    var showAllMarkup = false {
-        didSet { restyle(NSRange(location: 0, length: textStorage?.length ?? 0)) }
+    var showAllMarkup: Bool {
+        get { engine.showAllMarkup }
+        set { engine.showAllMarkup = newValue }
     }
     /// Draw with AppKit font smoothing (stroke thickening). Off, as in the
     /// web reader (-webkit-font-smoothing: antialiased).
@@ -30,7 +30,6 @@ final class DocumentTextView: NSTextView {
     }
         /// True after a reveal request, until the selection leaves every revealed unit.
     private(set) var revealing = false
-    private var revealedUnits: [NSRange] = []
 
     /// Every text change, as a patch against the previous text plus the new length.
     var onEdit: ((TextPatcher.Patch, Int) -> Void)?
@@ -101,16 +100,8 @@ final class DocumentTextView: NSTextView {
     private let hooks = Hooks()
     /// Held here: a layout manager's delegate is weak.
     private let markupLayout = MarkupLayoutDelegate()
-    private var parseGeneration = 0
     /// Background parses started (observability for large-document typing).
-    private(set) var backgroundParsesStarted = 0
-    /// At most one background parse runs; edits meanwhile queue one more
-    /// parse of whatever the text is when it finishes.
-    private var parseInFlight = false
-    private var parseQueued = false
-    /// Characters at the start and end of the text unchanged since `layout` was computed.
-    private var unchangedPrefix = Int.max
-    private var unchangedSuffix = Int.max
+    var backgroundParsesStarted: Int { engine.backgroundParsesStarted }
 
     /// `cell`: a table cell. Nothing observes a cell's frame, and AppKit's
     /// cost to post a frame change grows with the number of text views, so
@@ -125,6 +116,8 @@ final class DocumentTextView: NSTextView {
     private func configure() {
         hooks.view = self
         delegate = hooks
+        engine.blockImageHeight = { [weak self] in self?.imageSize(for: $0)?.height }
+        engine.tableHeight = { [weak self] in self?.tableHeights[$0] }
         layoutManager?.delegate = markupLayout
         textStorage?.delegate = hooks
         isRichText = false
@@ -148,19 +141,14 @@ final class DocumentTextView: NSTextView {
 
     /// Replace the whole text (initial load, external reload). Not undoable.
     func load(_ text: String) {
-        guard let storage = textStorage else { return }
+        guard textStorage != nil else { return }
         closeComposer()   // its selection was in the old text
-        hooks.loading = true
-        storage.replaceCharacters(in: NSRange(location: 0, length: storage.length), with: text)
-        hooks.loading = false
+        // Replacing the storage directly registers no undo.
         documentUndo.removeAllActions()
-        parseGeneration += 1   // a parse still in flight was for the old text
-        layout = MarkdownLayoutParser.parse(text)
-        unchangedPrefix = .max; unchangedSuffix = .max
         pendingCellPatches = []
-        restyle(NSRange(location: 0, length: storage.length))
-        requestImages()
-        onLayout?(layout)
+        hooks.loading = true
+        engine.load(text)
+        hooks.loading = false
     }
 
     /// True while the app (not a keystroke) is changing the text.
@@ -184,9 +172,7 @@ final class DocumentTextView: NSTextView {
     fileprivate func recordEdit(editedRange: NSRange, delta: Int) {
         guard let storage = textStorage else { return }
         let oldRange = NSRange(location: editedRange.location, length: editedRange.length - delta)
-        let oldLength = storage.length - delta
-        unchangedPrefix = min(unchangedPrefix, oldRange.location)
-        unchangedSuffix = min(unchangedSuffix, oldLength - NSMaxRange(oldRange))
+        engine.recordEdit(editedRange: editedRange, delta: delta)
         let insert = (storage.string as NSString).substring(with: editedRange)
         let patch = TextPatcher.Patch(from: oldRange.location, to: NSMaxRange(oldRange), insert: insert)
         editing = true
@@ -197,55 +183,13 @@ final class DocumentTextView: NSTextView {
     /// Re-parse after edits (called from textDidChange, outside processEditing).
     fileprivate func textChanged() {
         defer { editing = false }
-        guard let storage = textStorage, !hasMarkedText() else { return }
+        guard !hasMarkedText() else { return }
         if let host = cellHost, !pendingCellPatches.isEmpty {
             let patches = pendingCellPatches
             pendingCellPatches = []
             patches.forEach { host.cellDidEdit(self, $0) }
         }
-        let text = storage.string
-        let old = layout
-        let prefix = min(unchangedPrefix, old.length), suffix = min(unchangedSuffix, old.length - prefix)
-        let edit = NSRange(location: prefix, length: old.length - suffix - prefix)
-        let delta = storage.length - old.length
-        // Until the parse lands (later, in large documents), keep the edited
-        // paragraph laid out from its start. Offsets before the edit are valid
-        // in the old layout.
-        relayParagraphs(touching: NSRange(location: edit.location, length: max(0, edit.length + delta)))
-        parseGeneration += 1
-        let generation = parseGeneration
-        if storage.length <= Self.syncParseLimit {
-            applyParsed(MarkdownLayoutParser.parse(text), from: old, edit: edit, delta: delta, generation: generation)
-        } else {
-            guard !parseInFlight else { parseQueued = true; return }
-            parseInFlight = true
-            backgroundParsesStarted += 1
-            Task {
-                let new = await Task.detached(priority: .userInitiated) { MarkdownLayoutParser.parse(text) }.value
-                self.parseInFlight = false
-                self.applyParsed(new, from: old, edit: edit, delta: delta, generation: generation)
-                if self.parseQueued {
-                    self.parseQueued = false
-                    self.textChanged()
-                }
-            }
-        }
-    }
-
-    /// Install a parse result unless a newer edit has superseded it (latest wins).
-    private func applyParsed(_ new: MarkdownLayout, from old: MarkdownLayout, edit: NSRange, delta: Int, generation: Int) {
-        // Only a layout of exactly the current text may be applied: edits
-        // during IME composition don't bump the generation, and applying a
-        // layout of other text would hide the wrong characters.
-        guard generation == parseGeneration, !hasMarkedText(),
-              new.length == textStorage?.length else { return }
-        unchangedPrefix = .max; unchangedSuffix = .max
-        let changed = new.changedRange(from: old, edit: edit, delta: delta)
-        layout = new
-        updateRevealedUnits()
-        restyle(changed)
-        requestImages()
-        onLayout?(new)
+        engine.textChanged()
     }
 
     /// Composition can end without a text change (no textDidChange), so
@@ -255,21 +199,34 @@ final class DocumentTextView: NSTextView {
         textChanged()
     }
 
-    func restyle(_ range: NSRange) {
-        guard let storage = textStorage else { return }
-        let units = revealedUnits
-        let all = showAllMarkup
-        let heights = tableHeights
-        DocumentStyler.apply(layout, to: storage, in: range, theme: theme,
-                             isRevealed: { all || units.contains($0) },
-                             imageHeight: { [weak self] in self?.imageSize(for: $0)?.height },
-                             tableHeight: { heights[$0] })
+    func restyle(_ range: NSRange) { engine.restyle(range) }
+
+    // MARK: MarkdownTextHost
+
+    var hasMarkedText: Bool { hasMarkedText() }
+
+    func engine(_ engine: MarkdownTextEngine, didRestyle range: NSRange) {
         // TextKit re-lays out an edit from the line after the previous
         // newline, assuming a newline ends a line. In a reflowed paragraph a
         // soft break doesn't, so re-lay the whole paragraph from its start.
         relayParagraphs(touching: range)
         layoutGrids()
         layoutReviewMargin()
+    }
+
+    func engine(_ engine: MarkdownTextEngine, didApply layout: MarkdownLayout) {
+        requestImages()
+        onLayout?(layout)
+    }
+
+    /// Until the parse lands (later, in large documents), keep the edited
+    /// paragraph laid out from its start.
+    func engine(_ engine: MarkdownTextEngine, willParse edit: NSRange) {
+        relayParagraphs(touching: edit)
+    }
+
+    func engine(_ engine: MarkdownTextEngine, didInstall layout: MarkdownLayout) {
+        updateRevealedUnits()
     }
 
     /// Invalidate layout from the start of every top-level paragraph that
@@ -367,7 +324,7 @@ final class DocumentTextView: NSTextView {
 
     /// Show the markup of the unit(s) enclosing the selection (on), or hide it again (off).
     func reveal(_ on: Bool) {
-        setRevealedUnits(on ? unitsEnclosingSelection() : [])
+        setRevealedUnits(on ? engine.units(enclosing: selectedRange()) : [])
     }
 
     /// Reveal one unit and put the caret at its start (a table revealed from
@@ -380,34 +337,16 @@ final class DocumentTextView: NSTextView {
 
     func toggleShowAllMarkup() { showAllMarkup.toggle() }
 
-    /// Units containing the selection. A caret at a unit's end counts as
-    /// inside it — unless the unit ends with a newline (a block): then the
-    /// caret is already on the next line.
-    func unitsEnclosingSelection() -> [NSRange] {
-        guard let storage = textStorage else { return [] }
-        let text = storage.string as NSString
-        let selection = selectedRange()
-        return layout.revealUnits.filter { unit in
-            guard unit.encloses(selection) else { return false }
-            if selection.length == 0, selection.location == NSMaxRange(unit), unit.length > 0,
-               text.character(at: NSMaxRange(unit) - 1) == 10 { return false }
-            return true
-        }
-    }
-
     private func setRevealedUnits(_ units: [NSRange], keepRevealing: Bool = false) {
         revealing = keepRevealing || !units.isEmpty
-        guard units != revealedUnits else { return }
-        let touched = (units + revealedUnits).reduce(nil as NSRange?) { acc, r in acc.map { NSUnionRange($0, r) } ?? r }
-        revealedUnits = units
-        if let touched { restyle(touched) }
+        engine.setRevealedUnits(units)
     }
 
     /// Selection moved: a reveal ends once the selection leaves every revealed unit.
     fileprivate func selectionChanged() {
         guard revealing, !editing else { return }   // the user moved, not an edit
-        let current = Set(unitsEnclosingSelection())
-        if !revealedUnits.contains(where: current.contains) { setRevealedUnits([]) }
+        let current = Set(engine.units(enclosing: selectedRange()))
+        if !engine.revealedUnits.contains(where: current.contains) { setRevealedUnits([]) }
     }
 
     /// After a re-parse, revealed units are re-found around the selection
@@ -415,8 +354,8 @@ final class DocumentTextView: NSTextView {
     /// While the source being revealed is edited it can stop parsing as its
     /// construct for a moment (an image missing its ")"): stay revealing, so
     /// it shows again as source, not as the picture, once it is valid again.
-    fileprivate func updateRevealedUnits() {
-        if revealing { setRevealedUnits(unitsEnclosingSelection(), keepRevealing: true) }
+    private func updateRevealedUnits() {
+        if revealing { setRevealedUnits(engine.units(enclosing: selectedRange()), keepRevealing: true) }
     }
 
     /// Code, URLs and other exempt ranges never get spelling or grammar marks.
@@ -533,7 +472,7 @@ final class DocumentTextView: NSTextView {
     /// Inline code runs that get a pill: not those in a table's hidden
     /// source (its grid draws the cells).
     func codePillRuns() -> [MarkdownLayout.StyleRun] {
-        let hiddenTables = layout.tables.map(\.range).filter { !(showAllMarkup || revealedUnits.contains($0)) }
+        let hiddenTables = layout.tables.map(\.range).filter { !engine.isRevealed($0) }
         return layout.styles.filter { run in
             run.style == .code && !hiddenTables.contains { NSIntersectionRange($0, run.range).length > 0 }
         }
@@ -576,12 +515,12 @@ final class DocumentTextView: NSTextView {
         for (i, table) in layout.tables.enumerated() where NSMaxRange(table.range) <= storage.length {
             let grid = tableGrids[i]
             grid.index = i
-            grid.isHidden = showAllMarkup || revealedUnits.contains(table.range)
+            grid.isHidden = engine.isRevealed(table.range)
             guard !grid.isHidden else { continue }
             grid.update(table: table, text: storage.string as NSString, width: width, theme: theme, editable: isEditable)
             if tableHeights[i] != grid.frame.height {
                 tableHeights[i] = grid.frame.height
-                let heights = tableHeights, units = revealedUnits, all = showAllMarkup
+                let heights = tableHeights, units = engine.revealedUnits, all = showAllMarkup
                 DocumentStyler.apply(layout, to: storage, in: table.range, theme: theme,
                                      isRevealed: { all || units.contains($0) },
                                      imageHeight: { [weak self] in self?.imageSize(for: $0)?.height },
@@ -598,20 +537,9 @@ final class DocumentTextView: NSTextView {
         }
     }
 
-    /// Bring `layout` up to date with the text now (a cell edit needs the
-    /// table's current cell ranges, which a pending background parse may not have).
-    private func ensureCurrentLayout() {
-        guard let storage = textStorage, layout.length != storage.length || unchangedPrefix != .max || parseInFlight
-        else { return }
-        parseGeneration += 1
-        applyParsed(MarkdownLayoutParser.parse(storage.string), from: layout,
-                    edit: NSRange(location: 0, length: layout.length), delta: storage.length - layout.length,
-                    generation: parseGeneration)
-    }
-
     /// A cell's own edit, applied to that cell's source.
     func applyCellEdit(table index: Int, row: Int, column: Int, _ patch: TextPatcher.Patch) {
-        ensureCurrentLayout()
+        engine.ensureCurrentLayout()
         guard index < layout.tables.count, row < layout.tables[index].rows.count,
               column < layout.tables[index].rows[row].count else { return }
         let source = TableSource.cellEdit(layout.tables[index], row: row, column: column, patch)
@@ -620,7 +548,7 @@ final class DocumentTextView: NSTextView {
 
     /// A structural change: the table is rewritten neatly.
     func reformatTable(_ index: Int, _ change: (inout [[String]], inout [MarkdownLayout.Table.Alignment]) -> Void) {
-        ensureCurrentLayout()
+        engine.ensureCurrentLayout()
         guard isEditable, index < layout.tables.count, let storage = textStorage else { return }
         let patch = TableSource.reformat(layout.tables[index], in: storage.string as NSString, change)
         replace(NSRange(location: patch.from, length: patch.to - patch.from), with: patch.insert)
@@ -940,7 +868,9 @@ final class DocumentTextView: NSTextView {
         return DecorationInput(
             layout: layout, theme: theme, storage: storage, layoutManager: lm, textContainer: tc,
             origin: textContainerOrigin,
-            isRevealed: { [showAllMarkup, revealedUnits] in showAllMarkup || revealedUnits.contains($0) },
+            isRevealed: { [showAllMarkup, revealedUnits = engine.revealedUnits] in
+                showAllMarkup || revealedUnits.contains($0)
+            },
             isHidden: isHidden, images: imageStore, blockImageSize: imageSize(for:), codePillRuns: codePillRuns,
             pixelAlign: pixelAligned)
     }
