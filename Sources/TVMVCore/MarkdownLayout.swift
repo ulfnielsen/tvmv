@@ -121,6 +121,19 @@ public struct MarkdownLayout: Equatable, Sendable {
         public var url: String
         public var alt: String
     }
+    /// Every other image: drawn in the line of text it sits in, with the
+    /// `![alt](url)` source hidden until revealed.
+    public var inlineImages: [InlineImage] = []
+
+    public struct InlineImage: Equatable, Sendable {
+        /// The `![alt](url "title")` source; also its reveal unit.
+        public var range: NSRange
+        public var url: String
+        public var alt: String
+        /// The alt text between `![` and `]` in the source.
+        public var altRange: NSRange
+    }
+
     /// Link reference definition lines (`[label]: url`) outside code. Partial
     /// re-parses are wrapped with them so reference links resolve exactly as
     /// in a full parse.
@@ -136,7 +149,7 @@ public struct MarkdownLayout: Equatable, Sendable {
     /// Every reveal unit, in source order without duplicates.
     public var revealUnits: [NSRange] {
         var seen = Set<NSRange>()
-        return (markers.map(\.unit) + blockImages.map(\.range) + tables.map(\.range)
+        return (markers.map(\.unit) + blockImages.map(\.range) + inlineImages.map(\.range) + tables.map(\.range)
                 + listItems.map(\.marker) + quoteLines.map(\.prefix)).compactMap { seen.insert($0).inserted ? $0 : nil }
     }
 }

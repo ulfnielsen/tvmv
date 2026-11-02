@@ -137,6 +137,44 @@ final class MarkdownLayoutParserTests: XCTestCase {
         XCTAssertEqual(images.map(\.alt), ["A chart", "remote"])
     }
 
+    func testInlineImageInSentence() {
+        let layout = MarkdownLayoutParser.parse("A ![b](x.png) c")
+        XCTAssertEqual(layout.inlineImages,
+                       [.init(range: NSRange(location: 2, length: 11), url: "x.png", alt: "b",
+                              altRange: NSRange(location: 4, length: 1))])
+        XCTAssertTrue(layout.blockImages.isEmpty)
+    }
+
+    func testBlockImageIsNotInline() {
+        let layout = MarkdownLayoutParser.parse("![b](x.png)\n")
+        XCTAssertTrue(layout.inlineImages.isEmpty)
+        XCTAssertEqual(layout.blockImages.count, 1)
+    }
+
+    func testImageInsideEmphasisAndLink() {
+        let text = "*![a](b.png)* [![c](d.png)](https://x)"
+        let ns = text as NSString
+        let layout = MarkdownLayoutParser.parse(text)
+        XCTAssertEqual(layout.inlineImages.map { ns.substring(with: $0.range) }, ["![a](b.png)", "![c](d.png)"])
+        XCTAssertEqual(layout.inlineImages.map { ns.substring(with: $0.altRange) }, ["a", "c"])
+        XCTAssertEqual(styled(text) { if case .link(url: "https://x") = $0 { true } else { false } }, ["![c](d.png)"])
+        var seen = IndexSet()
+        for marker in layout.markers {
+            let span = marker.range.location..<NSMaxRange(marker.range)
+            XCTAssertFalse(seen.intersects(integersIn: span))
+            seen.insert(integersIn: span)
+        }
+    }
+
+    func testImageInCodeIsNot() {
+        XCTAssertTrue(MarkdownLayoutParser.parse("`![a](b.png)`").inlineImages.isEmpty)
+    }
+
+    func testInlineImageIsARevealUnit() {
+        let layout = MarkdownLayoutParser.parse("A ![b](x.png) c")
+        XCTAssertTrue(layout.revealUnits.contains(NSRange(location: 2, length: 11)))
+    }
+
     func testTablesRecordTheirCellsRowsAndAlignment() {
         let text = "Intro.\n\n| Name | *Score* | Note |\n|:-----|------:|:---:|\n| Ada  | 10 | a \\| b |\n| Bob | 7 |  |\n\nAfter.\n"
         let ns = text as NSString

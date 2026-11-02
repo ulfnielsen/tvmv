@@ -50,6 +50,9 @@ extension MarkdownLayout {
         widen(old.blockImages, blockImages, { $0.range }) { o, n, d in
             o.range.shifted(by: d) == n.range && o.url == n.url && o.alt == n.alt
         }
+        widen(old.inlineImages, inlineImages, { $0.range }) { o, n, d in
+            o.range.shifted(by: d) == n.range && o.url == n.url && o.alt == n.alt && o.altRange.shifted(by: d) == n.altRange
+        }
         widen(old.softBreaks.map { NSRange(location: $0, length: 1) }, softBreaks.map { NSRange(location: $0, length: 1) },
               { $0 }) { o, n, d in o.shifted(by: d) == n }
         widen(old.codeBlocks, codeBlocks, { $0.range }) { o, n, d in

@@ -47,6 +47,7 @@ extension MarkdownLayout {
         listItems.removeAll { item in threads.contains { meets($0, item.marker) } }
         quoteLines.removeAll { line in threads.contains { meets($0, line.prefix) } }
         blockImages.removeAll { image in opaque.contains { meets($0, image.range) } }
+        inlineImages.removeAll { image in opaque.contains { meets($0, image.range) } }
         tables.removeAll { table in threads.contains { meets($0, table.range) } }
         codeBlocks.removeAll { block in threads.contains { meets($0, block.range) } }
         headings.removeAll { heading in threads.contains { meets($0, heading.range) } }

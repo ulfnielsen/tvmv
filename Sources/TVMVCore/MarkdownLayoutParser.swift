@@ -298,6 +298,30 @@ struct LayoutBuilder {
         layout.blockImages.append(.init(range: docRange(r), url: url, alt: Self.plainText(content[0])))
     }
 
+    /// An image that is not a recorded block image. The source must read
+    /// `![alt` … `]` at the position cmark gave; anything else is skipped.
+    mutating func recordInlineImage(_ node: CMarkNode, _ r: NSRange) {
+        guard r.length >= 4, NSMaxRange(r) <= ns.length,
+              ns.character(at: r.location) == 33, ns.character(at: r.location + 1) == 91,   // "!["
+              !layout.blockImages.contains(where: { $0.range == docRange(r) }) else { return }
+        var depth = 1, i = r.location + 2
+        while i < NSMaxRange(r) {
+            switch ns.character(at: i) {
+            case 92: i += 1                       // backslash escapes the next character
+            case 91: depth += 1
+            case 93: depth -= 1
+            default: break
+            }
+            if depth == 0 { break }
+            i += 1
+        }
+        guard depth == 0, i < NSMaxRange(r) else { return }
+        let url = cmark_node_get_url(node).map { String(cString: $0) } ?? ""
+        layout.inlineImages.append(.init(
+            range: docRange(r), url: url, alt: Self.plainText(node),
+            altRange: docRange(NSRange(location: r.location + 2, length: i - r.location - 2))))
+    }
+
     // MARK: Ranges
 
     /// Range of `node` in the parsed text (no adjustment); nil without a position.
@@ -485,6 +509,9 @@ struct LayoutBuilder {
         layout.styles += sub.layout.styles.filter { $0.range.length > 0 }
         layout.markers += sub.layout.markers
         layout.spellExempt += sub.layout.spellExempt
+        layout.inlineImages += sub.layout.inlineImages.filter { image in
+            !layout.blockImages.contains { $0.range == image.range }
+        }
     }
 
     /// Visit one inline node; returns its end offset in the parsed text (or nil).
@@ -537,6 +564,7 @@ struct LayoutBuilder {
         case "image":
             layout.styles.append(.init(range: docRange(r), style: .image))
             layout.spellExempt.append(docRange(r))
+            recordInlineImage(node, r)
         case "html_inline":
             layout.styles.append(.init(range: docRange(r), style: .html))
             layout.spellExempt.append(docRange(r))

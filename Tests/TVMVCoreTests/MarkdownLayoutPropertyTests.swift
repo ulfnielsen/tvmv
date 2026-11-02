@@ -20,7 +20,7 @@ final class MarkdownLayoutPropertyTests: XCTestCase {
     private static let tokens = [
         "*", "**", "_", "`", "``", "```\n", "~~", "# ", "## ", "\n", "\n\n", "x", "word ", "[a](b)",
         "[r]", "[r]: http://z\n", "- ", "> ", "| a |", "\\\n", "  \n", "==\n", "<http://q>", "é", "😀",
-        " ", "1. ", "<div>\n", " ##", "www.q.com ",
+        " ", "1. ", "<div>\n", " ##", "www.q.com ", "![a](b.png)",
         // Review markup: anchors, refs, threads, and their pieces alone.
         "{==", "==}", "{~~", "~>", "~~}", "{++", "--}", "[^rv-a1b2]", "{==x==}[^rv-a1b2]",
         "{~~a~>b~~}[^rv-c3d4]", "\n\n[^rv-a1b2]: @ulf 2026-10-14: *note*\n", "    @claude 2026-10-14: ok\n",
@@ -69,6 +69,11 @@ final class MarkdownLayoutPropertyTests: XCTestCase {
                     && span.range.lowerBound <= r.location && NSMaxRange(r) <= span.range.upperBound
             }
         }
+        for image in layout.inlineImages {
+            XCTAssertTrue(image.range.encloses(image.altRange) && NSMaxRange(image.range) <= ns.length,
+                          "inline image out of bounds: \(context)", file: file, line: line)
+            XCTAssertFalse(layout.blockImages.contains { $0.range == image.range }, "image both block and inline: \(context)", file: file, line: line)
+        }
         for marker in layout.markers {
             XCTAssertTrue(NSMaxRange(marker.range) <= ns.length, "out of bounds: \(context)", file: file, line: line)
             XCTAssertTrue(marker.unit.encloses(marker.range), "marker outside its unit: \(context)", file: file, line: line)
@@ -106,5 +111,11 @@ final class MarkdownLayoutPropertyTests: XCTestCase {
             .map { MarkdownLayout.Marker(range: shift($0.range), unit: shift($0.unit), collapsesLine: $0.collapsesLine) }
             .filter { outside($0.unit) }
         XCTAssertEqual(newMarkers, oldMarkers, "markers changed outside \(changed): \(context)", file: file, line: line)
+
+        let newImages = new.inlineImages.filter { outside($0.range) }
+        let oldImages = old.inlineImages.filter { survived($0.range) }
+            .map { MarkdownLayout.InlineImage(range: shift($0.range), url: $0.url, alt: $0.alt, altRange: shift($0.altRange)) }
+            .filter { outside($0.range) }
+        XCTAssertEqual(newImages, oldImages, "inline images changed outside \(changed): \(context)", file: file, line: line)
     }
 }
