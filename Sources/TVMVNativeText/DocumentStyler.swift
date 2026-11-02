@@ -17,12 +17,24 @@ public enum DocumentStyler {
     /// - Parameter isRevealed: whether a reveal unit's markup is currently shown.
     /// - Parameter imageHeight: the height a block image is drawn at, once
     ///   loaded (nil while loading or after a failure: a normal text line).
+    /// - Parameter inlineImageSize: the size an inline image is drawn at, once
+    ///   loaded (nil while loading or after a failure: its alt shows).
+    /// - Parameter blockImagesInline: block images are styled as inline
+    ///   images (a table cell is one line).
     public static func apply(_ layout: MarkdownLayout, to storage: NSTextStorage, in range: NSRange,
                              theme: NativeTheme, isRevealed: (NSRange) -> Bool,
                              imageHeight: (MarkdownLayout.BlockImage) -> CGFloat? = { _ in nil },
-                             tableHeight: (Int) -> CGFloat? = { _ in nil }) {
+                             tableHeight: (Int) -> CGFloat? = { _ in nil },
+                             inlineImageSize: (MarkdownLayout.InlineImage) -> CGSize? = { _ in nil },
+                             blockImagesInline: Bool = false) {
         let range = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
         guard range.length > 0 else { return }
+        let source = storage.string as NSString
+        let inlineImages = layout.inlineImages
+            + (blockImagesInline ? layout.blockImages.map { inlineImage($0, in: source) } : [])
+        // A shown inline image's source is not styled as source: its alt
+        // keeps the font of the text around it.
+        let shownInline = Set(inlineImages.filter { !isRevealed($0.range) }.map(\.range))
         func clip(_ r: NSRange) -> NSRange? {
             let c = NSIntersectionRange(r, range)
             return c.length > 0 ? c : nil
@@ -57,6 +69,8 @@ public enum DocumentStyler {
             case .link(let url), .autolink(let url):
                 storage.addAttributes([.foregroundColor: theme.accent, .tvmvLink: url,
                                        .underlineStyle: NSUnderlineStyle.single.rawValue], range: r)
+            case .image where shownInline.contains(run.range):
+                break
             case .html, .image:
                 storage.addAttributes([.font: theme.mono, .foregroundColor: theme.muted], range: r)
             case .review(let role, let id):
@@ -129,7 +143,7 @@ public enum DocumentStyler {
         }
         // Block images: the source hides and its line takes the picture's
         // height plus a half-em margin above and below (drawn by the view).
-        for image in layout.blockImages where !isRevealed(image.range) {
+        for image in layout.blockImages where !blockImagesInline && !isRevealed(image.range) {
             guard let r = clip(image.range) else { continue }
             storage.addAttribute(.tvmvHidden, value: true, range: r)
             if let height = imageHeight(image) {
@@ -137,6 +151,32 @@ public enum DocumentStyler {
                 p.minimumLineHeight = height + theme.body.pointSize
                 p.maximumLineHeight = height + theme.body.pointSize
                 storage.addAttribute(.paragraphStyle, value: p, range: r)
+            }
+        }
+        // Inline images: a loaded one keeps only its "!", clear and kerned to
+        // the picture's width (drawn by the view); until then its alt shows,
+        // muted — or, with no alt, its file name.
+        for image in inlineImages where shownInline.contains(image.range) {
+            guard NSIntersectionRange(image.range, range).length > 0, NSMaxRange(image.range) <= source.length
+            else { continue }
+            if let size = inlineImageSize(image) {
+                if let r = clip(NSRange(location: image.range.location, length: 1)) {
+                    let font = storage.attribute(.font, at: r.location, effectiveRange: nil) as? PlatformFont ?? theme.body
+                    let bang = ("!" as NSString).size(withAttributes: [.font: font]).width
+                    storage.addAttributes([.tvmvImageCarrier: image.url, .foregroundColor: PlatformColor.clear,
+                                           .kern: size.width - bang], range: r)
+                }
+                if let r = clip(NSRange(location: image.range.location + 1, length: image.range.length - 1)) {
+                    storage.addAttribute(.tvmvHidden, value: true, range: r)
+                }
+            } else {
+                let shown = image.altRange.length > 0 ? image.altRange
+                    : fileName(image, in: source) ?? NSRange(location: NSMaxRange(image.altRange), length: 0)
+                for part in [NSRange(location: image.range.location, length: shown.location - image.range.location),
+                             NSRange(location: NSMaxRange(shown), length: NSMaxRange(image.range) - NSMaxRange(shown))] {
+                    if let r = clip(part) { storage.addAttribute(.tvmvHidden, value: true, range: r) }
+                }
+                if let r = clip(shown) { storage.addAttribute(.foregroundColor, value: theme.muted, range: r) }
             }
         }
         // Tables: the source hides (its final newline too, so the caret
@@ -207,5 +247,42 @@ public enum DocumentStyler {
             if let r = clip(exempt) { storage.addAttribute(.tvmvNoSpell, value: true, range: r) }
         }
         storage.endEditing()
+    }
+
+    /// A block image as an inline image: its alt is between the "![" and
+    /// the "]" that closes it.
+    static func inlineImage(_ image: MarkdownLayout.BlockImage, in text: NSString) -> MarkdownLayout.InlineImage {
+        var depth = 1, i = image.range.location + 2
+        while i < NSMaxRange(image.range) {
+            switch text.character(at: i) {
+            case 92: i += 1                       // backslash escapes the next character
+            case 91: depth += 1
+            case 93: depth -= 1
+            default: break
+            }
+            if depth == 0 { break }
+            i += 1
+        }
+        let end = min(i, NSMaxRange(image.range))
+        return .init(range: image.range, url: image.url, alt: image.alt,
+                     altRange: NSRange(location: image.range.location + 2, length: max(0, end - image.range.location - 2)))
+    }
+
+    /// The last path component of an image's destination in its source
+    /// (after "](", up to whitespace, ">" or the closing ")"); nil for a
+    /// reference image or an address ending in "/".
+    private static func fileName(_ image: MarkdownLayout.InlineImage, in text: NSString) -> NSRange? {
+        let end = NSMaxRange(image.range)
+        var i = NSMaxRange(image.altRange)
+        guard i + 1 < end, text.character(at: i) == 93, text.character(at: i + 1) == 40 else { return nil }   // "]("
+        i += 2
+        while i < end, [32, 9, 10].contains(text.character(at: i)) { i += 1 }
+        if i < end, text.character(at: i) == 60 { i += 1 }   // "<"
+        var start = i
+        while i < end - 1, ![32, 9, 10, 62].contains(text.character(at: i)) {
+            if text.character(at: i) == 47 { start = i + 1 }   // "/"
+            i += 1
+        }
+        return i > start ? NSRange(location: start, length: i - start) : nil
     }
 }

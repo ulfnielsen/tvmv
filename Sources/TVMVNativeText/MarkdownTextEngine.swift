@@ -55,6 +55,10 @@ public final class MarkdownTextEngine {
     public var blockImageHeight: (MarkdownLayout.BlockImage) -> CGFloat? = { _ in nil }
     /// The height a table's grid reserves, by index in `layout.tables`.
     public var tableHeight: (Int) -> CGFloat? = { _ in nil }
+    /// The size a loaded inline image is drawn at (nil: its alt shows).
+    public var inlineImageSize: (MarkdownLayout.InlineImage) -> CGSize? = { _ in nil }
+    /// Block images are styled as inline images (a table cell is one line).
+    public var treatsBlockImagesAsInline = false
 
     private var parseGeneration = 0
     /// Background parses started (observability for large-document typing).
@@ -155,7 +159,8 @@ public final class MarkdownTextEngine {
         let all = showAllMarkup
         DocumentStyler.apply(layout, to: storage, in: range, theme: theme,
                              isRevealed: { all || units.contains($0) },
-                             imageHeight: blockImageHeight, tableHeight: tableHeight)
+                             imageHeight: blockImageHeight, tableHeight: tableHeight,
+                             inlineImageSize: inlineImageSize, blockImagesInline: treatsBlockImagesAsInline)
         host?.engine(self, didRestyle: range)
     }
 

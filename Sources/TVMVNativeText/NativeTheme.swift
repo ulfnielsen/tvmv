@@ -19,6 +19,9 @@ public extension NSAttributedString.Key {
     static let tvmvSoftBreak = NSAttributedString.Key("tvmvSoftBreak")
     /// The review thread id of an anchor's text (or a point comment's carrier).
     static let tvmvReview = NSAttributedString.Key("tvmvReview")
+    /// The "!" an inline image is drawn over (value: the image's address);
+    /// the rest of its source hides.
+    static let tvmvImageCarrier = NSAttributedString.Key("tvmvImageCarrier")
 }
 
 /// Fonts, colors and measure for the native view: the paper & ink palette

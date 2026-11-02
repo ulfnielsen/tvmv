@@ -132,6 +132,9 @@ public struct MarkdownLayout: Equatable, Sendable {
         public var alt: String
         /// The alt text between `![` and `]` in the source.
         public var altRange: NSRange
+        public init(range: NSRange, url: String, alt: String, altRange: NSRange) {
+            self.range = range; self.url = url; self.alt = alt; self.altRange = altRange
+        }
     }
 
     /// Link reference definition lines (`[label]: url`) outside code. Partial

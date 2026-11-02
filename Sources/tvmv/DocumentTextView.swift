@@ -524,7 +524,8 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
                 DocumentStyler.apply(layout, to: storage, in: table.range, theme: theme,
                                      isRevealed: { all || units.contains($0) },
                                      imageHeight: { [weak self] in self?.imageSize(for: $0)?.height },
-                                     tableHeight: { heights[$0] })
+                                     tableHeight: { heights[$0] }, inlineImageSize: engine.inlineImageSize,
+                                     blockImagesInline: engine.treatsBlockImagesAsInline)
             }
             // The first line is all hidden glyphs, which TextKit puts on the line
             // before; its reserved height is on the line starting at its newline.
@@ -589,15 +590,16 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         return NSSize(width: width, height: picture.size.height * width / picture.size.width)
     }
 
-    /// Start loading every block image not yet requested.
+    /// Start loading every block and inline image not yet requested.
     private func requestImages() {
-        imageStore.request(layout.blockImages.map(\.url)) { [weak self] address in
-            self?.restyleImages { $0.url == address }
+        imageStore.request(layout.blockImages.map(\.url) + layout.inlineImages.map(\.url)) { [weak self] address in
+            self?.restyleImages { $0 == address }
         }
     }
 
-    private func restyleImages(where match: (MarkdownLayout.BlockImage) -> Bool) {
-        for image in layout.blockImages where match(image) { restyle(image.range) }
+    private func restyleImages(where match: (String) -> Bool) {
+        for image in layout.blockImages where match(image.url) { restyle(image.range) }
+        for image in layout.inlineImages where match(image.url) { restyle(image.range) }
     }
 
     /// `rect` moved (not resized) so its origin sits on a device pixel.
@@ -871,7 +873,8 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
             isRevealed: { [showAllMarkup, revealedUnits = engine.revealedUnits] in
                 showAllMarkup || revealedUnits.contains($0)
             },
-            isHidden: isHidden, images: imageStore, blockImageSize: imageSize(for:), codePillRuns: codePillRuns,
+            isHidden: isHidden, images: imageStore, blockImageSize: imageSize(for:),
+            inlineImageSize: engine.inlineImageSize, codePillRuns: codePillRuns,
             pixelAlign: pixelAligned)
     }
 

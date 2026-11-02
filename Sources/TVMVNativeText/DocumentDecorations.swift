@@ -22,6 +22,8 @@ public struct DecorationInput {
     public var images: ImageStore
     /// The size a loaded block image is drawn at; nil while loading or failed.
     public var blockImageSize: (MarkdownLayout.BlockImage) -> CGSize?
+    /// The size a loaded inline image is drawn at; nil while loading or failed.
+    public var inlineImageSize: (MarkdownLayout.InlineImage) -> CGSize?
     /// Inline code runs that get a pill.
     public var codePillRuns: [MarkdownLayout.StyleRun]
     /// A rect moved (not resized) so its origin sits on a device pixel.
@@ -31,6 +33,7 @@ public struct DecorationInput {
                 textContainer: NSTextContainer, origin: CGPoint, isRevealed: @escaping (NSRange) -> Bool,
                 isHidden: @escaping (Int) -> Bool, images: ImageStore,
                 blockImageSize: @escaping (MarkdownLayout.BlockImage) -> CGSize?,
+                inlineImageSize: @escaping (MarkdownLayout.InlineImage) -> CGSize? = { _ in nil },
                 codePillRuns: [MarkdownLayout.StyleRun], pixelAlign: @escaping (CGRect) -> CGRect) {
         self.layout = layout
         self.theme = theme
@@ -42,15 +45,16 @@ public struct DecorationInput {
         self.isHidden = isHidden
         self.images = images
         self.blockImageSize = blockImageSize
+        self.inlineImageSize = inlineImageSize
         self.codePillRuns = codePillRuns
         self.pixelAlign = pixelAlign
     }
 }
 
 /// What the text system doesn't draw itself, behind the text: code-block
-/// backgrounds, inline-code pills, block images, quote rules, list bullets
-/// and checkboxes, point-comment markers. Drawn into the current graphics
-/// context, in the view's flipped coordinates.
+/// backgrounds, inline-code pills, block and inline images, quote rules,
+/// list bullets and checkboxes, point-comment markers. Drawn into the
+/// current graphics context, in the view's flipped coordinates.
 @MainActor
 public enum DocumentDecorations {
     public static func draw(_ input: DecorationInput, in rect: CGRect) {
@@ -102,6 +106,7 @@ public enum DocumentDecorations {
             }
         }
         drawImages(input, visible: visible)
+        drawInlineImages(input, visible: visible)
         drawListsAndQuotes(input, visible: visible, in: context)
         drawPointMarkers(input, visible: visible, in: context)
     }
@@ -112,7 +117,8 @@ public enum DocumentDecorations {
         let lm = input.layoutManager, storage = input.storage, theme = input.theme, origin = input.origin
         for image in input.layout.blockImages
         where NSIntersectionRange(image.range, visible).length > 0 && NSMaxRange(image.range) <= storage.length
-            && !input.isRevealed(image.range) {
+            && !input.isRevealed(image.range)
+            && storage.attribute(.tvmvImageCarrier, at: image.range.location, effectiveRange: nil) == nil {
             let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: image.range.location),
                                                effectiveRange: nil)
             let x = fragment.minX + input.textContainer.lineFragmentPadding + origin.x
@@ -127,6 +133,31 @@ public enum DocumentDecorations {
                 let y = fragment.minY + origin.y + (fragment.height - lineBoxHeight(font)) / 2
                 ("▨ " + label as NSString).draw(at: CGPoint(x: x, y: y),
                                                 withAttributes: [.font: font, .foregroundColor: theme.muted])
+            }
+        }
+    }
+
+    /// Draw each shown inline image over its carrier "!" (the room its kern
+    /// keeps), bottom on the line's baseline. Block images styled inline
+    /// (in a table cell) are drawn here too.
+    private static func drawInlineImages(_ input: DecorationInput, visible: NSRange) {
+        let lm = input.layoutManager, storage = input.storage, origin = input.origin
+        let text = storage.string as NSString
+        let scope = NSIntersectionRange(visible, NSRange(location: 0, length: storage.length))
+        storage.enumerateAttribute(.tvmvImageCarrier, in: scope) { value, run, _ in
+            guard let url = value as? String else { return }
+            for location in run.location..<NSMaxRange(run) {
+                let image = input.layout.inlineImages.first { $0.range.location == location }
+                    ?? input.layout.blockImages.first { $0.range.location == location }
+                        .map { DocumentStyler.inlineImage($0, in: text) }
+                guard let image, image.url == url, let size = input.inlineImageSize(image),
+                      let picture = input.images.image(for: url) else { continue }
+                let glyph = lm.glyphIndexForCharacter(at: location)
+                let fragment = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+                let at = lm.location(forGlyphAt: glyph)
+                let baseline = fragment.minY + at.y + origin.y
+                drawImage(picture, in: input.pixelAlign(CGRect(x: fragment.minX + at.x + origin.x, y: baseline - size.height,
+                                                               width: size.width, height: size.height)))
             }
         }
     }
