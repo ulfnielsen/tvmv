@@ -370,28 +370,100 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         return exempt
     }
 
-    /// Hidden markup, or a shown inline image's carrier: to the caret,
-    /// delete and copy rules an inline image is one hidden run, which the
-    /// caret rests before or after. Only `.tvmvHidden` lays out as nothing.
     func isHidden(_ index: Int) -> Bool {
         guard let storage = textStorage, index >= 0, index < storage.length else { return false }
         return storage.attribute(.tvmvHidden, at: index, effectiveRange: nil) != nil
-            || storage.attribute(.tvmvImageCarrier, at: index, effectiveRange: nil) != nil
     }
 
-    /// The source of the image shown as a picture that a one-character
-    /// Backspace (ending at its end) or Delete (starting at its start) would
-    /// cut into: the whole image goes instead.
-    fileprivate func shownImage(deletedBy range: NSRange, caret: Int) -> NSRange? {
-        guard range.length == 1, let storage = textStorage else { return nil }
-        let backward = caret == NSMaxRange(range)
+    // MARK: Pictures in the text
+
+    /// The sources of the images shown as pictures in the text: its inline
+    /// images (in a table cell, its block images too) that carry one.
+    func shownImages() -> [NSRange] {
+        guard let storage = textStorage else { return [] }
         let images = layout.inlineImages.map(\.range)
             + (engine.treatsBlockImagesAsInline ? layout.blockImages.map(\.range) : [])
-        return images.first { image in
-            (backward ? NSMaxRange(image) == NSMaxRange(range) : image.location == range.location)
-                && NSMaxRange(image) <= storage.length
-                && storage.attribute(.tvmvImageCarrier, at: image.location, effectiveRange: nil) != nil
+        return images.filter {
+            NSMaxRange($0) <= storage.length && storage.attribute(.tvmvImageCarrier, at: $0.location, effectiveRange: nil) != nil
         }
+    }
+
+    /// Where a caret requested at `location` rests: never inside a
+    /// picture's source (it rests right before or after it, at a line start
+    /// or between two pictures too); elsewhere the hidden-markup rules apply.
+    fileprivate func caretStop(_ location: Int, movingForward forward: Bool) -> Int {
+        guard let storage = textStorage else { return location }
+        let images = shownImages()
+        func inside(_ i: Int) -> NSRange? { images.first { $0.location < i && i < NSMaxRange($0) } }
+        if let image = inside(location) { return forward ? NSMaxRange(image) : image.location }
+        if images.contains(where: { $0.location == location || NSMaxRange($0) == location }) { return location }
+        let stop = EditRules.snapCaret(location, movingForward: forward, in: storage.string as NSString, isHidden: isHidden)
+        return inside(stop).map { forward ? NSMaxRange($0) : $0.location } ?? stop
+    }
+
+    /// An arrow key passes one picture per press, with any hidden markup
+    /// between it and the caret (AppKit steps from glyph to glyph, which
+    /// can pass a picture's edge or several pictures at once).
+    private func pictureStep(forward: Bool) -> Int? {
+        guard !showAllMarkup, selectedRange().length == 0, let storage = textStorage else { return nil }
+        let images = shownImages()
+        guard !images.isEmpty else { return nil }
+        let text = storage.string as NSString
+        var i = selectedRange().location
+        if forward {
+            while true {
+                if let image = images.first(where: { $0.location == i }) { return NSMaxRange(image) }
+                guard i < text.length, isHidden(i), text.character(at: i) != 10 else { return nil }
+                i += 1
+            }
+        }
+        while true {
+            if let image = images.first(where: { NSMaxRange($0) == i }) { return image.location }
+            guard i > 0, isHidden(i - 1), text.character(at: i - 1) != 10 else { return nil }
+            i -= 1
+        }
+    }
+
+    override func moveRight(_ sender: Any?) {
+        if let stop = pictureStep(forward: true) { setSelectedRange(NSRange(location: stop, length: 0)) } else { super.moveRight(sender) }
+    }
+
+    override func moveLeft(_ sender: Any?) {
+        if let stop = pictureStep(forward: false) { setSelectedRange(NSRange(location: stop, length: 0)) } else { super.moveLeft(sender) }
+    }
+
+    /// What a one-character Backspace (or forward Delete) removes when it
+    /// reaches a picture over nothing but hidden markup: the whole image, or
+    /// the whole link when the picture is all the link shows. Nil otherwise.
+    fileprivate func pictureDelete(_ range: NSRange, caret: Int) -> NSRange? {
+        guard range.length == 1, let storage = textStorage else { return nil }
+        let text = storage.string as NSString
+        let images = shownImages()
+        var image: NSRange?
+        if caret == NSMaxRange(range) {
+            var end = NSMaxRange(range)
+            while true {
+                if let found = images.first(where: { NSMaxRange($0) == end }) { image = found; break }
+                guard end > 0, isHidden(end - 1), text.character(at: end - 1) != 10 else { return nil }
+                end -= 1
+            }
+        } else {
+            var start = range.location
+            while true {
+                if let found = images.first(where: { $0.location == start }) { image = found; break }
+                guard start < text.length, isHidden(start), text.character(at: start) != 10 else { return nil }
+                start += 1
+            }
+        }
+        guard let image else { return nil }
+        // A link's text run is its label; its "[" marker's unit is the whole link.
+        let isLinkLabel = layout.styles.contains { run in
+            if case .link = run.style { return run.range == image }
+            return false
+        }
+        guard isLinkLabel else { return image }
+        return layout.markers.first { $0.range.location == image.location - 1 && $0.unit.location == $0.range.location }?.unit
+            ?? image
     }
 
     // MARK: Events
@@ -649,6 +721,9 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         let text = storage.string as NSString
         var start = selection.location, end = NSMaxRange(selection)
         while start > 0, isHidden(start - 1) { start -= 1 }
+        // A picture is copied whole, and only when the selection takes it.
+        let images = shownImages()
+        if let image = images.first(where: { $0.location < start && start < NSMaxRange($0) }) { start = NSMaxRange(image) }
         while end < text.length {
             if isHidden(end) { end += 1; continue }
             // A collapsed line right after (a closing fence): take it, newline and all.
@@ -658,6 +733,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
             }
             break
         }
+        for image in images where start <= image.location && image.location < end { end = max(end, NSMaxRange(image)) }
         return NSRange(location: start, length: end - start)
     }
 
@@ -932,10 +1008,8 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
 
         func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange old: NSRange,
                       toCharacterRange new: NSRange) -> NSRange {
-            guard let view, !view.showAllMarkup, new.length == 0, let storage = view.textStorage else { return new }
-            let location = EditRules.snapCaret(new.location, movingForward: new.location >= old.location,
-                                               in: storage.string as NSString, isHidden: view.isHidden)
-            return NSRange(location: location, length: 0)
+            guard let view, !view.showAllMarkup, new.length == 0 else { return new }
+            return NSRange(location: view.caretStop(new.location, movingForward: new.location >= old.location), length: 0)
         }
 
         func textView(_ textView: NSTextView, shouldChangeTextIn range: NSRange, replacementString string: String?) -> Bool {
@@ -943,7 +1017,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
                   !view.applyingEdit, view.documentUndo.isUndoing == false, view.documentUndo.isRedoing == false
             else { return true }   // keystrokes only: not undo/redo, not the app's own edits
             let caret = view.selectedRange().location
-            let action = view.shownImage(deletedBy: range, caret: caret).map(EditRules.DeleteAction.replace)
+            let action = view.pictureDelete(range, caret: caret).map(EditRules.DeleteAction.replace)
                 ?? EditRules.retargetDelete(range, caret: caret, in: storage.string as NSString, isHidden: view.isHidden)
             switch action {
             case .allow:

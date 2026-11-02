@@ -460,6 +460,149 @@ final class DocumentImageTests: XCTestCase {
         XCTAssertEqual(cell.textStorage!.attribute(.tvmvImageCarrier, at: 0, effectiveRange: nil) as? String, "img/dot.png")
     }
 
+    // MARK: Inline images: caret, delete and copy at their edges
+
+    /// Load `text` editable with `img/a.png` and `img/b.png` (16×16), wait for both.
+    private func loadEditable(_ text: String, in target: DocumentTextView? = nil) throws {
+        try writePNG("img/a.png", width: 16, height: 16)
+        try writePNG("img/b.png", width: 16, height: 16)
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load(text)
+        pump { view.imageState(for: "img/a.png") == .loaded && (view.imageState(for: "img/b.png") ?? .loaded) == .loaded }
+    }
+
+    private func images(_ v: DocumentTextView? = nil) -> [NSRange] { (v ?? view).layout.inlineImages.map(\.range) }
+
+    func testCaretRestsBeforeAnImageThatStartsALine() throws {
+        try loadEditable("![a](img/a.png) text\n")
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        XCTAssertEqual(view.selectedRange().location, 0)
+        view.moveToEndOfLine(nil)
+        view.moveToBeginningOfLine(nil)
+        XCTAssertEqual(view.selectedRange().location, 0)
+        view.insertText("x", replacementRange: view.selectedRange())
+        XCTAssertEqual(view.string, "x![a](img/a.png) text\n")
+    }
+
+    func testCaretStopsBetweenAdjacentImages() throws {
+        for text in ["A ![a](img/a.png)![b](img/b.png) c\n",
+                     "A [![a](img/a.png)](https://u.example)[![b](img/b.png)](https://v.example) c\n"] {
+            try loadEditable(text)
+            let (a, b) = (images()[0], images()[1])
+            // One picture per press, with a stop between the two.
+            view.setSelectedRange(NSRange(location: a.location, length: 0))
+            view.moveRight(nil)
+            XCTAssertEqual(view.selectedRange().location, NSMaxRange(a), "after a in «\(text)»")
+            view.moveRight(nil)
+            XCTAssertEqual(view.selectedRange().location, NSMaxRange(b), "after b in «\(text)»")
+            view.moveLeft(nil)
+            XCTAssertEqual(view.selectedRange().location, b.location, "before b in «\(text)»")
+            view.moveLeft(nil)
+            XCTAssertEqual(view.selectedRange().location, a.location, "before a in «\(text)»")
+            // A caret put between them stays: typing lands there.
+            view.setSelectedRange(NSRange(location: b.location, length: 0))
+            XCTAssertEqual(view.selectedRange().location, b.location)
+            view.setSelectedRange(NSRange(location: NSMaxRange(a), length: 0))
+            XCTAssertEqual(view.selectedRange().location, NSMaxRange(a))
+        }
+    }
+
+    func testBackspaceAfterALinkedImageDeletesTheLink() throws {
+        let text = "ab [![b](img/a.png)](https://x.example) cd\n"
+        try loadEditable(text)
+        let end = (text as NSString).range(of: "example)").location + 8
+        view.setSelectedRange(NSRange(location: end, length: 0))
+        view.deleteBackward(nil)
+        pump { view.string != text }
+        XCTAssertEqual(view.string, "ab  cd\n")
+        view.undoManager!.undo()
+        XCTAssertEqual(view.string, text)
+        // Forward: Delete before the link.
+        view.setSelectedRange(NSRange(location: 3, length: 0))
+        view.deleteForward(nil)
+        pump { view.string != text }
+        XCTAssertEqual(view.string, "ab  cd\n")
+    }
+
+    func testBackspaceAcrossHiddenMarkupDeletesTheImage() throws {
+        let text = "ab ![b](img/a.png)**cd** e\n"
+        try loadEditable(text)
+        let cd = (text as NSString).range(of: "cd").location
+        view.setSelectedRange(NSRange(location: cd, length: 0))
+        view.deleteBackward(nil)
+        pump { view.string != text }
+        XCTAssertEqual(view.string, "ab **cd** e\n")
+        view.undoManager!.undo()
+        XCTAssertEqual(view.string, text)
+        // Forward: Delete after "ab " over hidden markup that ends at the image.
+        let text2 = "ab **cd**![b](img/a.png) e\n"
+        view.load(text2)
+        pump { view.layout.inlineImages.count == 1 && view.textStorage!.attribute(.tvmvImageCarrier, at: 9, effectiveRange: nil) != nil }
+        view.setSelectedRange(NSRange(location: 7, length: 0))   // after "cd"
+        view.deleteForward(nil)
+        pump { view.string != text2 }
+        XCTAssertEqual(view.string, "ab **cd** e\n")
+    }
+
+    func testCopyBesideAnImageLeavesItOut() throws {
+        let text = "A ![b](img/a.png) c\n"
+        try loadEditable(text)
+        let image = images()[0]
+        let s = text as NSString
+        XCTAssertEqual(s.substring(with: view.copyRange(for: NSRange(location: 0, length: 2))), "A ")
+        XCTAssertEqual(s.substring(with: view.copyRange(for: NSRange(location: NSMaxRange(image), length: 2))), " c")
+        XCTAssertEqual(s.substring(with: view.copyRange(for: NSRange(location: image.location, length: 1))), "![b](img/a.png)")
+        XCTAssertEqual(s.substring(with: view.copyRange(for: NSRange(location: 0, length: 3))), "A ![b](img/a.png)")
+        view.setSelectedRange(NSRange(location: 0, length: 2))
+        view.cut(nil)
+        XCTAssertEqual(view.string, "![b](img/a.png) c\n")
+        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "A ")
+        view.undoManager!.undo()
+        view.setSelectedRange(NSRange(location: image.location, length: 1))
+        view.cut(nil)
+        XCTAssertEqual(view.string, "A  c\n")
+    }
+
+    func testCaretCrossesAnImageInATableCell() throws {
+        try writePNG("img/a.png", width: 16, height: 16)
+        view.isEditable = true
+        view.load("| a |\n|---|\n| x ![a](img/a.png) y |\n")
+        let cell = try XCTUnwrap(view.tableGrids.first?.cells.last?.first)
+        pump { cell.textStorage!.length > 0 && cell.textStorage!.attribute(.tvmvImageCarrier, at: 2, effectiveRange: nil) != nil }
+        window.makeFirstResponder(cell)
+        let image = images(cell)[0]
+        cell.setSelectedRange(NSRange(location: image.location, length: 0))
+        XCTAssertEqual(cell.selectedRange().location, image.location)
+        cell.moveRight(nil)
+        XCTAssertEqual(cell.selectedRange().location, NSMaxRange(image))
+        cell.moveLeft(nil)
+        XCTAssertEqual(cell.selectedRange().location, image.location)
+    }
+
+    func testCaretRestsBeforeAnImageAloneInACell() throws {
+        try writePNG("img/a.png", width: 16, height: 16)
+        view.isEditable = true
+        view.load("| a |\n|---|\n| ![a](img/a.png) |\n")
+        let cell = try XCTUnwrap(view.tableGrids.first?.cells.last?.first)
+        pump { cell.textStorage!.length > 0 && cell.textStorage!.attribute(.tvmvImageCarrier, at: 0, effectiveRange: nil) != nil }
+        window.makeFirstResponder(cell)
+        cell.setSelectedRange(NSRange(location: 0, length: 0))
+        XCTAssertEqual(cell.selectedRange().location, 0)
+        cell.moveToEndOfLine(nil)
+        XCTAssertEqual(cell.selectedRange().location, cell.textStorage!.length)
+        cell.moveLeft(nil)
+        XCTAssertEqual(cell.selectedRange().location, 0)
+    }
+
+    func testABulletBeforeAnImageAnchorsAtThePicture() throws {
+        try writePNG("img/a.png", width: 16, height: 16)
+        view.load("- ![a](img/a.png) text\n")
+        pump { view.imageState(for: "img/a.png") == .loaded }
+        let anchor = try XCTUnwrap(view.bulletAnchor(for: view.layout.listItems[0]))
+        XCTAssertEqual(anchor.x, x(at: 2) + view.textContainerOrigin.x, accuracy: 0.5, "the text starts at the picture")
+    }
+
     func testAPictureLandsOnWholeDevicePixels() throws {
         // Reported: SVGs sharp at some window widths, fuzzy at others. The
         // lines above set where a picture starts; at a fractional point its
