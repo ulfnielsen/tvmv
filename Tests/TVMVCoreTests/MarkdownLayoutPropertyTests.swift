@@ -74,6 +74,10 @@ final class MarkdownLayoutPropertyTests: XCTestCase {
                           "inline image out of bounds: \(context)", file: file, line: line)
             XCTAssertFalse(layout.blockImages.contains { $0.range == image.range }, "image both block and inline: \(context)", file: file, line: line)
         }
+        for image in layout.blockImages {
+            XCTAssertTrue(image.range.encloses(image.altRange) && NSMaxRange(image.range) <= ns.length,
+                          "block image out of bounds: \(context)", file: file, line: line)
+        }
         for marker in layout.markers {
             XCTAssertTrue(NSMaxRange(marker.range) <= ns.length, "out of bounds: \(context)", file: file, line: line)
             XCTAssertTrue(marker.unit.encloses(marker.range), "marker outside its unit: \(context)", file: file, line: line)

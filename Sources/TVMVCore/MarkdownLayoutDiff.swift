@@ -48,7 +48,7 @@ extension MarkdownLayout {
                 && o.rows.map { $0.map { $0.shifted(by: d) } } == n.rows
         }
         widen(old.blockImages, blockImages, { $0.range }) { o, n, d in
-            o.range.shifted(by: d) == n.range && o.url == n.url && o.alt == n.alt
+            o.range.shifted(by: d) == n.range && o.url == n.url && o.alt == n.alt && o.altRange.shifted(by: d) == n.altRange
         }
         widen(old.inlineImages, inlineImages, { $0.range }) { o, n, d in
             o.range.shifted(by: d) == n.range && o.url == n.url && o.alt == n.alt && o.altRange.shifted(by: d) == n.altRange

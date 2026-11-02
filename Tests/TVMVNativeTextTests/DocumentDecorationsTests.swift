@@ -17,11 +17,12 @@ final class DocumentDecorationsTests: XCTestCase {
     private let images = ImageStore()
 
     /// A styled text stack for `text` and the decoration input over it.
-    private func input(_ text: String, inlineImageSize: CGSize? = nil) -> DecorationInput {
+    private func input(_ text: String, inlineImageSize: CGSize? = nil, blockImagesInline: Bool = false) -> DecorationInput {
         let storage = NSTextStorage(string: text)
         let layout = MarkdownLayoutParser.parse(text)
         DocumentStyler.apply(layout, to: storage, in: NSRange(location: 0, length: storage.length), theme: theme,
-                             isRevealed: { _ in false }, inlineImageSize: { _ in inlineImageSize })
+                             isRevealed: { _ in false }, inlineImageSize: { _ in inlineImageSize },
+                             blockImagesInline: blockImagesInline)
         let lm = NSLayoutManager()
         lm.delegate = delegate
         storage.addLayoutManager(lm)
@@ -33,12 +34,19 @@ final class DocumentDecorationsTests: XCTestCase {
             origin: CGPoint(x: 10, y: 10), isRevealed: { _ in false },
             isHidden: { $0 < storage.length && storage.attribute(.tvmvHidden, at: $0, effectiveRange: nil) != nil },
             images: images, blockImageSize: { _ in nil }, inlineImageSize: { _ in inlineImageSize },
-            codePillRuns: [], pixelAlign: { $0 })
+            blockImagesInline: blockImagesInline, codePillRuns: [], pixelAlign: { $0 })
     }
 
     /// Draw `input` into a 400×100 RGBA bitmap, flipped like a flipped view,
     /// and return the RGBA bytes of the pixel at `point`.
     private func pixel(at point: CGPoint, drawing input: DecorationInput) -> [Int] {
+        let bytes = bitmap(drawing: input)
+        let offset = Int(point.y) * 400 * 4 + Int(point.x) * 4
+        return (0..<4).map { Int(bytes[offset + $0]) }
+    }
+
+    /// Every RGBA byte of `input` drawn into a 400×100 bitmap (rows top down).
+    private func bitmap(drawing input: DecorationInput) -> [UInt8] {
         let width = 400, height = 100
         let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: width * 4,
                                 space: CGColorSpace(name: CGColorSpace.sRGB)!,
@@ -56,9 +64,8 @@ final class DocumentDecorationsTests: XCTestCase {
         UIGraphicsPopContext()
         #endif
         // Row 0 of the bitmap is the top: with the flip, user y maps straight to rows.
-        let bytes = context.data!.assumingMemoryBound(to: UInt8.self)
-        let offset = Int(point.y) * context.bytesPerRow + Int(point.x) * 4
-        return (0..<4).map { Int(bytes[offset + $0]) }
+        return Array(UnsafeBufferPointer(start: context.data!.assumingMemoryBound(to: UInt8.self),
+                                         count: context.bytesPerRow * height))
     }
 
     func testCheckedTaskDrawsAccentBox() throws {
@@ -112,5 +119,19 @@ final class DocumentDecorationsTests: XCTestCase {
         XCTAssertEqual(pixel(at: CGPoint(x: x + 10, y: baseline + 2), drawing: input), [0, 0, 0, 0])
         XCTAssertEqual(pixel(at: CGPoint(x: x + 10, y: baseline - 12), drawing: input), [0, 0, 0, 0])
         XCTAssertEqual(pixel(at: CGPoint(x: x + 22, y: baseline - 5), drawing: input), [0, 0, 0, 0])
+    }
+
+    func testFailedBlockImageInInlineModeDrawsNoLabel() {
+        images.documentURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("tvmv-missing-\(UUID().uuidString)/doc.md")
+        let failed = expectation(description: "failed")
+        images.request(["missing.png"]) { _ in failed.fulfill() }
+        wait(for: [failed], timeout: 5)
+        XCTAssertEqual(images.state(for: "missing.png"), .failed)
+        let text = "![Missing alt](missing.png)\n"
+        // As a block, the failed image gets a "▨ alt" label…
+        XCTAssertTrue(bitmap(drawing: input(text)).contains { $0 != 0 })
+        // …styled inline (a table cell), its alt is the text: nothing is drawn.
+        XCTAssertFalse(bitmap(drawing: input(text, blockImagesInline: true)).contains { $0 != 0 })
     }
 }

@@ -30,8 +30,7 @@ public enum DocumentStyler {
         let range = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
         guard range.length > 0 else { return }
         let source = storage.string as NSString
-        let inlineImages = layout.inlineImages
-            + (blockImagesInline ? layout.blockImages.map { inlineImage($0, in: source) } : [])
+        let inlineImages = layout.inlineImages + (blockImagesInline ? layout.blockImages.map(inlineImage) : [])
         // A shown inline image's source is not styled as source: its alt
         // keeps the font of the text around it.
         let shownInline = Set(inlineImages.filter { !isRevealed($0.range) }.map(\.range))
@@ -249,23 +248,9 @@ public enum DocumentStyler {
         storage.endEditing()
     }
 
-    /// A block image as an inline image: its alt is between the "![" and
-    /// the "]" that closes it.
-    static func inlineImage(_ image: MarkdownLayout.BlockImage, in text: NSString) -> MarkdownLayout.InlineImage {
-        var depth = 1, i = image.range.location + 2
-        while i < NSMaxRange(image.range) {
-            switch text.character(at: i) {
-            case 92: i += 1                       // backslash escapes the next character
-            case 91: depth += 1
-            case 93: depth -= 1
-            default: break
-            }
-            if depth == 0 { break }
-            i += 1
-        }
-        let end = min(i, NSMaxRange(image.range))
-        return .init(range: image.range, url: image.url, alt: image.alt,
-                     altRange: NSRange(location: image.range.location + 2, length: max(0, end - image.range.location - 2)))
+    /// A block image as an inline image (in a table cell).
+    static func inlineImage(_ image: MarkdownLayout.BlockImage) -> MarkdownLayout.InlineImage {
+        .init(range: image.range, url: image.url, alt: image.alt, altRange: image.altRange)
     }
 
     /// The last path component of an image's destination in its source

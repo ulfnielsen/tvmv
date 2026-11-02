@@ -135,6 +135,17 @@ final class MarkdownLayoutParserTests: XCTestCase {
                        ["![A chart](img/chart.png \"Title\")", "![remote](https://e.x/p.png)"])
         XCTAssertEqual(images.map(\.url), ["img/chart.png", "https://e.x/p.png"])
         XCTAssertEqual(images.map(\.alt), ["A chart", "remote"])
+        XCTAssertEqual(images.map { ns.substring(with: $0.altRange) }, ["A chart", "remote"])
+    }
+
+    func testBlockImageAltRangeMatchesInline() {
+        // One alt scan: the same source gives the same alt as a block and inline.
+        let alt = #"a [b] \] c"#
+        let block = MarkdownLayoutParser.parse("![\(alt)](x.png)\n").blockImages
+        let inline = MarkdownLayoutParser.parse("T ![\(alt)](x.png)\n").inlineImages
+        XCTAssertEqual(block.map(\.altRange.length), [(alt as NSString).length])
+        XCTAssertEqual(inline.map(\.altRange.length), [(alt as NSString).length])
+        XCTAssertEqual(block.map(\.altRange.location), [2])
     }
 
     func testInlineImageInSentence() {

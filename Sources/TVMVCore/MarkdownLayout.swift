@@ -120,6 +120,9 @@ public struct MarkdownLayout: Equatable, Sendable {
         public var range: NSRange
         public var url: String
         public var alt: String
+        /// The alt text between `![` and `]` in the source (empty, after
+        /// the `![`, when the source doesn't read as an inline image would).
+        public var altRange: NSRange
     }
     /// Every other image: drawn in the line of text it sits in, with the
     /// `![alt](url)` source hidden until revealed.

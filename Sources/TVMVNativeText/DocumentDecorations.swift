@@ -24,6 +24,9 @@ public struct DecorationInput {
     public var blockImageSize: (MarkdownLayout.BlockImage) -> CGSize?
     /// The size a loaded inline image is drawn at; nil while loading or failed.
     public var inlineImageSize: (MarkdownLayout.InlineImage) -> CGSize?
+    /// Block images are styled as inline images (a table cell): none is
+    /// drawn as a block, loaded or failed.
+    public var blockImagesInline: Bool
     /// Inline code runs that get a pill.
     public var codePillRuns: [MarkdownLayout.StyleRun]
     /// A rect moved (not resized) so its origin sits on a device pixel.
@@ -34,6 +37,7 @@ public struct DecorationInput {
                 isHidden: @escaping (Int) -> Bool, images: ImageStore,
                 blockImageSize: @escaping (MarkdownLayout.BlockImage) -> CGSize?,
                 inlineImageSize: @escaping (MarkdownLayout.InlineImage) -> CGSize? = { _ in nil },
+                blockImagesInline: Bool = false,
                 codePillRuns: [MarkdownLayout.StyleRun], pixelAlign: @escaping (CGRect) -> CGRect) {
         self.layout = layout
         self.theme = theme
@@ -46,6 +50,7 @@ public struct DecorationInput {
         self.images = images
         self.blockImageSize = blockImageSize
         self.inlineImageSize = inlineImageSize
+        self.blockImagesInline = blockImagesInline
         self.codePillRuns = codePillRuns
         self.pixelAlign = pixelAlign
     }
@@ -114,11 +119,11 @@ public enum DocumentDecorations {
     /// Draw each shown block image into the line its hidden source reserves;
     /// a failed one shows its alt text instead.
     private static func drawImages(_ input: DecorationInput, visible: NSRange) {
+        guard !input.blockImagesInline else { return }
         let lm = input.layoutManager, storage = input.storage, theme = input.theme, origin = input.origin
         for image in input.layout.blockImages
         where NSIntersectionRange(image.range, visible).length > 0 && NSMaxRange(image.range) <= storage.length
-            && !input.isRevealed(image.range)
-            && storage.attribute(.tvmvImageCarrier, at: image.range.location, effectiveRange: nil) == nil {
+            && !input.isRevealed(image.range) {
             let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: image.range.location),
                                                effectiveRange: nil)
             let x = fragment.minX + input.textContainer.lineFragmentPadding + origin.x
@@ -142,14 +147,12 @@ public enum DocumentDecorations {
     /// (in a table cell) are drawn here too.
     private static func drawInlineImages(_ input: DecorationInput, visible: NSRange) {
         let lm = input.layoutManager, storage = input.storage, origin = input.origin
-        let text = storage.string as NSString
         let scope = NSIntersectionRange(visible, NSRange(location: 0, length: storage.length))
         storage.enumerateAttribute(.tvmvImageCarrier, in: scope) { value, run, _ in
             guard let url = value as? String else { return }
             for location in run.location..<NSMaxRange(run) {
                 let image = input.layout.inlineImages.first { $0.range.location == location }
-                    ?? input.layout.blockImages.first { $0.range.location == location }
-                        .map { DocumentStyler.inlineImage($0, in: text) }
+                    ?? input.layout.blockImages.first { $0.range.location == location }.map(DocumentStyler.inlineImage)
                 guard let image, image.url == url, let size = input.inlineImageSize(image),
                       let picture = input.images.image(for: url) else { continue }
                 let glyph = lm.glyphIndexForCharacter(at: location)

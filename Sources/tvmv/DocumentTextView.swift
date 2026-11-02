@@ -874,7 +874,8 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
                 showAllMarkup || revealedUnits.contains($0)
             },
             isHidden: isHidden, images: imageStore, blockImageSize: imageSize(for:),
-            inlineImageSize: engine.inlineImageSize, codePillRuns: codePillRuns,
+            inlineImageSize: engine.inlineImageSize, blockImagesInline: engine.treatsBlockImagesAsInline,
+            codePillRuns: codePillRuns,
             pixelAlign: pixelAligned)
     }
 
