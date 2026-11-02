@@ -166,6 +166,16 @@ final class MarkdownLayoutParserTests: XCTestCase {
         }
     }
 
+    func testAltWithBracketInCodeSpanIsNotMisrecorded() {
+        for text in ["A ![a `]` c](x.png) d", "A ![a <http://q]> c](x.png) d"] {
+            let ns = text as NSString
+            for image in MarkdownLayoutParser.parse(text).inlineImages {
+                XCTAssertTrue(ns.substring(with: NSRange(location: NSMaxRange(image.altRange), length: 8)) == "](x.png)",
+                              "alt must end right before the tail: \(text)")
+            }
+        }
+    }
+
     func testImageInCodeIsNot() {
         XCTAssertTrue(MarkdownLayoutParser.parse("`![a](b.png)`").inlineImages.isEmpty)
     }

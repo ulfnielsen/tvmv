@@ -316,6 +316,10 @@ struct LayoutBuilder {
             i += 1
         }
         guard depth == 0, i < NSMaxRange(r) else { return }
+        // What follows the alt must close the image the way a link's tail does.
+        let tail = ns.substring(with: NSRange(location: i, length: NSMaxRange(r) - i))
+        guard tail == "]" || (tail.hasPrefix("](") && tail.hasSuffix(")"))
+                || (tail.hasPrefix("][") && tail.hasSuffix("]")) else { return }
         let url = cmark_node_get_url(node).map { String(cString: $0) } ?? ""
         layout.inlineImages.append(.init(
             range: docRange(r), url: url, alt: Self.plainText(node),
