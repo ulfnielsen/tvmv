@@ -1,5 +1,4 @@
 import AppKit
-import ImageIO
 import TVMVCore
 import TVMVNativeText
 
@@ -42,7 +41,9 @@ final class DocumentTextView: NSTextView {
     /// Called once, the first time the view gets a non-zero width.
     var onSized: (() -> Void)?
     /// The document's file: relative image paths resolve against its folder.
-    var documentURL: URL?
+    var documentURL: URL? {
+        didSet { imageStore.documentURL = documentURL }
+    }
     /// Set on a table cell's editor: the grid it belongs to.
     weak var cellHost: TableGridView?
     var isCell: Bool { cellHost != nil }
@@ -77,14 +78,19 @@ final class DocumentTextView: NSTextView {
         didSet { if !isCell { tableGrids.forEach { $0.setEditable(isEditable) } } }
     }
 
-    enum ImageState: Equatable { case loading, loaded, failed }
-    /// Block images by their address as written, loaded once and cached.
-    private var images: [String: (state: ImageState, image: NSImage?)] = [:]
+    typealias ImageState = ImageStore.State
+    private let imageStore = ImageStore()
 
-    func imageState(for address: String) -> ImageState? { images[address]?.state }
+    func imageState(for address: String) -> ImageState? { imageStore.state(for: address) }
     /// A document is untrusted: cap what one image may cost.
-    var maxImageBytes = 50_000_000
-    var maxImagePixels = 100_000_000
+    var maxImageBytes: Int {
+        get { imageStore.maxBytes }
+        set { imageStore.maxBytes = newValue }
+    }
+    var maxImagePixels: Int {
+        get { imageStore.maxPixels }
+        set { imageStore.maxPixels = newValue }
+    }
 
     /// Private undo stack: the window's document undo manager belongs to a
     /// DocumentGroup(viewing:) document that can't be saved, and registering
@@ -712,83 +718,10 @@ final class DocumentTextView: NSTextView {
 
     // MARK: Images
 
-    /// Where an image address points. Like the web reader, local images come
-    /// only from inside the document's folder (no "../", absolute paths or
-    /// file URLs); http, https and data URLs load as written.
-    static func imageURL(_ address: String, documentURL: URL?) -> URL? {
-        if let url = URL(string: address), let scheme = url.scheme?.lowercased() {
-            return ["http", "https", "data"].contains(scheme) ? url : nil
-        }
-        let path = address.removingPercentEncoding ?? address
-        guard !path.hasPrefix("/"), let folder = documentURL?.deletingLastPathComponent().standardizedFileURL
-        else { return nil }
-        let candidate = folder.appendingPathComponent(path).standardizedFileURL
-        return isInside(candidate, folder) ? candidate : nil
-    }
-
-    nonisolated static func isInside(_ candidate: URL, _ folder: URL) -> Bool {
-        let base = folder.path.hasSuffix("/") ? folder.path : folder.path + "/"
-        return candidate.path.hasPrefix(base)
-    }
-
-    /// Read a local image: a regular file, still inside the folder once
-    /// symlinks are resolved, and no larger than `limit`.
-    nonisolated static func readLocal(_ url: URL, folder: URL, limit: Int) -> Data? {
-        let real = url.resolvingSymlinksInPath()
-        guard isInside(real, folder.resolvingSymlinksInPath()),
-              let values = try? real.resourceValues(forKeys: [.isRegularFileKey, .fileSizeKey]),
-              values.isRegularFile == true, let size = values.fileSize, size <= limit
-        else { return nil }
-        return try? Data(contentsOf: real)
-    }
-
-    /// Download at most `limit` bytes; nil if there is more.
-    nonisolated static func download(_ url: URL, limit: Int) async -> Data? {
-        guard let (bytes, response) = try? await URLSession.shared.bytes(from: url),
-              response.expectedContentLength <= Int64(limit) else { return nil }
-        var data = Data()
-        do {
-            for try await byte in bytes {
-                data.append(byte)
-                if data.count > limit { return nil }
-            }
-        } catch { return nil }
-        return data
-    }
-
-    /// Decode within `maxImagePixels`, failing closed:
-    /// - a raster image must report dimensions for every frame, and all its
-    ///   frames together must fit the limit (NSImage loads them all);
-    /// - an image ImageIO can't measure loads only if it is purely vector
-    ///   (SVG, PDF) and its declared size fits the same limit;
-    /// - anything else is refused.
-    private func decode(_ data: Data) -> NSImage? {
-        if let source = CGImageSourceCreateWithData(data as CFData, nil), CGImageSourceGetCount(source) > 0,
-           CGImageSourceGetType(source) != nil {
-            var total = 0
-            for index in 0..<CGImageSourceGetCount(source) {
-                guard let properties = CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any],
-                      let width = properties[kCGImagePropertyPixelWidth] as? Int,
-                      let height = properties[kCGImagePropertyPixelHeight] as? Int
-                else { return nil }
-                let (pixels, overflow) = width.multipliedReportingOverflow(by: height)
-                guard !overflow else { return nil }
-                total += pixels
-                if total > maxImagePixels { return nil }
-            }
-            return NSImage(data: data)
-        }
-        guard let picture = NSImage(data: data), !picture.representations.isEmpty,
-              picture.representations.allSatisfy({ !($0 is NSBitmapImageRep) }),
-              picture.size.width * picture.size.height <= CGFloat(maxImagePixels)
-        else { return nil }
-        return picture
-    }
-
     /// The size a loaded block image is drawn at: its own size, scaled down
     /// (never up) to the text column.
     private func imageSize(for image: MarkdownLayout.BlockImage) -> NSSize? {
-        guard let picture = images[image.url]?.image, picture.size.width > 0, let container = textContainer else { return nil }
+        guard let picture = imageStore.image(for: image.url), picture.size.width > 0, let container = textContainer else { return nil }
         let column = container.size.width - 2 * container.lineFragmentPadding
         let width = min(picture.size.width, column)
         return NSSize(width: width, height: picture.size.height * width / picture.size.width)
@@ -796,36 +729,9 @@ final class DocumentTextView: NSTextView {
 
     /// Start loading every block image not yet requested.
     private func requestImages() {
-        for image in layout.blockImages where images[image.url] == nil {
-            let address = image.url
-            images[address] = (.loading, nil)
-            guard let url = Self.imageURL(address, documentURL: documentURL) else {
-                imageLoaded(address, data: nil)
-                continue
-            }
-            let limit = maxImageBytes
-            let folder = documentURL?.deletingLastPathComponent().standardizedFileURL
-            Task {
-                let data: Data?
-                switch url.scheme?.lowercased() {
-                case "http", "https":
-                    data = await Self.download(url, limit: limit)
-                case "data":
-                    data = (try? Data(contentsOf: url)).flatMap { $0.count <= limit ? $0 : nil }
-                default:
-                    data = await Task.detached(priority: .utility) {
-                        folder.flatMap { Self.readLocal(url, folder: $0, limit: limit) }
-                    }.value
-                }
-                self.imageLoaded(address, data: data)
-            }
+        imageStore.request(layout.blockImages.map(\.url)) { [weak self] address in
+            self?.restyleImages { $0.url == address }
         }
-    }
-
-    private func imageLoaded(_ address: String, data: Data?) {
-        let picture = data.flatMap(decode)
-        images[address] = (picture == nil ? .failed : .loaded, picture)
-        restyleImages { $0.url == address }
     }
 
     private func restyleImages(where match: (MarkdownLayout.BlockImage) -> Bool) {
@@ -842,14 +748,14 @@ final class DocumentTextView: NSTextView {
             let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: image.range.location),
                                                effectiveRange: nil)
             let x = fragment.minX + tc.lineFragmentPadding + textContainerOrigin.x
-            if let size = imageSize(for: image), let picture = images[image.url]?.image {
+            if let size = imageSize(for: image), let picture = imageStore.image(for: image.url) {
                 // On whole device pixels: the lines above can leave the
                 // fragment at a fractional point, smearing every edge.
                 let rect = pixelAligned(NSRect(x: x, y: fragment.minY + textContainerOrigin.y + theme.body.pointSize / 2,
                                                width: size.width, height: size.height))
                 picture.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
                              respectFlipped: true, hints: nil)
-            } else if images[image.url]?.state == .failed {
+            } else if imageStore.state(for: image.url) == .failed {
                 let label = image.alt.isEmpty ? image.url : image.alt
                 let font = NSFontManager.shared.convert(theme.body, toHaveTrait: .italicFontMask)
                 let y = fragment.minY + textContainerOrigin.y + (fragment.height - font.boundingRectForFont.height) / 2

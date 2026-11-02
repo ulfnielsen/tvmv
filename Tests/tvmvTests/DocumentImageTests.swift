@@ -3,6 +3,7 @@ import AppKit
 import ImageIO
 import TVMVCore
 @testable import tvmv
+@testable import TVMVNativeText
 
 @MainActor
 final class DocumentImageTests: XCTestCase {
@@ -97,7 +98,7 @@ final class DocumentImageTests: XCTestCase {
         // Security review: the web reader served local images only from
         // inside the document's folder (AssetSchemeHandler.confine).
         let doc = URL(fileURLWithPath: "/docs/guide/readme.md")
-        func resolve(_ s: String, _ d: URL? = doc) -> URL? { DocumentTextView.imageURL(s, documentURL: d) }
+        func resolve(_ s: String, _ d: URL? = doc) -> URL? { ImageSource.url(s, documentURL: d) }
         XCTAssertEqual(resolve("img/a b.png"), URL(fileURLWithPath: "/docs/guide/img/a b.png"))
         XCTAssertEqual(resolve("img/a%20b.png"), URL(fileURLWithPath: "/docs/guide/img/a b.png"))
         XCTAssertEqual(resolve("img/../a.png"), URL(fileURLWithPath: "/docs/guide/a.png"))
@@ -148,9 +149,9 @@ final class DocumentImageTests: XCTestCase {
         try writePNG("big.png", width: 200, height: 100)
         let url = folder.appendingPathComponent("big.png")
         let size = try Data(contentsOf: url).count
-        let whole = await DocumentTextView.download(url, limit: size)
+        let whole = await ImageSource.download(url, limit: size)
         XCTAssertEqual(whole?.count, size)
-        let capped = await DocumentTextView.download(url, limit: size - 1)
+        let capped = await ImageSource.download(url, limit: size - 1)
         XCTAssertNil(capped)
     }
 
