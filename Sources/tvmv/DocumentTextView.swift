@@ -401,35 +401,46 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         return inside(stop).map { forward ? NSMaxRange($0) : $0.location } ?? stop
     }
 
-    /// An arrow key passes one picture per press, with any hidden markup
-    /// between it and the caret (AppKit steps from glyph to glyph, which
-    /// can pass a picture's edge or several pictures at once).
-    private func pictureStep(forward: Bool) -> Int? {
+    /// An arrow key from beside hidden markup passes that markup and then
+    /// one visible character, or one picture (AppKit steps from glyph to
+    /// glyph: across null glyphs it can propose the document's start, or
+    /// pass a picture's edge or several pictures at once). Nil, for
+    /// AppKit's own step: a selection, all markup shown, no markup hidden
+    /// that way, or a hidden line break (a collapsed line or table).
+    private func arrowStep(forward: Bool) -> Int? {
         guard !showAllMarkup, selectedRange().length == 0, let storage = textStorage else { return nil }
         let images = shownImages()
-        guard !images.isEmpty else { return nil }
         let text = storage.string as NSString
-        var i = selectedRange().location
+        let caret = selectedRange().location
+        var i = caret
         if forward {
             while true {
                 if let image = images.first(where: { $0.location == i }) { return NSMaxRange(image) }
-                guard i < text.length, isHidden(i), text.character(at: i) != 10 else { return nil }
+                guard i < text.length, isHidden(i) else { break }
+                guard text.character(at: i) != 10 else { return nil }
                 i += 1
             }
+            guard i > caret else { return nil }
+            let next = i < text.length ? NSMaxRange(text.rangeOfComposedCharacterSequence(at: i)) : i
+            return caretStop(next, movingForward: true)
         }
         while true {
             if let image = images.first(where: { NSMaxRange($0) == i }) { return image.location }
-            guard i > 0, isHidden(i - 1), text.character(at: i - 1) != 10 else { return nil }
+            guard i > 0, isHidden(i - 1) else { break }
+            guard text.character(at: i - 1) != 10 else { return nil }
             i -= 1
         }
+        guard i < caret else { return nil }
+        let previous = i > 0 ? text.rangeOfComposedCharacterSequence(at: i - 1).location : i
+        return caretStop(previous, movingForward: false)
     }
 
     override func moveRight(_ sender: Any?) {
-        if let stop = pictureStep(forward: true) { setSelectedRange(NSRange(location: stop, length: 0)) } else { super.moveRight(sender) }
+        if let stop = arrowStep(forward: true) { setSelectedRange(NSRange(location: stop, length: 0)) } else { super.moveRight(sender) }
     }
 
     override func moveLeft(_ sender: Any?) {
-        if let stop = pictureStep(forward: false) { setSelectedRange(NSRange(location: stop, length: 0)) } else { super.moveLeft(sender) }
+        if let stop = arrowStep(forward: false) { setSelectedRange(NSRange(location: stop, length: 0)) } else { super.moveLeft(sender) }
     }
 
     /// What a one-character Backspace (or forward Delete) removes when it

@@ -451,4 +451,88 @@ final class DocumentTextViewTests: XCTestCase {
         view.showAllMarkup = true
         XCTAssertEqual(copied("bold"), "bold", "with the markup shown, the selection is what you see")
     }
+
+    // MARK: Arrows over hidden markup
+
+    /// A real arrow key press, through keyDown.
+    private func press(_ key: UInt16, _ character: Int) {
+        let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: [.numericPad, .function],
+                                     timestamp: 0, windowNumber: window.windowNumber, context: nil,
+                                     characters: String(UnicodeScalar(character)!),
+                                     charactersIgnoringModifiers: String(UnicodeScalar(character)!),
+                                     isARepeat: false, keyCode: key)!
+        view.keyDown(with: event)
+    }
+    private func pressRight() { press(124, NSRightArrowFunctionKey) }
+    private func pressLeft() { press(123, NSLeftArrowFunctionKey) }
+
+    private func loadEditable(_ text: String) {
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load(text)
+        view.layoutManager!.ensureLayout(for: view.textContainer!)
+    }
+
+    func testAnArrowPassesHiddenMarkupAndOneCharacter() {
+        // Reported: from before a hidden "**", right-arrow put the caret at
+        // the document's start (AppKit proposes {0,0} across a null glyph).
+        loadEditable("A **b** c\n")
+        for viaKey in [false, true] {
+            view.setSelectedRange(NSRange(location: 2, length: 0))
+            viaKey ? pressRight() : view.moveRight(nil)
+            XCTAssertEqual(view.selectedRange(), NSRange(location: 5, length: 0), "past the ** and the b (key: \(viaKey))")
+            viaKey ? pressRight() : view.moveRight(nil)
+            XCTAssertEqual(view.selectedRange(), NSRange(location: 8, length: 0), "past the ** and the space")
+            view.setSelectedRange(NSRange(location: 7, length: 0))
+            viaKey ? pressLeft() : view.moveLeft(nil)
+            XCTAssertEqual(view.selectedRange(), NSRange(location: 4, length: 0), "back past the ** and the b")
+            viaKey ? pressLeft() : view.moveLeft(nil)
+            XCTAssertEqual(view.selectedRange(), NSRange(location: 1, length: 0), "back past the ** and the space")
+        }
+    }
+
+    func testLeftArrowLeavesALineAfterItsHiddenPrefix() {
+        for (text, caret) in [("Para\n\n# Title\n", 8), ("Para\n\n- item\n", 8), ("Para\n\n> quoted\n", 8)] {
+            loadEditable(text)
+            view.setSelectedRange(NSRange(location: caret, length: 0))
+            XCTAssertEqual(view.selectedRange().location, caret, "rests after the prefix in «\(text)»")
+            pressLeft()
+            XCTAssertEqual(view.selectedRange(), NSRange(location: 5, length: 0), "onto the blank line in «\(text)»")
+            pressRight()
+            XCTAssertEqual(view.selectedRange(), NSRange(location: caret, length: 0), "back after the prefix in «\(text)»")
+            pressRight()
+            XCTAssertEqual(view.selectedRange(), NSRange(location: caret + 1, length: 0), "one character on in «\(text)»")
+        }
+    }
+
+    func testArrowsInPlainShownAndSelectedTextAreAppKits() {
+        loadEditable("A **b** c\n")
+        view.setSelectedRange(NSRange(location: 8, length: 0))
+        pressRight()
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 9, length: 0), "plain text: one character")
+        view.setSelectedRange(NSRange(location: 1, length: 0))
+        pressRight()
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 4, length: 0), "into hidden markup: AppKit's own step")
+        view.setSelectedRange(NSRange(location: 2, length: 3))
+        pressRight()
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 5, length: 0), "a selection collapses to its end")
+        view.showAllMarkup = true
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        pressRight()
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 3, length: 0), "all markup shown: one source character")
+        view.showAllMarkup = false
+        view.setSelectedRange(NSRange(location: 4, length: 0))
+        view.toggleRevealMarkup(nil)
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        pressRight()
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 3, length: 0), "revealed: one source character")
+        view.cancelOperation(nil)
+        view.isEditable = false
+        view.setSelectedRange(NSRange(location: 8, length: 0))
+        pressRight()
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 9, length: 0), "reading: plain text as before")
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        pressRight()
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 5, length: 0), "reading: past the ** and the b")
+    }
 }

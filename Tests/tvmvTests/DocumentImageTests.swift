@@ -564,6 +564,23 @@ final class DocumentImageTests: XCTestCase {
         XCTAssertEqual(view.string, "A  c\n")
     }
 
+    func testRightArrowPassesAnUnloadedImagesHiddenMarkup() {
+        // Reported: with the image failed (or loading) its "![" is hidden, and
+        // right-arrow from before it put the caret at the document's start.
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.load("A ![b](img/missing.png) c\n")
+        pump { view.imageState(for: "img/missing.png") == .failed }
+        view.setSelectedRange(NSRange(location: 2, length: 0))
+        view.moveRight(nil)
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 5, length: 0), "past the hidden ![ and the alt")
+        view.moveRight(nil)
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 24, length: 0), "past the hidden tail and the space")
+        view.setSelectedRange(NSRange(location: 23, length: 0))
+        view.moveLeft(nil)
+        XCTAssertEqual(view.selectedRange(), NSRange(location: 4, length: 0), "back past the tail and the alt")
+    }
+
     func testCaretCrossesAnImageInATableCell() throws {
         try writePNG("img/a.png", width: 16, height: 16)
         view.isEditable = true
