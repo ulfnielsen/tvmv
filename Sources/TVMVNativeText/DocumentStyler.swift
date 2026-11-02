@@ -30,18 +30,28 @@ public enum DocumentStyler {
         let range = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
         guard range.length > 0 else { return }
         let source = storage.string as NSString
-        let inlineImages = layout.inlineImages + (blockImagesInline ? layout.blockImages.map(inlineImage) : [])
-        // A shown inline image's source is not styled as source: its alt
-        // keeps the font of the text around it. One in a hidden table shows
-        // in its cell, not here.
-        let hiddenTables = layout.tables.map(\.range).filter { !isRevealed($0) }
-        let shownInline = Set(inlineImages.filter { image in
-            !isRevealed(image.range) && !hiddenTables.contains { NSLocationInRange(image.range.location, $0) }
-        }.map(\.range))
         func clip(_ r: NSRange) -> NSRange? {
             let c = NSIntersectionRange(r, range)
             return c.length > 0 ? c : nil
         }
+        // Only what touches `range` is looked at, so restyling one table (a
+        // load restyles each once its grid is measured) costs the same
+        // however many tables and images the document has.
+        let inlineImages = (layout.inlineImages + (blockImagesInline ? layout.blockImages.map(inlineImage) : []))
+            .filter { clip($0.range) != nil && NSMaxRange($0.range) <= source.length }
+        // A shown inline image's source is not styled as source: its picture,
+        // or its alt or file name until it loads, takes its place in the font
+        // of the text around it. One in a hidden table shows in its cell, not
+        // here; one with nothing to show until it loads stays source.
+        let hiddenTables = layout.tables.map(\.range).filter { clip($0) != nil && !isRevealed($0) }
+        let shownInline: [(image: MarkdownLayout.InlineImage, size: CGSize?, shown: NSRange?)] = inlineImages.compactMap { image in
+            guard !isRevealed(image.range), !hiddenTables.contains(where: { NSLocationInRange(image.range.location, $0) })
+            else { return nil }
+            if let size = inlineImageSize(image) { return (image, size, nil) }
+            guard let shown = image.altRange.length > 0 ? image.altRange : fileName(image, in: source) else { return nil }
+            return (image, nil, shown)
+        }
+        let shownRanges = Set(shownInline.map(\.image.range))
         func addTrait(_ trait: FontTrait, _ r: NSRange) {
             storage.enumerateAttribute(.font, in: r) { value, sub, _ in
                 let font = (value as? PlatformFont) ?? theme.body
@@ -72,7 +82,7 @@ public enum DocumentStyler {
             case .link(let url), .autolink(let url):
                 storage.addAttributes([.foregroundColor: theme.accent, .tvmvLink: url,
                                        .underlineStyle: NSUnderlineStyle.single.rawValue], range: r)
-            case .image where shownInline.contains(run.range):
+            case .image where shownRanges.contains(run.range):
                 break
             case .html, .image:
                 storage.addAttributes([.font: theme.mono, .foregroundColor: theme.muted], range: r)
@@ -146,8 +156,8 @@ public enum DocumentStyler {
         }
         // Block images: the source hides and its line takes the picture's
         // height plus a half-em margin above and below (drawn by the view).
-        for image in layout.blockImages where !blockImagesInline && !isRevealed(image.range) {
-            guard let r = clip(image.range) else { continue }
+        for image in layout.blockImages where !blockImagesInline {
+            guard let r = clip(image.range), !isRevealed(image.range) else { continue }
             storage.addAttribute(.tvmvHidden, value: true, range: r)
             if let height = imageHeight(image) {
                 let p = NSMutableParagraphStyle()
@@ -158,11 +168,10 @@ public enum DocumentStyler {
         }
         // Inline images: a loaded one keeps only its "!", clear and kerned to
         // the picture's width (drawn by the view); until then its alt shows,
-        // muted — or, with no alt, its file name.
-        for image in inlineImages where shownInline.contains(image.range) {
-            guard NSIntersectionRange(image.range, range).length > 0, NSMaxRange(image.range) <= source.length
-            else { continue }
-            if let size = inlineImageSize(image) {
+        // muted — or, with no alt, its file name (with neither, its source
+        // shows as source: it never vanishes).
+        for (image, size, shown) in shownInline {
+            if let size {
                 if let r = clip(NSRange(location: image.range.location, length: 1)) {
                     let font = storage.attribute(.font, at: r.location, effectiveRange: nil) as? PlatformFont ?? theme.body
                     let bang = ("!" as NSString).size(withAttributes: [.font: font]).width
@@ -172,9 +181,7 @@ public enum DocumentStyler {
                 if let r = clip(NSRange(location: image.range.location + 1, length: image.range.length - 1)) {
                     storage.addAttribute(.tvmvHidden, value: true, range: r)
                 }
-            } else {
-                let shown = image.altRange.length > 0 ? image.altRange
-                    : fileName(image, in: source) ?? NSRange(location: NSMaxRange(image.altRange), length: 0)
+            } else if let shown {
                 for part in [NSRange(location: image.range.location, length: shown.location - image.range.location),
                              NSRange(location: NSMaxRange(shown), length: NSMaxRange(image.range) - NSMaxRange(shown))] {
                     if let r = clip(part) { storage.addAttribute(.tvmvHidden, value: true, range: r) }
@@ -186,10 +193,10 @@ public enum DocumentStyler {
         // passes it as one collapsed block); the first line reserves the
         // grid's height plus a half-em margin each side, the rest collapse.
         let tableText = storage.string as NSString
-        for (index, table) in layout.tables.enumerated() where !isRevealed(table.range) {
+        for (index, table) in layout.tables.enumerated() {
             var hidden = table.range
             if NSMaxRange(hidden) < tableText.length, tableText.character(at: NSMaxRange(hidden)) == 10 { hidden.length += 1 }
-            guard let r = clip(hidden) else { continue }
+            guard let r = clip(hidden), !isRevealed(table.range) else { continue }
             storage.addAttribute(.tvmvHidden, value: true, range: r)
             let firstLine = tableText.lineRange(for: NSRange(location: table.range.location, length: 0))
             if let height = tableHeight(index), let first = clip(firstLine) {
@@ -214,7 +221,8 @@ public enum DocumentStyler {
         var indents: [Int: (amount: CGFloat, shown: CGFloat)] = [:]   // by line start
         for quote in layout.quoteLines {
             let line = tableText.lineRange(for: NSRange(location: quote.prefix.location, length: 0))
-            if let r = clip(line) { storage.addAttribute(.foregroundColor, value: theme.inkSoft, range: r) }
+            guard let r = clip(line) else { continue }   // its indent is applied only in range
+            storage.addAttribute(.foregroundColor, value: theme.inkSoft, range: r)
             var entry = indents[line.location] ?? (0, 0)
             entry.amount += quoteIndent(level: quote.level, em: em)
             if isRevealed(quote.prefix) { entry.shown += width(quote.prefix) }
@@ -223,6 +231,7 @@ public enum DocumentStyler {
         }
         for item in layout.listItems {
             let line = tableText.lineRange(for: NSRange(location: item.marker.location, length: 0))
+            guard clip(line) != nil else { continue }
             var entry = indents[line.location] ?? (0, 0)
             // The gutter fits the marker as typed ("- [ ] ", "10. "), so it can
             // take the bullet's place without moving the text.

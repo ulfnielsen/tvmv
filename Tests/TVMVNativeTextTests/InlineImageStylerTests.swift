@@ -93,4 +93,45 @@ final class InlineImageStylerTests: XCTestCase {
             XCTAssertLessThanOrEqual(p?.minimumLineHeight ?? 0, theme.body.pointSize * 1.7, "\(i)")
         }
     }
+
+    func testAnUnloadedImageWithNothingToShowShowsItsSource() {
+        // Never vanish: with no alt and no file name, the source shows, muted.
+        for text in ["A ![][ref] c\n\n[ref]: img/x.png\n", "A ![](https://host.example/) c\n"] {
+            let (storage, _) = stack(text)
+            let image = (text as NSString).range(of: text.contains("[ref]") ? "![][ref]" : "![](https://host.example/)")
+            for i in image.location..<NSMaxRange(image) {
+                XCTAssertFalse(hidden(storage, i), "\(i) in «\(text)»")
+                XCTAssertEqual(storage.attribute(.foregroundColor, at: i, effectiveRange: nil) as? PlatformColor,
+                               theme.muted, "\(i) in «\(text)»")
+            }
+        }
+    }
+
+    func testAnImageWithNothingToShowStillShowsAsAPictureOnceLoaded() {
+        let (storage, _) = stack("A ![](https://host.example/) c", size: CGSize(width: 40, height: 20))
+        XCTAssertEqual(storage.attribute(.tvmvImageCarrier, at: 2, effectiveRange: nil) as? String, "https://host.example/")
+        XCTAssertTrue(hidden(storage, 3))
+    }
+
+    /// The styler's work for one table's range is the same however many
+    /// tables and images the document has: a load restyles each table once
+    /// its grid is measured, and per-table work over every image (or table)
+    /// made loading a page of them quadratic.
+    func testRestylingOneTableDoesNotScaleWithTheDocument() {
+        func revealChecks(sections: Int) -> Int {
+            var text = "# Title\n\n"
+            for i in 0..<sections {
+                text += "Para \(i) ![i](img/i\(i).png) text.\n\n- item\n\n> quote\n\n![block](img/b\(i).png)\n\n| a | ![c](img/c\(i).png) |\n|---|---|\n| x | y |\n\n"
+            }
+            let layout = MarkdownLayoutParser.parse(text)
+            let storage = NSTextStorage(string: text)
+            let table = layout.tables[sections / 2].range
+            var checks = 0
+            DocumentStyler.apply(layout, to: storage, in: table, theme: theme,
+                                 isRevealed: { _ in checks += 1; return false },
+                                 inlineImageSize: { _ in CGSize(width: 16, height: 16) })
+            return checks
+        }
+        XCTAssertEqual(revealChecks(sections: 20), revealChecks(sections: 40))
+    }
 }
