@@ -554,12 +554,21 @@ final class DocumentImageTests: XCTestCase {
         XCTAssertEqual(s.substring(with: view.copyRange(for: NSRange(location: NSMaxRange(image), length: 2))), " c")
         XCTAssertEqual(s.substring(with: view.copyRange(for: NSRange(location: image.location, length: 1))), "![b](img/a.png)")
         XCTAssertEqual(s.substring(with: view.copyRange(for: NSRange(location: 0, length: 3))), "A ![b](img/a.png)")
+        // A named pasteboard: the test leaves the user's clipboard alone.
+        let board = NSPasteboard(name: NSPasteboard.Name("tvmv-test-\(UUID().uuidString)"))
+        defer { board.releaseGlobally() }
+        view.pasteboard = board
         view.setSelectedRange(NSRange(location: 0, length: 2))
         view.cut(nil)
         XCTAssertEqual(view.string, "![b](img/a.png) c\n")
-        XCTAssertEqual(NSPasteboard.general.string(forType: .string), "A ")
+        XCTAssertEqual(board.string(forType: .string), "A ")
+        XCTAssertEqual(view.undoManager!.undoActionName, "Cut")
         view.undoManager!.undo()
+        XCTAssertEqual(view.string, text)
         view.setSelectedRange(NSRange(location: image.location, length: 1))
+        view.copy(nil)
+        XCTAssertEqual(board.string(forType: .string), "![b](img/a.png)")
+        XCTAssertEqual(view.selectedRange(), NSRange(location: image.location, length: 1), "copy keeps the selection")
         view.cut(nil)
         XCTAssertEqual(view.string, "A  c\n")
     }

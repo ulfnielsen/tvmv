@@ -817,16 +817,22 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         return NSRange(location: start, length: end - start)
     }
 
+    /// Where copy and cut write (a test uses its own, not the clipboard).
+    var pasteboard = NSPasteboard.general
+
     override func copy(_ sender: Any?) {
         let selection = selectedRange()
         setSelectedRange(copyRange(for: selection))
-        super.copy(sender)
+        writeSelection(to: pasteboard, types: writablePasteboardTypes)
         setSelectedRange(selection)
     }
 
     override func cut(_ sender: Any?) {
+        guard isEditable else { return }
         setSelectedRange(copyRange(for: selectedRange()))
-        super.cut(sender)
+        guard writeSelection(to: pasteboard, types: writablePasteboardTypes) else { return }
+        delete(sender)
+        undoManager?.setActionName("Cut")
     }
 
     // MARK: Pasting images
