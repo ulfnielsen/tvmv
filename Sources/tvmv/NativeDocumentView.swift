@@ -27,24 +27,19 @@ final class NativeDocumentController {
     func topVisibleOffset() -> Int {
         guard let view = textView, let lm = view.layoutManager, let tc = view.textContainer,
               (view.string as NSString).length > 0 else { return 0 }
-        // One point below the edge: exactly at it, the line above (whose
-        // fragment includes its paragraph spacing) would claim the point.
-        let point = NSPoint(x: 0, y: max(0, view.visibleRect.minY - view.textContainerOrigin.y + 1))
-        return lm.characterIndexForGlyph(at: lm.glyphIndex(for: point, in: tc))
+        return DocumentGeometry.topVisibleOffset(y: view.visibleRect.minY, layoutManager: lm, textContainer: tc,
+                                                 origin: view.textContainerOrigin)
     }
 
     func scrollTo(offset: Int) {
         guard let view = textView, let lm = view.layoutManager, let tc = view.textContainer else { return }
         let length = (view.string as NSString).length
         guard length > 0 else { return }
-        let glyphs = lm.glyphRange(forCharacterRange: NSRange(location: min(max(0, offset), length - 1), length: 1),
-                                   actualCharacterRange: nil)
-        // Lay out up to the target and grow the view to match first, or the
-        // scroll is clamped to a height from before the latest reflow.
-        lm.ensureLayout(forGlyphRange: NSRange(location: 0, length: NSMaxRange(glyphs)))
+        // Lay out up to the target (lineTop does) and grow the view to match
+        // first, or the scroll is clamped to a height from before the latest reflow.
+        let top = DocumentGeometry.lineTop(offset: offset, layoutManager: lm, textContainer: tc)
         view.sizeToFit()
-        let rect = lm.boundingRect(forGlyphRange: glyphs, in: tc)
-        view.scroll(NSPoint(x: 0, y: max(0, rect.minY + view.textContainerOrigin.y)))
+        view.scroll(NSPoint(x: 0, y: max(0, top + view.textContainerOrigin.y)))
     }
 
     func scrollTo(fraction: Double) {

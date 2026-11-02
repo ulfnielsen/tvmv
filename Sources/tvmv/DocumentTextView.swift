@@ -462,43 +462,23 @@ final class DocumentTextView: NSTextView {
 
     // MARK: Lists and quotes
 
-    /// Where a list item's text starts on screen (its line fragment and the
-    /// x of the text), or nil if not laid out.
-    private func listItemGeometry(_ item: MarkdownLayout.ListItem) -> (fragment: NSRect, baseline: CGFloat, textX: CGFloat)? {
-        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage,
-              NSMaxRange(item.marker) <= storage.length else { return nil }
-        // Anchor on the first visible character of the line: hidden glyphs at
-        // a line's start (an italic first word's "*") sit on the line before.
-        let text = storage.string as NSString
-        let line = text.lineRange(for: NSRange(location: item.marker.location, length: 0))
-        var content = min(NSMaxRange(item.marker), max(0, storage.length - 1))
-        while content < NSMaxRange(line) - 1, isHidden(content) { content += 1 }
-        let glyph = lm.glyphIndexForCharacter(at: content)
-        let fragment = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-        let style = storage.attribute(.paragraphStyle, at: content, effectiveRange: nil) as? NSParagraphStyle
-        let textX = textContainerOrigin.x + tc.lineFragmentPadding + (style?.firstLineHeadIndent ?? 0)
-        let baseline = fragment.minY + textContainerOrigin.y + lm.location(forGlyphAt: glyph).y
-        return (fragment, baseline, textX)
-    }
-
     /// Where a list item's bullet is anchored: the x its text starts at and
     /// its first line's baseline, in view coordinates.
     func bulletAnchor(for item: MarkdownLayout.ListItem) -> NSPoint? {
-        listItemGeometry(item).map { NSPoint(x: $0.textX, y: $0.baseline) }
+        decorationInput().flatMap { DocumentGeometry.listItem(item, $0) }.map { NSPoint(x: $0.textX, y: $0.baseline) }
     }
 
     /// The clickable checkbox of a task item, in view coordinates.
     func taskBoxRect(for item: MarkdownLayout.ListItem) -> NSRect? {
-        guard item.task != nil, let g = listItemGeometry(item) else { return nil }
-        let side = theme.body.pointSize * 0.8
-        return NSRect(x: g.textX - side - theme.body.pointSize * 0.45, y: g.baseline - side * 0.95, width: side, height: side)
+        decorationInput().flatMap { DocumentGeometry.taskBox(item, $0) }
     }
 
     /// The task item whose checkbox is at `point` (with a little slack), if any.
     func taskItem(at point: NSPoint) -> Int? {
-        layout.listItems.indices.first { i in
-            !(showAllMarkup || revealedUnits.contains(layout.listItems[i].marker))
-                && taskBoxRect(for: layout.listItems[i])?.insetBy(dx: -4, dy: -4).contains(point) == true
+        guard let input = decorationInput() else { return nil }
+        return layout.listItems.indices.first { i in
+            !input.isRevealed(layout.listItems[i].marker)
+                && DocumentGeometry.taskBox(layout.listItems[i], input)?.insetBy(dx: -4, dy: -4).contains(point) == true
         }
     }
 
@@ -546,52 +526,6 @@ final class DocumentTextView: NSTextView {
             setSelectedRange(NSRange(location: caret + 1 + (next as NSString).length, length: 0))
         }
         return true
-    }
-
-    /// Bullets, numbers, checkboxes and quote rules, in the indent the styler left.
-    private func drawListsAndQuotes(visible: NSRange) {
-        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage else { return }
-        let em = theme.body.pointSize
-        for quote in layout.quoteLines where NSLocationInRange(quote.prefix.location, visible)
-            && NSMaxRange(quote.prefix) <= storage.length && !(showAllMarkup || revealedUnits.contains(quote.prefix)) {
-            let at = min(NSMaxRange(quote.prefix), max(0, storage.length - 1))
-            let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: at), effectiveRange: nil)
-            theme.muted.withAlphaComponent(0.45).setFill()
-            for k in 0..<quote.level {
-                NSRect(x: textContainerOrigin.x + tc.lineFragmentPadding + CGFloat(k) * 1.2 * em + 0.2 * em,
-                       y: fragment.minY + textContainerOrigin.y, width: 3, height: fragment.height).fill()
-            }
-        }
-        for item in layout.listItems where NSLocationInRange(item.marker.location, visible)
-            && !(showAllMarkup || revealedUnits.contains(item.marker)) {
-            guard let g = listItemGeometry(item) else { continue }
-            if let task = item.task, let box = taskBoxRect(for: item) {
-                let path = NSBezierPath(roundedRect: box, xRadius: 3, yRadius: 3)
-                if task {
-                    theme.accent.setFill(); path.fill()
-                    let check = NSBezierPath()
-                    check.move(to: NSPoint(x: box.minX + box.width * 0.22, y: box.midY))
-                    check.line(to: NSPoint(x: box.minX + box.width * 0.42, y: box.maxY - box.height * 0.25))
-                    check.line(to: NSPoint(x: box.maxX - box.width * 0.2, y: box.minY + box.height * 0.25))
-                    check.lineWidth = 1.6
-                    theme.paper.setStroke(); check.stroke()
-                } else {
-                    path.lineWidth = 1.2
-                    theme.muted.setStroke(); path.stroke()
-                }
-                continue
-            }
-            let label: String
-            if item.ordered {
-                label = (storage.string as NSString).substring(with: item.bullet)
-            } else {
-                label = ["•", "◦", "▪"][min(item.level, 2)]
-            }
-            let attributes: [NSAttributedString.Key: Any] = [.font: theme.body, .foregroundColor: theme.muted]
-            let size = (label as NSString).size(withAttributes: attributes)
-            (label as NSString).draw(at: NSPoint(x: g.textX - size.width - 0.45 * em, y: g.baseline - theme.body.ascender),
-                                     withAttributes: attributes)
-        }
     }
 
     // MARK: Tables
@@ -736,33 +670,6 @@ final class DocumentTextView: NSTextView {
 
     private func restyleImages(where match: (MarkdownLayout.BlockImage) -> Bool) {
         for image in layout.blockImages where match(image) { restyle(image.range) }
-    }
-
-    /// Draw each shown block image into the line its hidden source reserves;
-    /// a failed one shows its alt text instead.
-    private func drawImages(visible: NSRange) {
-        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage else { return }
-        for image in layout.blockImages
-        where NSIntersectionRange(image.range, visible).length > 0 && NSMaxRange(image.range) <= storage.length
-            && !(showAllMarkup || revealedUnits.contains(image.range)) {
-            let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: image.range.location),
-                                               effectiveRange: nil)
-            let x = fragment.minX + tc.lineFragmentPadding + textContainerOrigin.x
-            if let size = imageSize(for: image), let picture = imageStore.image(for: image.url) {
-                // On whole device pixels: the lines above can leave the
-                // fragment at a fractional point, smearing every edge.
-                let rect = pixelAligned(NSRect(x: x, y: fragment.minY + textContainerOrigin.y + theme.body.pointSize / 2,
-                                               width: size.width, height: size.height))
-                picture.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
-                             respectFlipped: true, hints: nil)
-            } else if imageStore.state(for: image.url) == .failed {
-                let label = image.alt.isEmpty ? image.url : image.alt
-                let font = NSFontManager.shared.convert(theme.body, toHaveTrait: .italicFontMask)
-                let y = fragment.minY + textContainerOrigin.y + (fragment.height - font.boundingRectForFont.height) / 2
-                ("▨ " + label as NSString).draw(at: NSPoint(x: x, y: y),
-                                                withAttributes: [.font: font, .foregroundColor: theme.muted])
-            }
-        }
     }
 
     /// `rect` moved (not resized) so its origin sits on a device pixel.
@@ -1023,66 +930,19 @@ final class DocumentTextView: NSTextView {
 
     override func drawBackground(in rect: NSRect) {
         super.drawBackground(in: rect)
-        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage else { return }
-        // Whole source lines: hidden glyphs at a line's start (a list marker,
-        // an image's source) sit on the fragment before, so a strip redrawn
-        // while scrolling may hold only the line's visible rest or newline.
-        let visible = (storage.string as NSString).lineRange(for: lm.characterRange(
-            forGlyphRange: lm.glyphRange(forBoundingRect: rect.offsetBy(dx: -textContainerOrigin.x, dy: -textContainerOrigin.y), in: tc),
-            actualGlyphRange: nil))
-        theme.paperDeep.setFill()
-        for block in layout.codeBlocks where NSIntersectionRange(block.range, visible).length > 0 && block.body.length > 0 {
-            let glyphs = lm.glyphRange(forCharacterRange: block.body, actualCharacterRange: nil)
-            var box = lm.boundingRect(forGlyphRange: glyphs, in: tc)
-            box.origin.x = textContainerOrigin.x - 12
-            box.size.width = tc.containerSize.width + 24
-            box.origin.y += textContainerOrigin.y - 8
-            box.size.height += 16
-            NSBezierPath(roundedRect: box, xRadius: 6, yRadius: 6).fill()
-        }
-        // Inline code: a pill hugging the code font around its baseline, per line.
-        let pad = theme.mono.pointSize * 0.14
-        for run in codePillRuns() where NSIntersectionRange(run.range, visible).length > 0 {
-            let glyphs = lm.glyphRange(forCharacterRange: run.range, actualCharacterRange: nil)
-            var g = glyphs.location
-            while g < NSMaxRange(glyphs) {
-                var lineGlyphs = NSRange()
-                let fragment = lm.lineFragmentRect(forGlyphAt: g, effectiveRange: &lineGlyphs)
-                let part = NSIntersectionRange(glyphs, lineGlyphs)
-                guard part.length > 0 else { break }
-                let extent = lm.boundingRect(forGlyphRange: part, in: tc)
-                let baseline = fragment.minY + lm.location(forGlyphAt: part.location).y
-                let pill = NSRect(x: extent.minX - 2 + textContainerOrigin.x,
-                                  y: baseline - theme.mono.ascender - pad + textContainerOrigin.y,
-                                  width: extent.width + 4,
-                                  height: theme.mono.ascender - theme.mono.descender + 2 * pad)
-                NSBezierPath(roundedRect: pill, xRadius: 4, yRadius: 4).fill()
-                g = NSMaxRange(part)
-            }
-        }
-        drawImages(visible: visible)
-        drawListsAndQuotes(visible: visible)
-        drawPointMarkers(visible: visible)
+        guard let input = decorationInput(codePillRuns: codePillRuns()) else { return }
+        DocumentDecorations.draw(input, in: rect)
     }
 
-    /// A point comment: a small accent bubble, superscript, in the room its
-    /// clear "[" carrier keeps (not while its source is revealed).
-    private func drawPointMarkers(visible: NSRange) {
-        guard let lm = layoutManager, let storage = textStorage else { return }
-        let em = theme.body.pointSize
-        theme.accent.setFill()
-        for run in layout.styles where NSLocationInRange(run.range.location, visible) && run.range.location < storage.length {
-            guard case .review(.pointMarker, _) = run.style,
-                  storage.attribute(.foregroundColor, at: run.range.location, effectiveRange: nil) as? NSColor == .clear
-            else { continue }
-            let glyph = lm.glyphIndexForCharacter(at: run.range.location)
-            let fragment = lm.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
-            let x = lm.location(forGlyphAt: glyph).x + fragment.minX + textContainerOrigin.x
-            let baseline = fragment.minY + lm.location(forGlyphAt: glyph).y + textContainerOrigin.y
-            let side = em * 0.5
-            let bubble = NSRect(x: x + em * 0.05, y: baseline - theme.body.ascender * 0.95, width: side, height: side * 0.8)
-            NSBezierPath(roundedRect: bubble, xRadius: side * 0.3, yRadius: side * 0.3).fill()
-        }
+    /// What the shared decorations and geometry read, in view coordinates.
+    private func decorationInput(codePillRuns: [MarkdownLayout.StyleRun] = []) -> DecorationInput? {
+        guard let lm = layoutManager, let tc = textContainer, let storage = textStorage else { return nil }
+        return DecorationInput(
+            layout: layout, theme: theme, storage: storage, layoutManager: lm, textContainer: tc,
+            origin: textContainerOrigin,
+            isRevealed: { [showAllMarkup, revealedUnits] in showAllMarkup || revealedUnits.contains($0) },
+            isHidden: isHidden, images: imageStore, blockImageSize: imageSize(for:), codePillRuns: codePillRuns,
+            pixelAlign: pixelAligned)
     }
 
     // MARK: Delegates
