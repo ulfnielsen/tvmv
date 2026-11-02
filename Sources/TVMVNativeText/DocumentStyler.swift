@@ -1,31 +1,36 @@
-import AppKit
+import CoreGraphics
+import Foundation
 import TVMVCore
-import TVMVNativeText
+#if os(macOS)
+import AppKit
+#elseif os(iOS)
+import UIKit
+#endif
 
 /// Applies a `MarkdownLayout` to a text storage, limited to one range.
-enum DocumentStyler {
+public enum DocumentStyler {
     /// Where a list item's text starts at nesting `level`; its bullet sits in the em before.
-    static func listIndent(level: Int, em: CGFloat) -> CGFloat { CGFloat(level + 1) * 1.6 * em }
+    public static func listIndent(level: Int, em: CGFloat) -> CGFloat { CGFloat(level + 1) * 1.6 * em }
     /// Where quoted text starts at quote depth `level`; one rule per level sits to its left.
-    static func quoteIndent(level: Int, em: CGFloat) -> CGFloat { CGFloat(level) * 1.2 * em }
+    public static func quoteIndent(level: Int, em: CGFloat) -> CGFloat { CGFloat(level) * 1.2 * em }
 
     /// - Parameter isRevealed: whether a reveal unit's markup is currently shown.
     /// - Parameter imageHeight: the height a block image is drawn at, once
     ///   loaded (nil while loading or after a failure: a normal text line).
-    static func apply(_ layout: MarkdownLayout, to storage: NSTextStorage, in range: NSRange,
-                      theme: NativeTheme, isRevealed: (NSRange) -> Bool,
-                      imageHeight: (MarkdownLayout.BlockImage) -> CGFloat? = { _ in nil },
-                      tableHeight: (Int) -> CGFloat? = { _ in nil }) {
+    public static func apply(_ layout: MarkdownLayout, to storage: NSTextStorage, in range: NSRange,
+                             theme: NativeTheme, isRevealed: (NSRange) -> Bool,
+                             imageHeight: (MarkdownLayout.BlockImage) -> CGFloat? = { _ in nil },
+                             tableHeight: (Int) -> CGFloat? = { _ in nil }) {
         let range = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
         guard range.length > 0 else { return }
         func clip(_ r: NSRange) -> NSRange? {
             let c = NSIntersectionRange(r, range)
             return c.length > 0 ? c : nil
         }
-        func addTrait(_ trait: NSFontTraitMask, _ r: NSRange) {
+        func addTrait(_ trait: FontTrait, _ r: NSRange) {
             storage.enumerateAttribute(.font, in: r) { value, sub, _ in
-                let font = (value as? NSFont) ?? theme.body
-                storage.addAttribute(.font, value: NSFontManager.shared.convert(font, toHaveTrait: trait), range: sub)
+                let font = (value as? PlatformFont) ?? theme.body
+                storage.addAttribute(.font, value: font.adding(trait), range: sub)
             }
         }
 
@@ -38,9 +43,9 @@ enum DocumentStyler {
                 storage.addAttributes([.font: theme.headingFont(level),
                                        .paragraphStyle: theme.headingParagraph(level)], range: r)
             case .emphasis:
-                addTrait(.italicFontMask, r)
+                addTrait(.italic, r)
             case .strong:
-                addTrait(.boldFontMask, r)
+                addTrait(.bold, r)
             case .strikethrough:
                 storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: r)
             case .code:
@@ -71,15 +76,15 @@ enum DocumentStyler {
                     // revealed, it is just text again.
                     let unit = layout.markers.first { $0.unit.location == run.range.location }?.unit ?? run.range
                     if !isRevealed(unit) {
-                        storage.addAttributes([.foregroundColor: NSColor.clear,
+                        storage.addAttributes([.foregroundColor: PlatformColor.clear,
                                                .kern: theme.body.pointSize * 0.25], range: r)
                     }
                 case .delimiter:
                     // The '>' of "~>": the gap between old and new, unless revealed.
                     let unit = layout.markers.first { NSMaxRange($0.range) == run.range.location }?.unit ?? run.range
                     if !isRevealed(unit) {
-                        storage.addAttributes([.foregroundColor: NSColor.clear,
-                                               .font: NSFont.systemFont(ofSize: theme.body.pointSize * 0.5)], range: r)
+                        storage.addAttributes([.foregroundColor: PlatformColor.clear,
+                                               .font: PlatformFont.systemFont(ofSize: theme.body.pointSize * 0.5)], range: r)
                     }
                 case .ref, .definition:
                     break
@@ -118,7 +123,7 @@ enum DocumentStyler {
             guard let r = clip(marker.range), !isRevealed(marker.unit) else { continue }
             storage.addAttribute(.tvmvHidden, value: true, range: r)
             if marker.collapsesLine {
-                storage.addAttributes([.font: NSFont.systemFont(ofSize: 0.1),
+                storage.addAttributes([.font: PlatformFont.systemFont(ofSize: 0.1),
                                        .paragraphStyle: NativeTheme.collapsedParagraph], range: r)
             }
         }
@@ -152,7 +157,7 @@ enum DocumentStyler {
             }
             let rest = NSRange(location: NSMaxRange(firstLine), length: max(0, NSMaxRange(hidden) - NSMaxRange(firstLine)))
             if let r = clip(rest) {
-                storage.addAttributes([.font: NSFont.systemFont(ofSize: 0.1),
+                storage.addAttributes([.font: PlatformFont.systemFont(ofSize: 0.1),
                                        .paragraphStyle: NativeTheme.collapsedParagraph], range: r)
             }
         }
