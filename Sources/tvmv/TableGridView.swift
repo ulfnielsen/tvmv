@@ -61,6 +61,12 @@ final class TableGridView: NSView {
         layoutCells(width: width)
     }
 
+    /// Restyle the cells' images `match` picks (they loaded); the document
+    /// then re-measures the grid.
+    func restyleImages(where match: (String) -> Bool) {
+        cells.joined().forEach { _ = $0.restyleImages(where: match) }
+    }
+
     func setEditable(_ editable: Bool) {
         cells.joined().forEach { $0.isEditable = editable }
     }
@@ -81,7 +87,6 @@ final class TableGridView: NSView {
                 if r == 0 { cellTheme.body = NSFontManager.shared.convert(theme.body, toHaveTrait: .boldFontMask) }
                 cell.cellHost = self
                 cell.engine.treatsBlockImagesAsInline = true   // a cell's image sits in its line
-                cell.documentURL = document?.documentURL
                 cell.theme = cellTheme
                 cell.drawsBackground = false
                 cell.allowsUndo = false

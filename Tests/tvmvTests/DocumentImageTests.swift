@@ -581,6 +581,78 @@ final class DocumentImageTests: XCTestCase {
         XCTAssertEqual(view.selectedRange(), NSRange(location: 4, length: 0), "back past the tail and the alt")
     }
 
+    // MARK: Images settling, and images in table cells
+
+    func testImagesSettlingTogetherLayOutTheGridsOnce() {
+        // Addresses outside the folder fail at once, all in one turn. Each
+        // used to restyle and re-lay every grid: a page of tables with
+        // images took 34 s to settle.
+        var text = ""
+        for i in 0..<20 { text += "Para \(i) ![a](../out\(i).png) text.\n\n" }
+        for _ in 0..<3 { text += "| a | b |\n|---|---|\n| x | y |\n\n" }
+        let (passes, updates) = (view.gridLayoutPasses, view.gridUpdates)
+        view.load(text)
+        pump { (0..<20).allSatisfy { view.imageState(for: "../out\($0).png") == .failed } }
+        XCTAssertEqual(view.imageState(for: "../out19.png"), .failed)
+        XCTAssertEqual(view.gridLayoutPasses - passes, 2, "the load's pass, and one for the images that settled in one turn")
+        XCTAssertEqual(view.gridUpdates - updates, 3, "each grid measured at the load; none holds an image")
+        XCTAssertFalse(glyphHidden((text as NSString).range(of: "![a](../out19").location + 2), "the failed image shows its alt")
+    }
+
+    func testACellsImageLoadingReMeasuresItsGrid() throws {
+        // The grid exists before the image loads; once it does, the grid is
+        // re-measured: the picture wraps the cell's text to a second line,
+        // and the grid is laid out as a fresh one would be.
+        try writePNG("img/wide.png", width: 120, height: 20)
+        view.setFrameSize(NSSize(width: 420, height: view.frame.height))   // a narrow window
+        let text = "Text.\n\n| word word ![b](img/wide.png) | c |\n|---|---|\n| x | y |\n"
+        view.load(text)
+        let grid = try XCTUnwrap(view.tableGrids.first)
+        let cell = grid.cell(row: 0, column: 0)
+        let before = cell.frame
+        let updates = view.gridUpdates
+        pump { view.imageState(for: "img/wide.png") == .loaded }
+        let bang = (cell.string as NSString).range(of: "![b]").location
+        XCTAssertEqual(cell.textStorage!.attribute(.tvmvImageCarrier, at: bang, effectiveRange: nil) as? String, "img/wide.png")
+        XCTAssertGreaterThan(cell.frame.height, before.height + 10, "the picture wraps the cell's text")
+        XCTAssertEqual(view.gridUpdates - updates, 1, "only its grid is re-measured")
+        let measured = grid.cells.map { $0.map(\.frame) }
+        let gridFrame = grid.frame
+        // Rebuilt from scratch (a new theme with the same metrics), the grid
+        // measures the same columns and rows.
+        let theme = view.theme
+        view.theme = NativeTheme(bodyFamily: "Georgia", monoFamily: "Menlo", size: 16, measure: 80, fullWidth: false, dark: true)
+        view.theme = theme
+        XCTAssertEqual(grid.cells.map { $0.map(\.frame) }, measured)
+        XCTAssertEqual(grid.frame, gridFrame)
+    }
+
+    func testCellsShareTheDocumentsImages() throws {
+        try writePNG("img/a.png", width: 16, height: 16)
+        try writePNG("img/b.png", width: 16, height: 16)
+        view.load("A ![p](img/a.png) b\n\n| ![p](img/a.png) | ![p](img/a.png) |\n|---|---|\n| ![q](img/b.png) | x |\n")
+        pump { view.imageState(for: "img/a.png") == .loaded && view.imageState(for: "img/b.png") == .loaded }
+        let grid = try XCTUnwrap(view.tableGrids.first)
+        // A new theme rebuilds the grid's cells.
+        view.theme = NativeTheme(bodyFamily: "Georgia", monoFamily: "Menlo", size: 18, measure: 80, fullWidth: false, dark: false)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.2))
+        XCTAssertEqual(view.imageLoadsStarted, 2, "one load per address, across the document and its cells")
+        let cell = grid.cell(row: 1, column: 0)
+        XCTAssertTrue(grid.cells.joined().allSatisfy { $0.imageStore === view.imageStore })
+        XCTAssertEqual(cell.textStorage!.attribute(.tvmvImageCarrier, at: 0, effectiveRange: nil) as? String, "img/b.png")
+        XCTAssertEqual(cell.imageState(for: "img/b.png"), .loaded)
+        // A cell resolves addresses against the document's current file.
+        let moved = folder.appendingPathComponent("moved")
+        try FileManager.default.createDirectory(at: moved.appendingPathComponent("img"), withIntermediateDirectories: true)
+        try writePNG("moved/img/c.png", width: 16, height: 16)
+        view.documentURL = moved.appendingPathComponent("doc.md")
+        view.load("| ![r](img/c.png) |\n|---|\n| x |\n")
+        pump { view.imageState(for: "img/c.png") == .loaded }
+        XCTAssertEqual(view.imageState(for: "img/c.png"), .loaded)
+        XCTAssertEqual(view.tableGrids[0].cell(row: 0, column: 0).textStorage!
+            .attribute(.tvmvImageCarrier, at: 0, effectiveRange: nil) as? String, "img/c.png")
+    }
+
     func testCaretCrossesAnImageInATableCell() throws {
         try writePNG("img/a.png", width: 16, height: 16)
         view.isEditable = true

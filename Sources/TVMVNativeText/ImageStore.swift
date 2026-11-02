@@ -105,6 +105,8 @@ public final class ImageStore {
     public var documentURL: URL?
 
     private var images: [String: (state: State, image: PlatformImage?)] = [:]
+    /// Loads started (observability: each address loads once).
+    public private(set) var loadsStarted = 0
 
     public init() {}
 
@@ -116,6 +118,7 @@ public final class ImageStore {
     public func request(_ addresses: [String], onLoaded: @escaping @MainActor (String) -> Void) {
         for address in addresses where images[address] == nil {
             images[address] = (.loading, nil)
+            loadsStarted += 1
             guard let url = ImageSource.url(address, documentURL: documentURL) else {
                 loaded(address, data: nil, onLoaded)
                 continue

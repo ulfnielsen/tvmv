@@ -67,6 +67,9 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     /// The comment or suggestion being written (⌘⇧M, ⌘⇧E), in the side column.
     var reviewComposer: ReviewComposerView?
     private var layingOutGrids = false
+    /// Grid layout passes, and grids re-measured in them (observability).
+    private(set) var gridLayoutPasses = 0
+    private(set) var gridUpdates = 0
     /// True from a text change until it has been handled: caret moves an
     /// edit causes don't end a reveal.
     private var editing = false
@@ -78,9 +81,20 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     }
 
     typealias ImageState = ImageStore.State
-    private let imageStore = ImageStore()
+    private let ownImages = ImageStore()
+    /// A table cell shares its document's images (and so its file): each
+    /// address loads once, and the document restyles the cells using it.
+    var imageStore: ImageStore { cellHost?.document?.imageStore ?? ownImages }
+    /// Images that settled and wait to be restyled (once per turn).
+    private var settledImages: Set<String> = []
 
-    func imageState(for address: String) -> ImageState? { imageStore.state(for: address) }
+    /// An image's state as shown: one that settled shows as loading until
+    /// it is restyled.
+    func imageState(for address: String) -> ImageState? {
+        if let document = cellHost?.document { return document.imageState(for: address) }
+        return settledImages.contains(address) ? .loading : imageStore.state(for: address)
+    }
+    var imageLoadsStarted: Int { imageStore.loadsStarted }
     /// A document is untrusted: cap what one image may cost.
     var maxImageBytes: Int {
         get { imageStore.maxBytes }
@@ -211,6 +225,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         // newline, assuming a newline ends a line. In a reflowed paragraph a
         // soft break doesn't, so re-lay the whole paragraph from its start.
         relayParagraphs(touching: range)
+        guard !restylingImages else { return }   // laid out once, after them all
         layoutGrids()
         layoutReviewMargin()
     }
@@ -259,7 +274,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     func columnChanged() {
         let column = textContainer?.size.width
         layoutColumn()
-        if textContainer?.size.width != column { restyleImages { _ in true } }
+        if textContainer?.size.width != column { _ = restyleImages { _ in true } }
         layoutGrids()
         layoutReviewMargin()
     }
@@ -603,12 +618,16 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
 
     /// Keep one grid per table, refreshed from the source and placed over its
     /// hidden lines; a grid's height change restyles the lines that reserve it.
-    func layoutGrids() {
+    /// - Parameter only: the tables whose grids are refreshed (nil: all);
+    ///   every grid is placed.
+    func layoutGrids(only refreshed: IndexSet? = nil) {
         guard !isCell, !layingOutGrids, let storage = textStorage, let lm = layoutManager, let tc = textContainer
         else { return }
         layingOutGrids = true
         defer { layingOutGrids = false }
+        gridLayoutPasses += 1
         while tableGrids.count > layout.tables.count { tableGrids.removeLast().removeFromSuperview() }
+        let existing = tableGrids.count
         while tableGrids.count < layout.tables.count {
             let grid = TableGridView(document: self)
             addSubview(grid)
@@ -620,7 +639,10 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
             grid.index = i
             grid.isHidden = engine.isRevealed(table.range)
             guard !grid.isHidden else { continue }
-            grid.update(table: table, text: storage.string as NSString, width: width, theme: theme, editable: isEditable)
+            if refreshed?.contains(i) ?? true || i >= existing {
+                grid.update(table: table, text: storage.string as NSString, width: width, theme: theme, editable: isEditable)
+                gridUpdates += 1
+            }
             if tableHeights[i] != grid.frame.height {
                 tableHeights[i] = grid.frame.height
                 let heights = tableHeights, units = engine.revealedUnits, all = showAllMarkup
@@ -702,16 +724,63 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
                                        column: container.size.width - 2 * container.lineFragmentPadding)
     }
 
-    /// Start loading every block and inline image not yet requested.
+    /// Start loading every block and inline image not yet requested (a
+    /// table cell's too: the document requests them for its cells).
     private func requestImages() {
+        guard !isCell else { return }
         imageStore.request(layout.blockImages.map(\.url) + layout.inlineImages.map(\.url)) { [weak self] address in
-            self?.restyleImages { $0 == address }
+            self?.imageSettled(address)
         }
     }
 
-    private func restyleImages(where match: (String) -> Bool) {
-        for image in layout.blockImages where match(image.url) { restyle(image.range) }
-        for image in layout.inlineImages where match(image.url) { restyle(image.range) }
+    /// Images settle one by one: restyle those that settled in one turn
+    /// together, with one grid pass.
+    private func imageSettled(_ address: String) {
+        if settledImages.isEmpty {
+            DispatchQueue.main.async { [weak self] in self?.restyleSettledImages() }
+        }
+        settledImages.insert(address)
+    }
+
+    private func restyleSettledImages() {
+        let settled = settledImages
+        settledImages = []
+        guard !settled.isEmpty else { return }
+        let tables = restyleImages(where: settled.contains)
+        for i in tables where i < tableGrids.count { tableGrids[i].restyleImages(where: settled.contains) }
+        layoutGrids(only: tables)
+        layoutReviewMargin()
+    }
+
+    private var restylingImages = false
+
+    /// The table whose source holds `location` (tables are in text order).
+    private func tableIndex(at location: Int) -> Int? {
+        let tables = layout.tables
+        var low = 0, high = tables.count
+        while low < high {
+            let mid = (low + high) / 2
+            if NSMaxRange(tables[mid].range) <= location { low = mid + 1 } else { high = mid }
+        }
+        return low < tables.count && NSLocationInRange(location, tables[low].range) ? low : nil
+    }
+
+    /// Restyle the images `match` picks, laying out after them all (the
+    /// caller places grids and the review margin). An image in a table's
+    /// hidden source is its grid's: returns those tables.
+    func restyleImages(where match: (String) -> Bool) -> IndexSet {
+        var tables = IndexSet()
+        restylingImages = true
+        defer { restylingImages = false }
+        for range in layout.blockImages.filter({ match($0.url) }).map(\.range)
+            + layout.inlineImages.filter({ match($0.url) }).map(\.range) {
+            if let i = tableIndex(at: range.location), !engine.isRevealed(layout.tables[i].range) {
+                tables.insert(i)
+            } else {
+                restyle(range)
+            }
+        }
+        return tables
     }
 
     /// `rect` moved (not resized) so its origin sits on a device pixel.
