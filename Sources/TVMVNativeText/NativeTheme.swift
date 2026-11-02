@@ -1,7 +1,13 @@
-import AppKit
+import CoreGraphics
+import Foundation
 import TVMVCore
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
-extension NSAttributedString.Key {
+public extension NSAttributedString.Key {
     /// Markup hidden by the layout-manager delegate (null glyphs).
     static let tvmvHidden = NSAttributedString.Key("tvmvHidden")
     /// Exempt from spelling and grammar checking.
@@ -17,35 +23,32 @@ extension NSAttributedString.Key {
 
 /// Fonts, colors and measure for the native view: the paper & ink palette
 /// from app.css, expressed as AppKit values.
-struct NativeTheme: Equatable {
-    var body: NSFont
-    var mono: NSFont
-    var ink: NSColor
-    var inkSoft: NSColor
-    var muted: NSColor
-    var accent: NSColor
-    var paper: NSColor
-    var paperDeep: NSColor
+public struct NativeTheme: Equatable {
+    public var body: PlatformFont
+    public var mono: PlatformFont
+    public var ink: PlatformColor
+    public var inkSoft: PlatformColor
+    public var muted: PlatformColor
+    public var accent: PlatformColor
+    public var paper: PlatformColor
+    public var paperDeep: PlatformColor
     /// Review markup: a commented range's background, inserted and deleted text.
-    var reviewHighlight: NSColor
-    var reviewInsert: NSColor
-    var reviewDelete: NSColor
+    public var reviewHighlight: PlatformColor
+    public var reviewInsert: PlatformColor
+    public var reviewDelete: PlatformColor
     /// Text column width in points; nil means full width.
-    var columnWidth: CGFloat?
+    public var columnWidth: CGFloat?
     /// Minimum horizontal padding either side of the column (app.css --tvmv-pad).
-    var padding: CGFloat = 68
+    public var padding: CGFloat = 68
     /// Paragraph alignment (table cells follow their column's alignment).
-    var textAlignment: NSTextAlignment = .natural
+    public var textAlignment: NSTextAlignment = .natural
 
-    init(bodyFamily: String, monoFamily: String, size: CGFloat, measure: Double, fullWidth: Bool, dark: Bool) {
-        body = NSFont(name: bodyFamily, size: size)
-            ?? NSFont(name: "Georgia", size: size) ?? .systemFont(ofSize: size)
-        mono = NSFont(name: monoFamily, size: size * 0.86)
+    public init(bodyFamily: String, monoFamily: String, size: CGFloat, measure: Double, fullWidth: Bool, dark: Bool) {
+        body = PlatformFont(name: bodyFamily, size: size)
+            ?? PlatformFont(name: "Georgia", size: size) ?? .systemFont(ofSize: size)
+        mono = PlatformFont(name: monoFamily, size: size * 0.86)
             ?? .monospacedSystemFont(ofSize: size * 0.86, weight: .regular)
-        func hex(_ v: UInt32) -> NSColor {
-            NSColor(srgbRed: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255,
-                    blue: CGFloat(v & 0xFF) / 255, alpha: 1)
-        }
+        func hex(_ v: UInt32) -> PlatformColor { .srgb(v) }
         if dark {
             paper = hex(0x181410); paperDeep = hex(0x221C16); ink = hex(0xECE3D3)
             inkSoft = hex(0xCBB89B); muted = hex(0x9C876A); accent = hex(0xE2693B)
@@ -63,7 +66,7 @@ struct NativeTheme: Equatable {
 
     /// app.css: body line-height 1.7. Gaps between paragraphs come from
     /// the blank lines that separate them (`blankLineParagraph`).
-    var paragraphStyle: NSParagraphStyle {
+    public var paragraphStyle: NSParagraphStyle {
         let p = NSMutableParagraphStyle()
         p.minimumLineHeight = body.pointSize * 1.7
         p.maximumLineHeight = body.pointSize * 1.7
@@ -72,7 +75,7 @@ struct NativeTheme: Equatable {
     }
 
     /// A blank line between blocks is the 1em paragraph margin of app.css.
-    var blankLineParagraph: NSParagraphStyle {
+    public var blankLineParagraph: NSParagraphStyle {
         let p = NSMutableParagraphStyle()
         p.minimumLineHeight = body.pointSize
         p.maximumLineHeight = body.pointSize
@@ -81,7 +84,7 @@ struct NativeTheme: Equatable {
 
     /// app.css headings: line-height 1.25, extra room above (margin-top 1.6em,
     /// of which the preceding blank line supplies 1em).
-    func headingParagraph(_ level: Int) -> NSParagraphStyle {
+    public func headingParagraph(_ level: Int) -> NSParagraphStyle {
         let p = NSMutableParagraphStyle()
         let height = headingFont(level).pointSize * 1.25
         p.minimumLineHeight = height
@@ -92,7 +95,7 @@ struct NativeTheme: Equatable {
 
     /// Code lines: no gaps between lines; room above the first line and
     /// below the last for the block background.
-    func codeParagraph(first: Bool, last: Bool) -> NSParagraphStyle {
+    public func codeParagraph(first: Bool, last: Bool) -> NSParagraphStyle {
         let p = NSMutableParagraphStyle()
         p.lineHeightMultiple = 1.15
         p.paragraphSpacingBefore = first ? body.pointSize * 0.7 : 0
@@ -100,20 +103,20 @@ struct NativeTheme: Equatable {
         return p
     }
 
-    static var collapsedParagraph: NSParagraphStyle {
+    public static var collapsedParagraph: NSParagraphStyle {
         let p = NSMutableParagraphStyle()
         p.minimumLineHeight = 0.01
         p.maximumLineHeight = 0.01
         return p
     }
 
-    var base: [NSAttributedString.Key: Any] {
+    public var base: [NSAttributedString.Key: Any] {
         [.font: body, .foregroundColor: ink, .paragraphStyle: paragraphStyle]
     }
 
     /// app.css heading scale: h1 2.0em … h6 0.85em, regular weight (400) —
     /// the serif's display sizes carry the hierarchy, not boldness.
-    func headingFont(_ level: Int) -> NSFont {
+    public func headingFont(_ level: Int) -> PlatformFont {
         let scale: [CGFloat] = [2.0, 1.5, 1.28, 1.1, 0.95, 0.85]
         return body.withSize(body.pointSize * scale[max(1, min(level, 6)) - 1])
     }
@@ -123,16 +126,18 @@ extension NativeTheme {
     /// The theme for the current settings. `dark` is the resolved appearance
     /// (Settings' light/dark, or the system's when set to auto).
     @MainActor
-    init(settings: AppSettings, dark: Bool) {
+    public init(settings: AppSettings, dark: Bool) {
         self.init(bodyFamily: settings.bodyFont, monoFamily: settings.monoFont,
                   size: CGFloat(settings.baseSize), measure: settings.measure,
                   fullWidth: settings.fullWidth, dark: dark)
     }
 
     /// Window-chrome tint: the paper color lightened, as the web reader did.
-    var chromeColor: RGBAColor {
-        let c = paper.usingColorSpace(.sRGB) ?? paper
-        return RGBAColor(red: Double(c.redComponent), green: Double(c.greenComponent),
-                         blue: Double(c.blueComponent)).blended(fraction: 0.16, of: .white)
+    public var chromeColor: RGBAColor {
+        let srgb = CGColorSpace(name: CGColorSpace.sRGB)!
+        let c = paper.cgColor.converted(to: srgb, intent: .defaultIntent, options: nil)?.components
+            ?? paper.cgColor.components ?? [0, 0, 0]
+        return RGBAColor(red: Double(c[0]), green: Double(c[1]),
+                         blue: Double(c[2])).blended(fraction: 0.16, of: .white)
     }
 }

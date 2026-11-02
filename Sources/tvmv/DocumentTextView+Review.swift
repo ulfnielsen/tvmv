@@ -1,5 +1,6 @@
 import AppKit
 import TVMVCore
+import TVMVNativeText
 
 /// Review actions: each one is a set of `ReviewMarkup` patches applied as a
 /// single undoable edit through the view's edit path, allowed while reading

@@ -1,6 +1,7 @@
 import XCTest
 import AppKit
 import TVMVCore
+import TVMVNativeText
 @testable import tvmv
 
 @MainActor

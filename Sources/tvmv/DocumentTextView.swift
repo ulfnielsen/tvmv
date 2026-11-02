@@ -1,6 +1,7 @@
 import AppKit
 import ImageIO
 import TVMVCore
+import TVMVNativeText
 
 /// The native reader/editor: one TextKit 1 text view in which Markdown
 /// renders in place with its markup hidden.

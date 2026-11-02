@@ -1,5 +1,6 @@
 import AppKit
 import TVMVCore
+import TVMVNativeText
 
 /// Applies a `MarkdownLayout` to a text storage, limited to one range.
 enum DocumentStyler {

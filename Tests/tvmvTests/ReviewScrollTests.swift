@@ -1,6 +1,7 @@
 import AppKit
 import XCTest
 @testable import tvmv
+import TVMVNativeText
 
 /// Adding or settling a comment keeps the page where it was.
 @MainActor

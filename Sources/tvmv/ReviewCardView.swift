@@ -1,5 +1,6 @@
 import AppKit
 import TVMVCore
+import TVMVNativeText
 
 /// What a margin card shows: one per thread, plus one per problem a hand
 /// edit can leave (a thread whose anchor is gone, an anchor whose thread is).

@@ -1,5 +1,6 @@
 import AppKit
 import TVMVCore
+import TVMVNativeText
 
 /// A GFM table shown as an editable grid over its hidden source.
 ///

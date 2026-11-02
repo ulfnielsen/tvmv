@@ -1,4 +1,5 @@
 import TVMVCore
+import TVMVNativeText
 import SwiftUI
 import AppKit
 
