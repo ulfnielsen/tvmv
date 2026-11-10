@@ -138,6 +138,29 @@ final class MarkdownLayoutParserTests: XCTestCase {
         XCTAssertEqual(images.map { ns.substring(with: $0.altRange) }, ["A chart", "remote"])
     }
 
+    func testMermaidBlocksAndDisplayMathAreDiagrams() {
+        let text = "Intro.\n\n```mermaid\ngraph TD\n  A --> B\n```\n\n$$\nx^2 + 1\n$$\n\n\\[ \\frac{1}{2} \\]\n\nEnd.\n"
+        let ns = text as NSString
+        let diagrams = MarkdownLayoutParser.parse(text).diagrams
+        XCTAssertEqual(diagrams.map(\.kind), [.mermaid, .math, .math])
+        XCTAssertEqual(diagrams.map(\.source), ["graph TD\n  A --> B", "x^2 + 1", "\\frac{1}{2}"])
+        XCTAssertEqual(diagrams.map { ns.substring(with: $0.range) },
+                       ["```mermaid\ngraph TD\n  A --> B\n```\n", "$$\nx^2 + 1\n$$\n", "\\[ \\frac{1}{2} \\]\n"])
+        // Each is a reveal unit: its source shows when revealed.
+        XCTAssertTrue(diagrams.allSatisfy { MarkdownLayoutParser.parse(text).revealUnits.contains($0.range) })
+    }
+
+    func testOnlyWholeDiagramsAreDiagrams() {
+        for text in ["```mermaid\ngraph TD\n",            // unclosed fence: still being typed
+                     "```python\nx = 1\n```\n",
+                     "- ```mermaid\n  graph TD\n  ```\n",  // in a list
+                     "Inline $$x$$ math.\n",
+                     "$$a$$ and $$b$$\n",
+                     "$$ $$\n"] {
+            XCTAssertEqual(MarkdownLayoutParser.parse(text).diagrams, [], text)
+        }
+    }
+
     func testBlockImageAltRangeMatchesInline() {
         // One alt scan: the same source gives the same alt as a block and inline.
         let alt = #"a [b] \] c"#

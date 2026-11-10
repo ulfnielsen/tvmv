@@ -27,6 +27,9 @@ public struct DecorationInput {
     /// Block images are styled as inline images (a table cell): none is
     /// drawn as a block, loaded or failed.
     public var blockImagesInline: Bool
+    /// A rendered diagram's picture and the size it is drawn at; nil while
+    /// rendering or after a failure (its source shows).
+    public var diagramImage: (MarkdownLayout.Diagram) -> (image: PlatformImage, size: CGSize)?
     /// Inline code runs that get a pill.
     public var codePillRuns: [MarkdownLayout.StyleRun]
     /// A rect moved (not resized) so its origin sits on a device pixel.
@@ -38,6 +41,7 @@ public struct DecorationInput {
                 blockImageSize: @escaping (MarkdownLayout.BlockImage) -> CGSize?,
                 inlineImageSize: @escaping (MarkdownLayout.InlineImage) -> CGSize? = { _ in nil },
                 blockImagesInline: Bool = false,
+                diagramImage: @escaping (MarkdownLayout.Diagram) -> (image: PlatformImage, size: CGSize)? = { _ in nil },
                 codePillRuns: [MarkdownLayout.StyleRun], pixelAlign: @escaping (CGRect) -> CGRect) {
         self.layout = layout
         self.theme = theme
@@ -51,6 +55,7 @@ public struct DecorationInput {
         self.blockImageSize = blockImageSize
         self.inlineImageSize = inlineImageSize
         self.blockImagesInline = blockImagesInline
+        self.diagramImage = diagramImage
         self.codePillRuns = codePillRuns
         self.pixelAlign = pixelAlign
     }
@@ -81,7 +86,12 @@ public enum DocumentDecorations {
             forGlyphRange: lm.glyphRange(forBoundingRect: rect.offsetBy(dx: -origin.x, dy: -origin.y), in: tc),
             actualGlyphRange: nil))
         context.setFillColor(theme.paperDeep.cgColor)
-        for block in input.layout.codeBlocks where NSIntersectionRange(block.range, visible).length > 0 && block.body.length > 0 {
+        let shownDiagrams = input.layout.diagrams.filter {
+            NSIntersectionRange($0.range, visible).length > 0 && NSMaxRange($0.range) <= storage.length
+                && !input.isRevealed($0.range) && input.diagramImage($0) != nil
+        }
+        for block in input.layout.codeBlocks where NSIntersectionRange(block.range, visible).length > 0 && block.body.length > 0
+            && !shownDiagrams.contains(where: { $0.range == block.range }) {
             let glyphs = lm.glyphRange(forCharacterRange: block.body, actualCharacterRange: nil)
             var box = lm.boundingRect(forGlyphRange: glyphs, in: tc)
             box.origin.x = origin.x - 12
@@ -111,6 +121,7 @@ public enum DocumentDecorations {
             }
         }
         drawImages(input, visible: visible)
+        drawDiagrams(input, shownDiagrams)
         drawInlineImages(input, visible: visible)
         drawListsAndQuotes(input, visible: visible, in: context)
         drawPointMarkers(input, visible: visible, in: context)
@@ -140,6 +151,30 @@ public enum DocumentDecorations {
                                                 withAttributes: [.font: font, .foregroundColor: theme.muted])
             }
         }
+    }
+
+    /// Draw each shown diagram where `diagramRect` places it.
+    private static func drawDiagrams(_ input: DecorationInput, _ diagrams: [MarkdownLayout.Diagram]) {
+        for diagram in diagrams {
+            guard let (picture, _) = input.diagramImage(diagram), let rect = diagramRect(input, diagram) else { continue }
+            drawImage(picture, in: input.pixelAlign(rect))
+        }
+    }
+
+    /// Where a shown diagram is drawn: centred in the line its hidden
+    /// source reserves. That line is all hidden glyphs, which TextKit puts
+    /// on the line before: the reserved height is on the line at its newline.
+    public static func diagramRect(_ input: DecorationInput, _ diagram: MarkdownLayout.Diagram) -> CGRect? {
+        guard let size = input.diagramImage(diagram)?.size, NSMaxRange(diagram.range) <= input.storage.length else { return nil }
+        let lm = input.layoutManager, tc = input.textContainer, origin = input.origin
+        let text = input.storage.string as NSString
+        let newline = max(diagram.range.location,
+                          NSMaxRange(text.lineRange(for: NSRange(location: diagram.range.location, length: 0))) - 1)
+        let fragment = lm.lineFragmentRect(forGlyphAt: lm.glyphIndexForCharacter(at: newline), effectiveRange: nil)
+        let column = tc.size.width - 2 * tc.lineFragmentPadding
+        return CGRect(x: origin.x + tc.lineFragmentPadding + max(0, (column - size.width) / 2),
+                      y: fragment.minY + origin.y + input.theme.body.pointSize / 2,
+                      width: size.width, height: size.height)
     }
 
     /// Draw each shown inline image over its carrier "!" (the room its kern

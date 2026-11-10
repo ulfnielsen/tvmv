@@ -22,8 +22,12 @@ pasted from the clipboard), spelling checked, and tables edited as grids (Tab
 between cells; a row of buttons below a focused table, shortcuts, and a cell's
 right-click menu insert, delete and align rows and columns).
 
-In both native views code blocks show as plain monospace, and math and Mermaid
-diagrams as their source; print and Save as PDF render all three.
+On macOS, Mermaid diagrams (` ```mermaid ` blocks) and display math (`$$…$$`
+or `\[…\]` on their own) show rendered, through the same Mermaid and KaTeX as
+the web layer; double-click one to edit its source, and a diagram that doesn't
+parse stays as source. Inline math shows as source. On Linux math and Mermaid
+show as their source. In both native views code blocks show as plain
+monospace; print and Save as PDF render code, math and diagrams.
 
 On **iOS** a web layer (`Sources/TVMVCore/Resources/web/`, shared verbatim)
 renders the document with syntax highlighting, KaTeX math and Mermaid diagrams,

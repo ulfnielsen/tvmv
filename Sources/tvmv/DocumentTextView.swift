@@ -133,6 +133,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         engine.blockImageHeight = { [weak self] in self?.imageSize(for: $0)?.height }
         engine.inlineImageSize = { [weak self] in self?.inlineImageSize(for: $0) }
         engine.tableHeight = { [weak self] in self?.tableHeights[$0] }
+        engine.diagramHeight = { [weak self] in self?.diagramImage(for: $0)?.size.height }
         layoutManager?.delegate = markupLayout
         textStorage?.delegate = hooks
         isRichText = false
@@ -232,6 +233,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
 
     func engine(_ engine: MarkdownTextEngine, didApply layout: MarkdownLayout) {
         requestImages()
+        requestDiagrams()
         onLayout?(layout)
     }
 
@@ -265,6 +267,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         insertionPointColor = theme.ink
         selectedTextAttributes = [.backgroundColor: theme.accent.withAlphaComponent(0.18)]
         layoutColumn()
+        requestDiagrams()   // drawn in the theme's colors and size
         restyle(NSRange(location: 0, length: textStorage?.length ?? 0))
     }
 
@@ -274,7 +277,10 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     func columnChanged() {
         let column = textContainer?.size.width
         layoutColumn()
-        if textContainer?.size.width != column { _ = restyleImages { _ in true } }
+        if textContainer?.size.width != column {
+            _ = restyleImages { _ in true }
+            restyleDiagrams { _ in true }
+        }
         layoutGrids()
         layoutReviewMargin()
     }
@@ -495,6 +501,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     // MARK: Events
 
     override func mouseDown(with event: NSEvent) {
+        if event.clickCount == 2, revealDiagram(at: convert(event.locationInWindow, from: nil)) { return }
         if event.clickCount == 1, let task = taskItem(at: convert(event.locationInWindow, from: nil)) {
             toggleTask(task)
             return
@@ -783,6 +790,67 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         return tables
     }
 
+    // MARK: Diagrams
+
+    /// Renders the document's Mermaid blocks and display math.
+    var diagramRenderer = DiagramRenderer.shared
+    /// Diagrams that settled and wait to be restyled (once per turn).
+    private var settledDiagrams: Set<DiagramRenderer.Key> = []
+
+    private func diagramKey(_ diagram: MarkdownLayout.Diagram) -> DiagramRenderer.Key { .init(diagram, theme: theme) }
+
+    /// A rendered diagram's picture and the size it is drawn at: its own
+    /// size, scaled down (never up) to the text column. Nil while rendering,
+    /// after a failure, or settled but not yet restyled: its source shows.
+    func diagramImage(for diagram: MarkdownLayout.Diagram) -> (image: NSImage, size: CGSize)? {
+        let key = diagramKey(diagram)
+        guard !isCell, !settledDiagrams.contains(key), let picture = diagramRenderer.image(for: key),
+              picture.size.width > 0, let container = textContainer else { return nil }
+        let column = container.size.width - 2 * container.lineFragmentPadding
+        let width = min(picture.size.width, column)
+        return (picture, CGSize(width: width, height: picture.size.height * width / picture.size.width))
+    }
+
+    private func requestDiagrams() {
+        guard !isCell, !layout.diagrams.isEmpty else { return }
+        diagramRenderer.request(layout.diagrams.map(diagramKey)) { [weak self] key in self?.diagramSettled(key) }
+    }
+
+    private func diagramSettled(_ key: DiagramRenderer.Key) {
+        if settledDiagrams.isEmpty {
+            DispatchQueue.main.async { [weak self] in self?.restyleSettledDiagrams() }
+        }
+        settledDiagrams.insert(key)
+    }
+
+    private func restyleSettledDiagrams() {
+        let settled = settledDiagrams
+        settledDiagrams = []
+        guard !settled.isEmpty else { return }
+        restyleDiagrams(where: settled.contains)
+        layoutGrids()
+        layoutReviewMargin()
+    }
+
+    /// Reveal the source of the diagram drawn at `point` (a double-click
+    /// on it: a click can't place the caret in its hidden source).
+    func revealDiagram(at point: NSPoint) -> Bool {
+        guard !showAllMarkup, let input = decorationInput(),
+              let diagram = layout.diagrams.first(where: {
+                  !engine.isRevealed($0.range) && DocumentDecorations.diagramRect(input, $0)?.contains(point) == true
+              })
+        else { return false }
+        reveal(unit: diagram.range)
+        return true
+    }
+
+    /// Restyle the diagrams `match` picks (the caller places grids and the review margin).
+    private func restyleDiagrams(where match: (DiagramRenderer.Key) -> Bool) {
+        restylingImages = true
+        defer { restylingImages = false }
+        for diagram in layout.diagrams where match(diagramKey(diagram)) { restyle(diagram.range) }
+    }
+
     /// `rect` moved (not resized) so its origin sits on a device pixel.
     private func pixelAligned(_ rect: NSRect) -> NSRect {
         let backing = convertToBacking(rect.origin)
@@ -1066,6 +1134,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
             },
             isHidden: isHidden, images: imageStore, blockImageSize: imageSize(for:),
             inlineImageSize: engine.inlineImageSize, blockImagesInline: engine.treatsBlockImagesAsInline,
+            diagramImage: { [weak self] in self?.diagramImage(for: $0) },
             codePillRuns: codePillRuns,
             pixelAlign: pixelAligned)
     }

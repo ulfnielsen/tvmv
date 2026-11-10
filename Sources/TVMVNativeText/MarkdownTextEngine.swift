@@ -57,6 +57,8 @@ public final class MarkdownTextEngine {
     public var tableHeight: (Int) -> CGFloat? = { _ in nil }
     /// The size a loaded inline image is drawn at (nil: its alt shows).
     public var inlineImageSize: (MarkdownLayout.InlineImage) -> CGSize? = { _ in nil }
+    /// The height a rendered diagram is drawn at (nil: its source shows).
+    public var diagramHeight: (MarkdownLayout.Diagram) -> CGFloat? = { _ in nil }
     /// Block images are styled as inline images (a table cell is one line).
     public var treatsBlockImagesAsInline = false
 
@@ -160,7 +162,8 @@ public final class MarkdownTextEngine {
         DocumentStyler.apply(layout, to: storage, in: range, theme: theme,
                              isRevealed: { all || units.contains($0) },
                              imageHeight: blockImageHeight, tableHeight: tableHeight,
-                             inlineImageSize: inlineImageSize, blockImagesInline: treatsBlockImagesAsInline)
+                             inlineImageSize: inlineImageSize, blockImagesInline: treatsBlockImagesAsInline,
+                             diagramHeight: diagramHeight)
         host?.engine(self, didRestyle: range)
     }
 

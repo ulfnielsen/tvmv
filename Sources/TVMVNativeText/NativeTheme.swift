@@ -45,6 +45,8 @@ public struct NativeTheme: Equatable {
     public var padding: CGFloat = 68
     /// Paragraph alignment (table cells follow their column's alignment).
     public var textAlignment: NSTextAlignment = .natural
+    /// The dark palette (diagrams render in their dark theme).
+    public private(set) var isDark = false
 
     public init(bodyFamily: String, monoFamily: String, size: CGFloat, measure: Double, fullWidth: Bool, dark: Bool) {
         body = PlatformFont(name: bodyFamily, size: size)
@@ -52,6 +54,7 @@ public struct NativeTheme: Equatable {
         mono = PlatformFont(name: monoFamily, size: size * 0.86)
             ?? .monospacedSystemFont(ofSize: size * 0.86, weight: .regular)
         func hex(_ v: UInt32) -> PlatformColor { .srgb(v) }
+        isDark = dark
         if dark {
             paper = hex(0x181410); paperDeep = hex(0x221C16); ink = hex(0xECE3D3)
             inkSoft = hex(0xCBB89B); muted = hex(0x9C876A); accent = hex(0xE2693B)

@@ -140,6 +140,23 @@ public struct MarkdownLayout: Equatable, Sendable {
         }
     }
 
+    /// Top-level Mermaid code blocks and display math paragraphs (`$$…$$`,
+    /// `\[…\]`): shown as the rendered diagram, with the source hidden
+    /// until revealed.
+    public var diagrams: [Diagram] = []
+
+    public struct Diagram: Equatable, Sendable {
+        public enum Kind: String, Equatable, Sendable { case mermaid, math }
+        /// The whole block, whole lines (fences included); also its reveal unit.
+        public var range: NSRange
+        public var kind: Kind
+        /// What is rendered: the code, or the formula between the delimiters.
+        public var source: String
+        public init(range: NSRange, kind: Kind, source: String) {
+            self.range = range; self.kind = kind; self.source = source
+        }
+    }
+
     /// Link reference definition lines (`[label]: url`) outside code. Partial
     /// re-parses are wrapped with them so reference links resolve exactly as
     /// in a full parse.
@@ -155,7 +172,7 @@ public struct MarkdownLayout: Equatable, Sendable {
     /// Every reveal unit, in source order without duplicates.
     public var revealUnits: [NSRange] {
         var seen = Set<NSRange>()
-        return (markers.map(\.unit) + blockImages.map(\.range) + inlineImages.map(\.range) + tables.map(\.range)
+        return (markers.map(\.unit) + blockImages.map(\.range) + inlineImages.map(\.range) + tables.map(\.range) + diagrams.map(\.range)
                 + listItems.map(\.marker) + quoteLines.map(\.prefix)).compactMap { seen.insert($0).inserted ? $0 : nil }
     }
 }

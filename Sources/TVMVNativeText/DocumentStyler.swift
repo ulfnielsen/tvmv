@@ -21,12 +21,15 @@ public enum DocumentStyler {
     ///   loaded (nil while loading or after a failure: its alt shows).
     /// - Parameter blockImagesInline: block images are styled as inline
     ///   images (a table cell is one line).
+    /// - Parameter diagramHeight: the height a diagram is drawn at, once
+    ///   rendered (nil while rendering or after a failure: its source shows).
     public static func apply(_ layout: MarkdownLayout, to storage: NSTextStorage, in range: NSRange,
                              theme: NativeTheme, isRevealed: (NSRange) -> Bool,
                              imageHeight: (MarkdownLayout.BlockImage) -> CGFloat? = { _ in nil },
                              tableHeight: (Int) -> CGFloat? = { _ in nil },
                              inlineImageSize: (MarkdownLayout.InlineImage) -> CGSize? = { _ in nil },
-                             blockImagesInline: Bool = false) {
+                             blockImagesInline: Bool = false,
+                             diagramHeight: (MarkdownLayout.Diagram) -> CGFloat? = { _ in nil }) {
         let range = NSIntersectionRange(range, NSRange(location: 0, length: storage.length))
         guard range.length > 0 else { return }
         let source = storage.string as NSString
@@ -206,6 +209,27 @@ public enum DocumentStyler {
                 storage.addAttribute(.paragraphStyle, value: p, range: first)
             }
             let rest = NSRange(location: NSMaxRange(firstLine), length: max(0, NSMaxRange(hidden) - NSMaxRange(firstLine)))
+            if let r = clip(rest) {
+                storage.addAttributes([.font: PlatformFont.systemFont(ofSize: 0.1),
+                                       .paragraphStyle: NativeTheme.collapsedParagraph], range: r)
+            }
+        }
+        // Diagrams, once rendered: like a table, the source hides; the first
+        // line reserves the picture's height plus a half-em margin each side,
+        // the rest collapse (soft breaks too: each line is its own).
+        for diagram in layout.diagrams {
+            guard let r = clip(diagram.range), !isRevealed(diagram.range), let height = diagramHeight(diagram)
+            else { continue }
+            storage.addAttribute(.tvmvHidden, value: true, range: r)
+            storage.removeAttribute(.tvmvSoftBreak, range: r)
+            let firstLine = tableText.lineRange(for: NSRange(location: diagram.range.location, length: 0))
+            if let first = clip(firstLine) {
+                let p = NSMutableParagraphStyle()
+                p.minimumLineHeight = height + theme.body.pointSize
+                p.maximumLineHeight = height + theme.body.pointSize
+                storage.addAttributes([.font: theme.body, .paragraphStyle: p], range: first)
+            }
+            let rest = NSRange(location: NSMaxRange(firstLine), length: max(0, NSMaxRange(diagram.range) - NSMaxRange(firstLine)))
             if let r = clip(rest) {
                 storage.addAttributes([.font: PlatformFont.systemFont(ofSize: 0.1),
                                        .paragraphStyle: NativeTheme.collapsedParagraph], range: r)

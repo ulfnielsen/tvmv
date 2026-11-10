@@ -63,6 +63,15 @@ public enum WebResources {
             return besideExecutable
         }
 
+        // 4. Tests: the bundle sits beside the loaded test bundle.
+        for test in Bundle.allBundles where test.bundleURL.pathExtension == "xctest" {
+            let url = test.bundleURL.deletingLastPathComponent().appendingPathComponent(resourceBundleName)
+            if let web = Bundle(url: url)?.resourceURL?.appendingPathComponent("web"),
+               FileManager.default.fileExists(atPath: web.path) {
+                return web
+            }
+        }
+
         // Nothing matched: return the canonical location so callers fail with a
         // clear "file not found" against the expected path rather than a crash.
         return (Bundle.main.resourceURL ?? Bundle.main.bundleURL)

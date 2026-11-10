@@ -132,6 +132,7 @@ struct LayoutBuilder {
                     }
                 }
                 visitBlock(block, limit: limit, depth: 0)
+                if recordBlocks { recordDiagram(block, r) }
             }
         }
         layout.styles.removeAll { $0.range.length == 0 }
@@ -299,6 +300,34 @@ struct LayoutBuilder {
             ?? NSRange(location: r.location + min(2, r.length), length: 0)
         layout.blockImages.append(.init(range: docRange(r), url: url, alt: Self.plainText(content[0]),
                                         altRange: docRange(alt)))
+    }
+
+    /// A top-level Mermaid code block (its fences closed) or a paragraph
+    /// that is one display formula. Call after the block is visited.
+    mutating func recordDiagram(_ block: CMarkNode, _ r: NSRange) {
+        switch CMark.type(block) {
+        case "code_block":
+            let info = cmark_node_get_fence_info(block).map { String(cString: $0) } ?? ""
+            guard info.split(separator: " ").first?.lowercased() == "mermaid", let code = layout.codeBlocks.last,
+                  code.range.location == docRange(lineRange(at: r.location)).location,
+                  layout.markers.filter({ $0.unit == code.range }).count == 2 else { return }
+            layout.diagrams.append(.init(range: code.range, kind: .mermaid,
+                                         source: ns.substring(with: code.body.shifted(by: -adjust))))
+        case "paragraph":
+            let text = ns.substring(with: r).trimmingCharacters(in: .whitespacesAndNewlines)
+            for (open, close) in [("$$", "$$"), ("\\[", "\\]")]
+            where text.hasPrefix(open) && text.hasSuffix(close) && text.count > open.count + close.count {
+                let formula = String(text.dropFirst(open.count).dropLast(close.count))
+                guard !formula.contains(open), !formula.contains(close),
+                      !formula.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                let lines = NSUnionRange(lineRange(at: r.location), lineRange(at: max(r.location, NSMaxRange(r) - 1)))
+                layout.diagrams.append(.init(range: docRange(lines), kind: .math,
+                                             source: formula.trimmingCharacters(in: .whitespacesAndNewlines)))
+                return
+            }
+        default:
+            return
+        }
     }
 
     /// An image that is not a recorded block image. The source must read

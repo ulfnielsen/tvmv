@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>tvmv diagrams</title>
+  <!-- The native view's diagram renderer: an offscreen page that lays out
+       one Mermaid diagram or math block at its top left, for the app to
+       capture as a PDF (vector; the native SVG renderer can't draw
+       Mermaid's CSS-styled output faithfully). -->
+  <link rel="stylesheet" href="vendor/katex/katex.min.css">
+  <style>
+    html, body { margin: 0; padding: 0; background: transparent; }
+    #out { position: absolute; left: 0; top: 0; display: inline-block; padding: 2px; }
+    #out .katex-display { margin: 0; }
+    #out svg { display: block; }
+  </style>
+  <script src="vendor/katex/katex.min.js"></script>
+  <script src="vendor/mermaid/mermaid.min.js"></script>
+</head>
+<body>
+  <div id="out"></div>
+  <script>
+    "use strict";
+    var count = 0;
+
+    /// Lay out a diagram in #out; returns its size in CSS pixels. Throws
+    /// on a source that doesn't parse.
+    async function renderDiagram(kind, source, dark, color, size) {
+      var out = document.getElementById("out");
+      out.innerHTML = "";
+      out.style.color = color;
+      out.style.fontSize = size + "px";
+      if (kind === "mermaid") {
+        mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: dark ? "dark" : "neutral" });
+        var id = "tvmv-diagram-" + (++count);
+        try {
+          var result = await mermaid.render(id, source);
+          out.innerHTML = result.svg;
+          var svg = out.querySelector("svg");
+          // Mermaid sizes the diagram to its container (max-width: 100%);
+          // here it takes its own size.
+          var box = (svg.getAttribute("viewBox") || "").split(/[\s,]+/).map(Number);
+          if (box.length === 4 && box[2] > 0 && box[3] > 0) {
+            svg.removeAttribute("style");
+            svg.setAttribute("width", box[2]);
+            svg.setAttribute("height", box[3]);
+          }
+        } finally {
+          // A failed render leaves its error graphic in the page.
+          document.querySelectorAll("[id^='d" + id + "'], #" + id).forEach(function (el) {
+            if (!out.contains(el)) el.remove();
+          });
+        }
+      } else {
+        katex.render(source, out, { displayMode: true, throwOnError: true });
+      }
+      // Laying out requests the fonts the diagram uses; wait for them.
+      out.getBoundingClientRect();
+      await document.fonts.ready;
+      var rect = out.getBoundingClientRect();
+      return { width: Math.ceil(rect.width), height: Math.ceil(rect.height) };
+    }
+  </script>
+</body>
+</html>
