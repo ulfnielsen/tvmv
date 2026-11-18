@@ -55,6 +55,33 @@ final class NativeDocumentViewTests: XCTestCase {
         XCTAssertLessThanOrEqual(abs(controller.topVisibleOffset() - heading), 3)
     }
 
+    func testHomeScrollsToTopWithoutChangingSelection() throws {
+        let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 300),
+                              styleMask: [.titled], backing: .buffered, defer: false)
+        let (scroll, view) = NativeDocumentView.makeScrollView(theme: theme)
+        scroll.frame = window.contentView!.bounds
+        window.contentView!.addSubview(scroll)
+        view.load(String(repeating: "Paragraph before the table.\n\n", count: 40)
+                  + "| Header |\n| --- |\n| value |\n\n"
+                  + String(repeating: "Paragraph after the table.\n\n", count: 40))
+        let cell = try XCTUnwrap(view.tableGrids.first?.cells.last?.first)
+        let home = String(UnicodeScalar(NSHomeFunctionKey)!)
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: [.function, .numericPad], timestamp: 0, windowNumber: window.windowNumber,
+            context: nil, characters: home, charactersIgnoringModifiers: home, isARepeat: false, keyCode: 115))
+        for responder in [view, cell] {
+            XCTAssertTrue(window.makeFirstResponder(responder))
+            let selection = NSRange(location: 2, length: 1)
+            responder.setSelectedRange(selection)
+            view.scroll(NSPoint(x: 0, y: view.tableGrids[0].frame.minY - 20))
+            XCTAssertGreaterThan(scroll.contentView.bounds.minY, 0)
+            responder.keyDown(with: event)
+            XCTAssertEqual(scroll.contentView.bounds.minY, 0, responder === view ? "document" : "cell")
+            XCTAssertEqual(responder.selectedRange(), selection)
+            XCTAssertTrue(window.firstResponder === responder)
+        }
+    }
+
     func testLinkPolicyOpensOnlyWebMailAndMarkdownTargets() throws {
         // Regression (security review): the native view must not open
         // arbitrary schemes or files from a document's links. The web reader
