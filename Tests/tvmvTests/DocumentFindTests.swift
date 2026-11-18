@@ -52,6 +52,34 @@ final class DocumentFindTests: XCTestCase {
         XCTAssertEqual(view.selectedRange(), NSRange(location: 7, length: 1))
     }
 
+    func testFindIndicatorDrawsMatchedGlyphsForBodyAndCell() throws {
+        let (window, _, view) = makeDocument("Earlier text\n\n| Key |\n| --- |\n| **Ctrl**+M |\n\nPress Ctrl+Shift+M.\n")
+        defer { window.orderOut(nil) }
+        let finder = DocumentFindClient(document: view)
+        let client: any NSTextFinderClient = finder
+        let cell = try XCTUnwrap(view.tableGrids.first?.cells.last?.first)
+        // Find's coordinates omit the hidden table syntax and the bold markers.
+        for (location, expectedView) in [(19, cell), (34, view)] {
+            let range = NSRange(location: location, length: 4)
+            var effective = NSRange()
+            let target = try XCTUnwrap(client.contentView?(at: range.location, effectiveCharacterRange: &effective))
+            XCTAssertTrue(target === expectedView)
+            let bounds = try XCTUnwrap(finder.rects(forCharacterRange: range)?.first?.rectValue)
+            let bitmap = try XCTUnwrap(CGContext(data: nil, width: 128, height: 64, bitsPerComponent: 8,
+                bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+            bitmap.translateBy(x: -bounds.minX, y: 64 + bounds.minY)
+            bitmap.scaleBy(x: 1, y: -1)
+            bitmap.clip(to: bounds)
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = NSGraphicsContext(cgContext: bitmap, flipped: true)
+            client.drawCharacters?(in: range, forContentView: target)
+            NSGraphicsContext.restoreGraphicsState()
+            let bytes = try XCTUnwrap(bitmap.data).assumingMemoryBound(to: UInt8.self)
+            XCTAssertTrue((0..<(bitmap.bytesPerRow * bitmap.height)).contains { bytes[$0] != 0 },
+                          "The Find indicator must draw the glyphs at the actual match location")
+        }
+    }
+
     func testIncrementalFindCanOutliveClosingItsDocument() throws {
         try autoreleasepool {
             let (window, scroll, view) = makeDocument("| A |\n| --- |\n| needle |\n")

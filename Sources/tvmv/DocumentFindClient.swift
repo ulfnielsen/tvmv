@@ -203,6 +203,17 @@ final class DocumentFindClient: NSObject, @preconcurrency NSTextFinderClient {
         return (0..<count).map { NSValue(rect: rects[$0].offsetBy(dx: origin.x, dy: origin.y)) }
     }
 
+    // Drawing the whole view as a fallback can put unrelated text in the
+    // yellow indicator. Draw just the match in its own text container.
+    func drawCharacters(in range: NSRange, forContentView view: NSView) {
+        guard let segment = segment(containing: range), segment.view === view,
+              let manager = segment.view.layoutManager else { return }
+        let local = segment.localRange(range)
+        manager.ensureLayout(forCharacterRange: local)
+        let glyphs = manager.glyphRange(forCharacterRange: local, actualCharacterRange: nil)
+        manager.drawGlyphs(forGlyphRange: glyphs, at: segment.view.textContainerOrigin)
+    }
+
     var visibleCharacterRanges: [NSValue] {
         segments.compactMap { segment in
             let view = segment.view
