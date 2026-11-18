@@ -21,7 +21,10 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     }
     var showAllMarkup: Bool {
         get { engine.showAllMarkup }
-        set { engine.showAllMarkup = newValue }
+        set {
+            invalidateFindContent()
+            engine.showAllMarkup = newValue
+        }
     }
     /// Draw with AppKit font smoothing (stroke thickening). Off, as in the
     /// web reader (-webkit-font-smoothing: antialiased).
@@ -112,6 +115,30 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     override var undoManager: UndoManager? { documentUndo }
 
     private let hooks = Hooks()
+    private var findClient: DocumentFindClient?
+
+    private var documentFindClient: DocumentFindClient {
+        if let document = cellHost?.document { return document.documentFindClient }
+        if let findClient { return findClient }
+        let client = DocumentFindClient(document: self)
+        findClient = client
+        return client
+    }
+
+    private func invalidateFindContent() {
+        (cellHost?.document ?? self).findClient?.invalidate()
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        if newWindow !== window { findClient?.detach() }
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func performTextFinderAction(_ sender: Any?) {
+        guard let sender = sender as? NSValidatedUserInterfaceItem,
+              let action = NSTextFinder.Action(rawValue: sender.tag) else { return }
+        documentFindClient.perform(action, from: self)
+    }
     /// Held here: a layout manager's delegate is weak.
     private let markupLayout = MarkupLayoutDelegate()
     /// Background parses started (observability for large-document typing).
@@ -140,8 +167,6 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         allowsUndo = true
         isEditable = false
         isSelectable = true
-        usesFindBar = true
-        isIncrementalSearchingEnabled = true
         isAutomaticQuoteSubstitutionEnabled = false
         isAutomaticDashSubstitutionEnabled = false
         isContinuousSpellCheckingEnabled = true
@@ -158,6 +183,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     /// Replace the whole text (initial load, external reload). Not undoable.
     func load(_ text: String) {
         guard textStorage != nil else { return }
+        invalidateFindContent()
         closeComposer()   // its selection was in the old text
         // Replacing the storage directly registers no undo.
         documentUndo.removeAllActions()
@@ -360,6 +386,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     func toggleShowAllMarkup() { showAllMarkup.toggle() }
 
     private func setRevealedUnits(_ units: [NSRange], keepRevealing: Bool = false) {
+        invalidateFindContent()
         revealing = keepRevealing || !units.isEmpty
         engine.setRevealedUnits(units)
     }
@@ -458,6 +485,14 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
 
     override func moveRight(_ sender: Any?) {
         if let stop = arrowStep(forward: true) { setSelectedRange(NSRange(location: stop, length: 0)) } else { super.moveRight(sender) }
+    }
+
+    override func scrollToBeginningOfDocument(_ sender: Any?) {
+        if let document = cellHost?.document {
+            document.scrollToBeginningOfDocument(sender)
+        } else {
+            super.scrollToBeginningOfDocument(sender)
+        }
     }
 
     override func moveLeft(_ sender: Any?) {
@@ -630,6 +665,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     func layoutGrids(only refreshed: IndexSet? = nil) {
         guard !isCell, !layingOutGrids, let storage = textStorage, let lm = layoutManager, let tc = textContainer
         else { return }
+        invalidateFindContent()
         layingOutGrids = true
         defer { layingOutGrids = false }
         gridLayoutPasses += 1
@@ -981,6 +1017,10 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     }
 
     override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
+        if item.action == #selector(performTextFinderAction(_:)),
+           let action = NSTextFinder.Action(rawValue: item.tag) {
+            return documentFindClient.validate(action)
+        }
         switch item.action {
         case Selector(("undo:")): return (cellHost?.document?.documentUndo ?? documentUndo).canUndo
         case Selector(("redo:")): return (cellHost?.document?.documentUndo ?? documentUndo).canRedo
@@ -1145,6 +1185,11 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     private final class Hooks: NSObject, NSTextViewDelegate, NSTextStorageDelegate {
         weak var view: DocumentTextView?
         var loading = false
+
+        func textStorage(_ storage: NSTextStorage, willProcessEditing mask: NSTextStorageEditActions,
+                         range: NSRange, changeInLength delta: Int) {
+            if mask.contains(.editedCharacters) { view?.invalidateFindContent() }
+        }
 
         func textStorage(_ storage: NSTextStorage, didProcessEditing mask: NSTextStorageEditActions,
                          range: NSRange, changeInLength delta: Int) {
