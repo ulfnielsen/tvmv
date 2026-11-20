@@ -20,6 +20,78 @@ final class TableGridView: NSView {
     private var rowHeights: [CGFloat] = []
     /// The cell whose own edit is being applied: it already shows the text.
     private var editingCell: DocumentTextView?
+    private var rowAnchor: Int?
+    private var rowEnd: Int?
+
+    var hasSelectedRows: Bool { selectedRows != nil }
+
+    private var selectedRows: ClosedRange<Int>? {
+        guard let rowAnchor, let rowEnd else { return nil }
+        return min(rowAnchor, rowEnd)...max(rowAnchor, rowEnd)
+    }
+
+    func clearRowSelection() {
+        guard rowAnchor != nil || rowEnd != nil else { return }
+        rowAnchor = nil
+        rowEnd = nil
+        updateRowHighlight()
+    }
+
+    func beginRowSelection(from cell: DocumentTextView) {
+        clearRowSelection()
+        rowAnchor = position(of: cell)?.0
+    }
+
+    func extendRows(to cell: DocumentTextView) -> Bool {
+        guard let anchor = rowAnchor, let row = position(of: cell)?.row,
+              row != anchor || hasSelectedRows else { return false }
+        guard window?.makeFirstResponder(cell) == true else { return false }
+        rowAnchor = anchor
+        rowEnd = row
+        updateRowHighlight()
+        return true
+    }
+
+    func extendRows(from cell: DocumentTextView, by step: Int) -> Bool {
+        guard let row = position(of: cell)?.row else { return false }
+        let target = (rowEnd ?? row) + step
+        guard cells.indices.contains(target) else { return selectedRows != nil }
+        rowAnchor = rowAnchor ?? row
+        rowEnd = target
+        updateRowHighlight()
+        if let first = cells[target].first { first.scrollToVisible(first.bounds) }
+        return true
+    }
+
+    private func updateRowHighlight() {
+        for (row, views) in cells.enumerated() {
+            for cell in views {
+                let selected = selectedRows?.contains(row) == true
+                if selected { cell.backgroundColor = NSColor.selectedContentBackgroundColor.withAlphaComponent(0.22) }
+                cell.drawsBackground = selected
+            }
+        }
+    }
+
+    func copyRows(from cell: DocumentTextView, to board: NSPasteboard, wholeTable: Bool = false) -> Bool {
+        guard position(of: cell) != nil, let document, let table,
+              wholeTable || selectedRows != nil else { return false }
+        let raw = document.string as NSString
+        guard table.range.upperBound <= raw.length else { return false }
+        let text = raw.substring(with: table.range)
+        let copied: String
+        if wholeTable {
+            copied = text
+        } else if let rows = selectedRows {
+            // Keep the original header and separator so the copied rows paste
+            // back as a table, preserving source markup and alignment.
+            let lines = text.components(separatedBy: "\n")
+            guard lines.count >= 2, rows.upperBound < lines.count - 1 else { return false }
+            copied = (Array(lines.prefix(2)) + rows.filter { $0 > 0 }.map { lines[$0 + 1] }).joined(separator: "\n")
+        } else { return false }
+        board.clearContents()
+        return board.setString(copied, forType: .string)
+    }
 
     static let cellInset = NSSize(width: 7, height: 5)
     static let minColumnWidth: CGFloat = 48
@@ -46,6 +118,7 @@ final class TableGridView: NSView {
         }
         let shapeChanged = texts.count != cells.count || cells.first?.count != columns
         if shapeChanged || theme != self.theme {
+            clearRowSelection()
             rebuild(texts, alignments: table.alignments, theme: theme, editable: editable)
         } else {
             for (r, row) in texts.enumerated() {
@@ -371,8 +444,12 @@ final class TableGridView: NSView {
 
     /// Table commands for a cell's context menu.
     func menuItems(for cell: DocumentTextView) -> [NSMenuItem] {
-        guard position(of: cell) != nil, document?.isEditable == true else { return [] }
-        var items: [NSMenuItem] = [.separator()]
+        guard position(of: cell) != nil else { return [] }
+        let copy = NSMenuItem(title: "Copy Table", action: #selector(DocumentTextView.copyTable(_:)), keyEquivalent: "")
+        copy.target = cell
+        copy.image = NSImage(systemSymbolName: "doc.on.doc", accessibilityDescription: copy.title)
+        var items: [NSMenuItem] = [.separator(), copy]
+        guard document?.isEditable == true else { return items }
         for command in TableCommand.allCases {
             if command == .alignLeft { items.append(.separator()) }
             let item = command.menuItem()

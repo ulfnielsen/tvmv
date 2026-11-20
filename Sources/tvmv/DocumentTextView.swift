@@ -393,6 +393,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
 
     /// Selection moved: a reveal ends once the selection leaves every revealed unit.
     fileprivate func selectionChanged() {
+        if cellHost?.hasSelectedRows == true { cellHost?.clearRowSelection() }
         guard revealing, !editing else { return }   // the user moved, not an edit
         let current = Set(engine.units(enclosing: selectedRange()))
         if !engine.revealedUnits.contains(where: current.contains) { setRevealedUnits([]) }
@@ -536,6 +537,10 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     // MARK: Events
 
     override func mouseDown(with event: NSEvent) {
+        if let host = cellHost {
+            if event.modifierFlags.contains(.shift), host.extendRows(to: self) { return }
+            host.beginRowSelection(from: self)
+        }
         if event.clickCount == 2, revealDiagram(at: convert(event.locationInWindow, from: nil)) { return }
         if event.clickCount == 1, let task = taskItem(at: convert(event.locationInWindow, from: nil)) {
             toggleTask(task)
@@ -925,14 +930,25 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     var pasteboard = NSPasteboard.general
 
     override func copy(_ sender: Any?) {
+        if cellHost?.copyRows(from: self, to: pasteboard) == true { return }
         let selection = selectedRange()
         setSelectedRange(copyRange(for: selection))
         writeSelection(to: pasteboard, types: writablePasteboardTypes)
         setSelectedRange(selection)
     }
 
+    override func deleteBackward(_ sender: Any?) {
+        guard cellHost?.hasSelectedRows != true else { return }
+        super.deleteBackward(sender)
+    }
+
+    override func deleteForward(_ sender: Any?) {
+        guard cellHost?.hasSelectedRows != true else { return }
+        super.deleteForward(sender)
+    }
+
     override func cut(_ sender: Any?) {
-        guard isEditable else { return }
+        guard isEditable, cellHost?.hasSelectedRows != true else { return }
         setSelectedRange(copyRange(for: selectedRange()))
         guard writeSelection(to: pasteboard, types: writablePasteboardTypes) else { return }
         delete(sender)
@@ -942,7 +958,17 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
     // MARK: Pasting images
 
     override func paste(_ sender: Any?) {
-        if !pasteImage(from: .general) { super.paste(sender) }
+        if isEditable, let text = pasteboard.string(forType: .string), text.contains("|"),
+           text.rangeOfCharacter(from: .newlines) != nil {
+            let source = text.trimmingCharacters(in: .newlines)
+            let tables = MarkdownLayoutParser.parse(source).tables
+            if tables.count == 1, tables[0].range == NSRange(location: 0, length: source.utf16.count) {
+                insertTableBlock(source, afterLine: isCell)
+                return
+            }
+        }
+        cellHost?.clearRowSelection()
+        if !pasteImage(from: pasteboard) { super.paste(sender) }
     }
 
     /// Paste an image (a screenshot, from Preview or a browser): save it as
@@ -1028,6 +1054,70 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
         }
     }
 
+    @objc func insertTable(_ sender: Any?) {
+        insertTableBlock("| Column 1 | Column 2 |\n| --- | --- |\n|  |  |", afterLine: true)
+    }
+
+    @objc func copyTable(_ sender: Any?) {
+        if cellHost?.copyRows(from: self, to: pasteboard, wholeTable: true) != true { NSSound.beep() }
+    }
+
+    private func insertTableBlock(_ source: String, afterLine: Bool) {
+        let document = cellHost?.document ?? self
+        guard document.isEditable, let storage = document.textStorage else { return }
+        document.engine.ensureCurrentLayout()
+        let raw = storage.string as NSString
+        var at = document.selectedRange()
+        if let host = cellHost, document.layout.tables.indices.contains(host.index) {
+            at = NSRange(location: document.layout.tables[host.index].range.upperBound, length: 0)
+        } else if afterLine && at.length == 0 && at.location < raw.length {
+            let block = document.layout.blocks.first { NSLocationInRange(at.location, $0.range) }
+            at.location = block?.range.upperBound ?? raw.lineRange(for: at).upperBound
+        }
+        func isNewline(_ i: Int) -> Bool { i >= 0 && i < raw.length && raw.character(at: i) == 10 }
+        let before = at.location == 0 ? "" : !isNewline(at.location - 1) ? "\n\n" : !isNewline(at.location - 2) ? "\n" : ""
+        let after = !isNewline(at.upperBound) ? "\n\n" : !isNewline(at.upperBound + 1) ? "\n" : ""
+        guard document.replace(at, with: before + source + after) else { return }
+        document.window?.makeFirstResponder(document)
+        document.setSelectedRange(NSRange(location: at.location + (before + source + after).utf16.count, length: 0))
+    }
+
+    override func moveDownAndModifySelection(_ sender: Any?) {
+        if cellHost?.extendRows(from: self, by: 1) == true { return }
+        super.moveDownAndModifySelection(sender)
+    }
+
+    override func moveUpAndModifySelection(_ sender: Any?) {
+        if cellHost?.extendRows(from: self, by: -1) == true { return }
+        super.moveUpAndModifySelection(sender)
+    }
+
+    override func resignFirstResponder() -> Bool {
+        guard super.resignFirstResponder() else { return false }
+        cellHost?.clearRowSelection()
+        return true
+    }
+
+    override func insertText(_ insertString: Any, replacementRange: NSRange) {
+        cellHost?.clearRowSelection()
+        if isEditable, !showAllMarkup, !hasMarkedText(), let typed = insertString as? String, typed == "`",
+           selectedRange().length == 0, replacementRange.location == NSNotFound || replacementRange == selectedRange(),
+           let storage = textStorage {
+            let caret = selectedRange().location
+            let raw = storage.string as NSString
+            if let close = layout.markers.first(where: { marker in
+                marker.range.location == caret && marker.range.upperBound == marker.unit.upperBound
+                    && marker.range.length == 1 && caret < raw.length && isHidden(caret)
+                    && raw.character(at: caret) == 96
+                    && layout.styles.contains { $0.style == .code && NSIntersectionRange($0.range, marker.unit).length > 0 }
+            }) {
+                setSelectedRange(NSRange(location: close.range.upperBound, length: 0))
+                return
+            }
+        }
+        super.insertText(insertString, replacementRange: replacementRange)
+    }
+
     // MARK: Return
 
     /// The kind of the top-level block the caret is in (nil between blocks).
@@ -1088,6 +1178,7 @@ final class DocumentTextView: NSTextView, MarkdownTextHost {
 
     override func cancelOperation(_ sender: Any?) {
         // NSTextView doesn't implement cancelOperation:; passing it to super throws.
+        cellHost?.clearRowSelection()
         if revealing { reveal(false) }
     }
 

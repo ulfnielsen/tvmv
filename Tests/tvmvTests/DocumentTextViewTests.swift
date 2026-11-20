@@ -473,6 +473,15 @@ final class DocumentTextViewTests: XCTestCase {
         view.layoutManager!.ensureLayout(for: view.textContainer!)
     }
 
+    func testTypingOverHiddenClosingBacktickLetsProseContinueOutsideInlineCode() {
+        loadEditable("`ctrl`")
+        view.setSelectedRange(NSRange(location: 5, length: 0))
+        for text in ["`", " works"] {
+            view.insertText(text, replacementRange: NSRange(location: NSNotFound, length: 0))
+        }
+        XCTAssertEqual(view.string, "`ctrl` works")
+    }
+
     func testAnArrowPassesHiddenMarkupAndOneCharacter() {
         // Reported: from before a hidden "**", right-arrow put the caret at
         // the document's start (AppKit proposes {0,0} across a null glyph).

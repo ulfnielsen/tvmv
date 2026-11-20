@@ -41,6 +41,50 @@ final class TableGridTests: XCTestCase {
         XCTAssertTrue(glyphHidden(ns.range(of: "| Bob").location))
     }
 
+    func testShiftDownCopiesConsecutiveRowsAsMarkdownAndPasteRendersThem() throws {
+        let cell = grid.cell(row: 1, column: 0)
+        window.makeFirstResponder(cell)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        cell.pasteboard = board
+        let down = String(UnicodeScalar(NSDownArrowFunctionKey)!)
+        let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+            modifierFlags: [.shift, .function, .numericPad], timestamp: 0, windowNumber: window.windowNumber,
+            context: nil, characters: down, charactersIgnoringModifiers: down, isARepeat: false, keyCode: 125))
+        cell.keyDown(with: event)
+        XCTAssertTrue(grid.cell(row: 1, column: 0).drawsBackground)
+        XCTAssertTrue(grid.cell(row: 2, column: 0).drawsBackground)
+        XCTAssertFalse(grid.cell(row: 0, column: 0).drawsBackground)
+        cell.copy(nil)
+        XCTAssertEqual(board.string(forType: .string), "| Name | Score |\n|:-----|------:|\n| Ada  | 10 |\n| Bob | 7 |")
+        view.isEditable = true
+        view.pasteboard = board
+        window.makeFirstResponder(view)
+        view.setSelectedRange(NSRange(location: ns.length, length: 0))
+        view.paste(nil)
+        XCTAssertEqual(view.tableGrids.count, 2)
+        XCTAssertEqual(view.tableGrids.last?.cellTexts, [["Name", "Score"], ["Ada", "10"], ["Bob", "7"]])
+    }
+
+    func testCopyTableInReadModeIncludesAllRowsFromAnyCell() {
+        let cell = grid.cell(row: 2, column: 1)
+        let board = NSPasteboard.withUniqueName()
+        defer { board.releaseGlobally() }
+        cell.pasteboard = board
+        XCTAssertTrue(cell.tryToPerform(NSSelectorFromString("copyTable:"), with: nil))
+        XCTAssertEqual(board.string(forType: .string), "| Name | Score |\n|:-----|------:|\n| Ada  | 10 |\n| Bob | 7 |")
+    }
+
+    func testInsertTableInParagraphKeepsSurroundingText() {
+        view.isEditable = true
+        window.makeFirstResponder(view)
+        view.setSelectedRange(NSRange(location: 5, length: 0))
+        XCTAssertTrue(view.tryToPerform(NSSelectorFromString("insertTable:"), with: nil))
+        XCTAssertEqual(view.tableGrids.count, 2)
+        XCTAssertTrue(view.string.hasPrefix("Intro.\n\n"))
+        XCTAssertTrue(view.string.hasSuffix("\n\nAfter.\n"))
+    }
+
     func testCellsPostNoFrameChanges() {
         // Posting costs more with every text view: with each cell posting,
         // a page of tables took quadratic time to load.
@@ -166,10 +210,13 @@ final class TableGridTests: XCTestCase {
         view.isEditable = true
         view.layoutGrids()
         let items = grid.menuItems(for: grid.cell(row: 1, column: 0)).filter { !$0.isSeparatorItem }
-        XCTAssertEqual(items.count, TableCommand.allCases.count)
+        XCTAssertEqual(items.count, TableCommand.allCases.count + 1)
+        XCTAssertEqual(items.first?.action, #selector(DocumentTextView.copyTable(_:)))
         for item in items {
             XCTAssertNotNil(item.image, "an icon for «\(item.title)»")
-            XCTAssertFalse(item.keyEquivalent.isEmpty, "a shortcut for «\(item.title)»")
+            if item.action != #selector(DocumentTextView.copyTable(_:)) {
+                XCTAssertFalse(item.keyEquivalent.isEmpty, "a shortcut for «\(item.title)»")
+            }
         }
         for command in TableCommand.allCases {
             XCTAssertNotNil(NSImage(systemSymbolName: command.symbol, accessibilityDescription: nil), command.symbol)

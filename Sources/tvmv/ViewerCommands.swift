@@ -122,6 +122,11 @@ struct ViewerMenuCommands: Commands {
                 .disabled(commands == nil)
         }
         CommandMenu("Table") {
+            Button("Insert Table") { NSApp.sendAction(#selector(DocumentTextView.insertTable(_:)), to: nil, from: nil) }
+                .disabled(commands?.isEditing != true)
+            Button("Copy Table") { NSApp.sendAction(#selector(DocumentTextView.copyTable(_:)), to: nil, from: nil) }
+                .disabled(commands == nil)
+            Divider()
             // Act on the table cell being edited (its text view is the first responder).
             ForEach(TableCommand.allCases, id: \.self) { command in
                 if command == .alignLeft { Divider() }
